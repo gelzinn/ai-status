@@ -1,19 +1,36 @@
-# Updates
+# Updating Omarchy AI Status
 
-To update to the latest version, run the install script again:
+**Updates use the same command as installation -- the install script handles both fresh installs and upgrades automatically.**
+
+## Update Command
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/gelzinn/omarchy-ai-status/main/install.sh)
 ```
 
-Or if you have the repo cloned locally:
+Or from a local clone:
 
 ```bash
 ./install.sh
 ```
 
-The script detects that Omarchy AI Status is already installed and pulls the latest changes from the repository automatically.
+## How It Works
 
-## How it works
+The script maintains a clone at `~/.local/share/omarchy-ai-status/`. On each run it detects whether:
 
-The install script clones the repository to `~/.local/share/omarchy-ai-status/` on first run. On subsequent runs, it detects the existing `.git` directory and runs `git pull --ff-only` to fetch and apply the latest updates.
+| State | Action |
+|---|---|
+| First install | Clones the repository and sets up symlinks |
+| Already installed | Pulls latest changes via `git pull` |
+| Stale directory | Removes and reclones |
+| Local clone | Copies files directly |
+
+After updating, the script restarts Waybar automatically to apply changes.
+
+## Checking Your Version
+
+The current version is shown at the top of the Waybar tooltip. You can also check:
+
+```bash
+cat ~/.local/share/omarchy-ai-status/VERSION
+```

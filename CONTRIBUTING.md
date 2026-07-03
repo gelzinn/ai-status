@@ -1,23 +1,43 @@
 # Contributing to Omarchy AI Status
 
-Thank you for your interest in improving Omarchy AI Status.
+**Bug reports, feature requests, and pull requests are welcome.**
 
-Currently, this module is heavily optimized for **Linux** and **Waybar**. However, thanks to its modular design, the core logic in `src/core/` and the data-fetching mechanisms in `src/providers/` are independent and can be adapted easily.
+This project targets Linux and Waybar, but the core logic in `src/core/` and the provider scripts in `src/providers/` are platform-independent and can be adapted to other status bars or operating systems.
 
-## Adding Support for a New OS or Status Bar
+## Adding a New Provider
 
-If you use macOS, Windows, or another status bar (like Polybar, eww, or sketchybar), you can help us support it.
+Each provider needs two files in `src/providers/<name>/`:
 
-1. **Fork this repository** on GitHub.
-2. **Abstract the UI**: The visual formatting is currently handled in `src/core/render.py` using Pango markup (Waybar's standard). You can modify this file to support standard text or other formatting syntaxes based on environment variables or config flags.
-3. **Update Installation**: Modify the `install.sh` and `check.sh` scripts to recognize the new environment and configure it appropriately.
-4. **Submit a Pull Request (PR)**. We would love to merge your work to support users across all platforms.
+| File | Purpose |
+|---|---|
+| `query.sh` | Fetches raw data via API call, CLI invocation, or terminal interaction |
+| `parse.py` | Exports `parse(raw_output)` returning a standardized JSON structure |
 
-## Developing New Providers
+Walk through `src/providers/claude/` as a reference implementation.
 
-To add a new AI API to the list:
+Steps:
 
-1. Create a folder in `src/providers/<name>`.
-2. Write a `query.sh` that makes the HTTP request to the API.
-3. Write a `parse.py` (in the same folder) to format the raw output into a standardized JSON array. (Check `src/providers/claude` for an example).
-4. Open a Pull Request.
+1. Fork the repository on GitHub
+2. Create `src/providers/<name>/query.sh` with your data-fetching logic
+3. Create `src/providers/<name>/parse.py` with a `parse(raw_output)` function
+4. Register the provider via `waybar-ai-status config` (it appears automatically)
+5. Open a pull request
+
+## Adding Support for Other Platforms
+
+The visual formatting lives in `src/core/render.py` using Pango markup (Waybar's format). To support another status bar or OS:
+
+1. Fork the repository on GitHub
+2. Modify `src/core/render.py` to output the appropriate format for your target
+3. Update `install.sh` and `check.sh` for the new environment
+4. Open a pull request
+
+## Making Changes
+
+| Step | Action |
+|---|---|
+| 1 | Fork and clone the repository |
+| 2 | Make your changes -- keep the provider architecture consistent |
+| 3 | Run `./install.sh` to test locally |
+| 4 | Verify the daemon runs: `waybar-ai-status daemon` |
+| 5 | Open a pull request describing what you changed and why |
