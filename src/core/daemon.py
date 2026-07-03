@@ -1,3 +1,4 @@
+import os
 import time
 import json
 import signal
@@ -6,6 +7,7 @@ import threading
 from . import state
 from . import fetch
 from . import render
+from . import config as cfgmod
 
 should_update = True
 is_updating = False
@@ -47,6 +49,7 @@ def run():
     
     last_auto_update = time.time()
     last_update_check = 0
+    last_config_mtime = 0
     should_update = True
     
     while True:
@@ -56,6 +59,13 @@ def run():
             if now - last_update_check >= 3600:
                 fetch.check_for_updates()
                 last_update_check = now
+            
+            config_mtime = 0
+            if os.path.exists(cfgmod.CONFIG_FILE):
+                config_mtime = os.path.getmtime(cfgmod.CONFIG_FILE)
+            if config_mtime != last_config_mtime:
+                last_config_mtime = config_mtime
+                should_update = True
                 
             if should_update and not is_updating:
                 should_update = False

@@ -4,8 +4,9 @@ import json
 import importlib.util
 import urllib.request
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from . import __version__
+from . import config as cfgmod
 
 def run_provider(provider_dir):
     query_script = os.path.join(provider_dir, "query.sh")
@@ -69,23 +70,41 @@ def fetch_all_data():
     if not os.path.exists(script_dir):
         return []
         
-    # Pega todas as pastas dentro de providers/
-    provider_dirs = [os.path.join(script_dir, d) for d in os.listdir(script_dir) if os.path.isdir(os.path.join(script_dir, d))]
+    enabled_order = cfgmod.enabled_order()
+    enabled_set = set(enabled_order)
     
-    # Exclude gemini-cli
-    provider_dirs = [d for d in provider_dirs if "gemini-cli" not in os.path.basename(d)]
-    provider_dirs.sort()
+    provider_dirs = []
+    for d in os.listdir(script_dir):
+        if not os.path.isdir(os.path.join(script_dir, d)):
+            continue
+        if d in ("__pycache__", "gemini-cli"):
+            continue
+        if d not in enabled_set:
+            continue
+        provider_dirs.append((d, os.path.join(script_dir, d)))
     
-    with ThreadPoolExecutor(max_workers=max(1, len(provider_dirs))) as executor:
-        futures = {executor.submit(run_provider, d): d for d in provider_dirs}
+    name_to_dir = {name: path for name, path in provider_dirs}
+    ordered_dirs = []
+    for name in enabled_order:
+        if name in name_to_dir:
+            ordered_dirs.append(name_to_dir[name])
+    
+    with ThreadPoolExecutor(max_workers=max(1, len(ordered_dirs))) as executor:
+        future_to_dir = {executor.submit(run_provider, d): d for d in ordered_dirs}
         
-    results = []
-    for future in futures:
+    dir_to_results = {}
+    for future in as_completed(future_to_dir):
+        d = future_to_dir[future]
         try:
-            data = future.result(timeout=12)
+            data = future.result(timeout=18)
             if data and "error" not in data:
                 providers = data if isinstance(data, list) else [data]
-                results.extend(providers)
+                dir_to_results[d] = providers
         except Exception:
             pass
+    
+    results = []
+    for d in ordered_dirs:
+        if d in dir_to_results:
+            results.extend(dir_to_results[d])
     return results
