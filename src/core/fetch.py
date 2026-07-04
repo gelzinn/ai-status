@@ -4,9 +4,77 @@ import json
 import importlib.util
 import urllib.request
 import re
+import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from . import __version__
 from . import config as cfgmod
+
+CACHE_DIR = os.path.join(tempfile.gettempdir(), "waybar-ai-status-cache")
+CACHE_TTL = 3600
+
+
+def _cache_path(provider_dir):
+    return os.path.join(CACHE_DIR, f"{os.path.basename(provider_dir)}.json")
+
+
+def _save_cache(provider_dir, data):
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    path = _cache_path(provider_dir)
+    try:
+        with open(path, "w") as f:
+            json.dump({"timestamp": time.time(), "data": data}, f)
+    except Exception:
+        pass
+
+
+def _load_cache(provider_dir):
+    path = _cache_path(provider_dir)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            cache = json.load(f)
+        if time.time() - cache.get("timestamp", 0) < CACHE_TTL:
+            return cache["data"]
+    except Exception:
+        pass
+    return None
+
+
+def _is_error_result(result):
+    if result is None:
+        return True
+    if isinstance(result, list):
+        return all(_is_error_result(item) for item in result)
+    if isinstance(result, dict):
+        if "error" in result:
+            return True
+        metrics = result.get("metrics", [])
+        if not metrics:
+            return True
+        if all(m.get("percentage", 0) == 0 for m in metrics):
+            error_kw = ["rate limit", "unreachable", "failed", "auth"]
+            for m in metrics:
+                detail = (m.get("detail") or "").lower()
+                if any(kw in detail for kw in error_kw):
+                    return True
+    return False
+
+
+def _extract_error_detail(result):
+    if isinstance(result, list):
+        for item in result:
+            d = _extract_error_detail(item)
+            if d:
+                return d
+        return "Unknown error"
+    if isinstance(result, dict):
+        for m in (result.get("metrics") or []):
+            if m.get("detail"):
+                return m["detail"]
+    return "Unknown error"
+
 
 def run_provider(provider_dir):
     query_script = os.path.join(provider_dir, "query.sh")
@@ -16,30 +84,45 @@ def run_provider(provider_dir):
         return None
         
     try:
-        # 1. Query: Puxa os dados (Bash faz o curl e cospe na tela)
         res = subprocess.run([query_script], capture_output=True, text=True, timeout=20)
         if res.returncode != 0:
-            return {"error": f"Query failed for {os.path.basename(provider_dir)}"}
+            return _load_cache(provider_dir) or {"error": f"Query failed for {os.path.basename(provider_dir)}"}
             
         raw_output = res.stdout.strip()
         if not raw_output:
-            return None
+            return _load_cache(provider_dir) or None
             
-        # 2. Parse: Se o parse.py existir, formata o array em Python
         if os.path.exists(parse_script):
             spec = importlib.util.spec_from_file_location("parse", parse_script)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            return module.parse(raw_output)
+            result = module.parse(raw_output)
         else:
-            # Fallback temporário: tenta ler como JSON direto (scripts antigos)
-            return json.loads(raw_output)
-            
+            result = json.loads(raw_output)
+        
+        if _is_error_result(result):
+            cached = _load_cache(provider_dir)
+            if cached:
+                detail = _extract_error_detail(result)
+                if isinstance(cached, list):
+                    for item in cached:
+                        if isinstance(item, dict):
+                            item["_cached"] = True
+                            item["_error"] = detail
+                else:
+                    cached = dict(cached)
+                    cached["_cached"] = True
+                    cached["_error"] = detail
+                return cached
+            return result
+        
+        _save_cache(provider_dir, result)
+        return result
+        
     except subprocess.TimeoutExpired:
-        return {"error": "Timeout"}
+        return _load_cache(provider_dir) or {"error": "Timeout"}
     except Exception as e:
-        return {"error": str(e)}
-
+        return _load_cache(provider_dir) or {"error": str(e)}
 _latest_version = None
 
 def check_for_updates():

@@ -133,8 +133,13 @@ def format_provider_block(provider_data, selected_dir=None, selected_idx=None, s
 
     is_selected = provider_data.get("_dir") == selected_dir and provider_data.get("_idx") == selected_idx
     prefix = "→ " if is_selected else "  "
+    line = f"{prefix}{provider}"
+    if provider_data.get("_error"):
+        err_icon = '<span foreground="#ef4444"> ●</span>'
+        pad = max(1, BAR_LINE_WIDTH - len(prefix) - len(provider) - 2)
+        line = f"{prefix}{provider}{' ' * pad}{err_icon}"
     sorted_metrics = sorted(metrics, key=lambda m: TYPE_ORDER.get(m.get("type", "generic"), 4))
-    lines = [f"{prefix}{provider}", ""]
+    lines = [line, ""]
     for metric in sorted_metrics:
         mtype = metric.get("type", "generic")
         name = TYPE_NAMES.get(mtype, "Usage")
@@ -160,7 +165,12 @@ def format_loading_provider_block(provider_data, frame_index):
         
     sorted_metrics = sorted(metrics, key=lambda m: TYPE_ORDER.get(m.get("type", "generic"), 4))
     spinner = SPINNERS[frame_index % len(SPINNERS)]
-    lines = [f"{provider} {spinner}", ""]
+    line = f"{provider} {spinner}"
+    if provider_data.get("_error"):
+        err_icon = '<span foreground="#ef4444"> ●</span>'
+        pad = max(1, BAR_LINE_WIDTH - len(provider) - len(spinner) - 3)
+        line = f"{provider} {spinner}{' ' * pad}{err_icon}"
+    lines = [line, ""]
     for metric in sorted_metrics:
         mtype = metric.get("type", "generic")
         name = TYPE_NAMES.get(mtype, "Usage")

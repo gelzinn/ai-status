@@ -114,6 +114,13 @@ def parse(raw_output):
             "metrics": [{"type": "generic", "percentage": 0, "detail": message}],
         }
 
+    if "error" in usage:
+        err = usage["error"]
+        return {
+            "provider": provider,
+            "metrics": [{"type": "generic", "percentage": 0, "detail": err.get("message", "API error")}],
+        }
+
     limits = usage.get("limits")
     metrics = _metrics_from_limits(limits) if isinstance(limits, list) else []
     if not metrics:
