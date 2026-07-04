@@ -13,13 +13,12 @@ def generate_css():
             b64 = base64.b64encode(f.read()).decode()
             frames.append(b64)
 
-    pct = 100.0 / NUM_FRAMES
+    pct_step = 100 // NUM_FRAMES
 
     lines = ["@keyframes claude-spark {"]
     for i, b64 in enumerate(frames):
-        start = i * pct
-        end = (i + 1) * pct - 0.01
-        lines.append(f"  {start:.2f}%, {end:.2f}% {{ background-image: url('data:image/png;base64,{b64}'); }}")
+        pct = i * pct_step
+        lines.append(f"  {pct}% {{ background-image: url(\"data:image/png;base64,{b64}\"); }}")
     lines.append("}")
 
     lines.append("")
