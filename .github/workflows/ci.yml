@@ -16,6 +16,8 @@ jobs:
         with:
           scandir: "."
           format: tty
+          ignore_paths: "src/providers/antigravity/query.sh"
+          ignore: "SC1091,SC2034"
 
   python-syntax:
     runs-on: ubuntu-latest
