@@ -64,14 +64,35 @@ Scrapes usage data from Kiro's web API using session cookies.
 | **Auth** | Valid session cookie exported from browser or extension |
 | **Metrics** | Usage percentage and reset timer |
 
-### OpenCode
+### OpenCode (Go)
 
-Queries the OpenCode Go binary directly for usage statistics.
+Queries the [opencode.ai](https://opencode.ai) Go dashboard for usage statistics.
 
 | Detail | |
 |---|---|
-| **Auth** | OpenCode must be authenticated (`opencode auth`) |
+| **Auth** | API key from `~/.local/share/opencode/auth.json` + workspace config (see below) |
 | **Metrics** | Rolling, weekly, and monthly usage percentages with reset timers |
+
+#### Setup
+
+The provider needs a config file at `~/.config/opencode-bar/opencode-go.json` with two values from your browser:
+
+1. **`workspaceId`** — Log in at [opencode.ai](https://opencode.ai), go to your workspace. The URL will be `https://opencode.ai/workspace/<workspaceId>/go`. Copy the ID.
+
+2. **`authCookie`** — On the same page, open DevTools (F12) → Network tab → click any request to `opencode.ai` → in Request Headers, copy the full `Cookie` header value.
+
+Then create the file:
+
+```bash
+mkdir -p ~/.config/opencode-bar
+cat > ~/.config/opencode-bar/opencode-go.json <<'EOF'
+{
+  "workspaceId": "<workspaceId>",
+  "authCookie": "<authCookie>"
+}
+EOF
+chmod 600 ~/.config/opencode-bar/opencode-go.json
+```
 
 ### Z.AI
 
