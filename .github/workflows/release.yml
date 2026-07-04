@@ -2,71 +2,56 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      ref:
-        description: "Tag or commit to build (e.g. v0.1.0)"
-        required: true
-        default: ""
 
 permissions:
   contents: write
 
 jobs:
   release:
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
 
-      - name: Generate release body
-        env:
-          TAG: ${{ inputs.ref || github.ref_name }}
+      - name: Bump version
+        id: version
         run: |
-          VERSION="${TAG#v}"
+          CURRENT=$(cat VERSION)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          HAS_FEAT=$(git log "$CURRENT..HEAD" --oneline --grep="^feat" 2>/dev/null | head -1)
+          if [ -n "$HAS_FEAT" ]; then
+            NEW="$MAJOR.$((MINOR + 1)).0"
+          else
+            NEW="$MAJOR.$MINOR.$((PATCH + 1))"
+          fi
+          echo "$NEW" > VERSION
+          echo "new=$NEW" >> $GITHUB_OUTPUT
 
-          PREV_TAG=$(git tag --sort=-v:refname | grep -Fxv "$TAG" | head -1)
-
-          awk -v ver="$VERSION" '
-            BEGIN { hdr = "## [" ver "]" }
-            index($0, hdr) == 1 { flag=1; next }
-            flag && index($0, "## [") == 1 { exit }
-            flag { print }
-          ' CHANGELOG.md > changelog_section.md
-
-          {
-            if [ -s changelog_section.md ]; then
-              echo "## What's changed"
-              echo
-              cat changelog_section.md
-            fi
-
-            echo "## Install"
-            echo
-            echo '```bash'
-            echo "bash <(curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${TAG}/install.sh)"
-            echo '```'
-
-            if [ -n "$PREV_TAG" ]; then
-              echo
-              echo "**Full diff**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${TAG}"
-            fi
-          } > body.md
+      - name: Commit version bump and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: bump version to ${{ steps.version.outputs.new }} [skip ci]"
+          git tag "v${{ steps.version.outputs.new }}"
+          git push origin HEAD:main
+          git push origin "v${{ steps.version.outputs.new }}"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ inputs.ref || github.ref_name }}"
+          TAG="v${{ steps.version.outputs.new }}"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file body.md
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes ""
           else
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "$TAG" \
-              --notes-file body.md \
+              --generate-notes \
               --latest
           fi
