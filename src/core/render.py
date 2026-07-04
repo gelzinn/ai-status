@@ -15,6 +15,43 @@ TYPE_ORDER = {
 SPINNERS = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 BAR_LINE_WIDTH = 34
 
+ICON = "\U000F06A9"
+
+def _find_selected_provider(latest_data, selected):
+    if not selected or not latest_data:
+        return None
+    dir_name = selected.get("provider")
+    idx = selected.get("idx", 0)
+    count = 0
+    for p in latest_data:
+        if p.get("_dir") == dir_name:
+            if count == idx:
+                return p
+            count += 1
+    return None
+
+def get_selected_metric_text(latest_data, selected):
+    p = _find_selected_provider(latest_data, selected)
+    if not p:
+        return ICON
+    provider_name = p.get("provider", "")
+    metric_type = selected.get("metric", "rolling")
+    metrics = p.get("metrics", [])
+    for m in metrics:
+        if m.get("type") == metric_type:
+            pct = float(m.get("percentage", 0.0))
+            return f"{ICON}\u2003{provider_name} {pct:.0f}%"
+    if metrics:
+        pct = float(metrics[0].get("percentage", 0.0))
+        return f"{ICON}\u2003{provider_name} {pct:.0f}%"
+    return f"{ICON}\u2003{provider_name}"
+
+def get_selected_provider_name(latest_data, selected):
+    p = _find_selected_provider(latest_data, selected)
+    if not p:
+        return ICON
+    return f"{ICON}\u2003{p.get('provider', '')}"
+
 def make_progress_bar(percentage, width=25):
     percentage = max(0.0, min(100.0, percentage))
     filled_len = int(round(width * percentage / 100))
@@ -89,24 +126,30 @@ def format_reset_time(seconds, mtype):
     if hours > 0: return f"Resets in {hours}h {minutes}m"
     return f"Resets in {minutes}m"
 
-def format_provider_block(provider_data):
+def format_provider_block(provider_data, selected_dir=None, selected_idx=None, selected_metric=None):
     provider = provider_data.get("provider", "AI Provider")
     metrics = provider_data.get("metrics", [])
     if not metrics: return ""
-        
+
+    is_selected = provider_data.get("_dir") == selected_dir and provider_data.get("_idx") == selected_idx
+    prefix = "→ " if is_selected else "  "
     sorted_metrics = sorted(metrics, key=lambda m: TYPE_ORDER.get(m.get("type", "generic"), 4))
-    lines = [provider, ""]
+    lines = [f"{prefix}{provider}", ""]
     for metric in sorted_metrics:
         mtype = metric.get("type", "generic")
         name = TYPE_NAMES.get(mtype, "Usage")
+        is_active = is_selected and mtype == selected_metric
         pct = float(metric.get("percentage", 0.0))
         seconds = metric.get("reset_in_seconds")
         detail = metric.get("detail")
         if detail is None: detail = format_reset_time(seconds, mtype)
-            
-        lines.append(f"  {name}:")
-        lines.append(f"  {make_progress_bar(pct)}")
-        if detail: lines.append(f"  {detail}")
+
+        if is_active:
+            lines.append(f"•   {name}:")
+        else:
+            lines.append(f"    {name}:")
+        lines.append(f"    {make_progress_bar(pct)}")
+        if detail: lines.append(f"    {detail}")
         lines.append("")
     return "\n".join(lines)
 
@@ -144,7 +187,7 @@ def format_header():
         line += f"\n<span alpha='70%'>Update available: v{info['latest']}</span>"
     return line
 
-def build_loading_state(latest_data, frame):
+def build_loading_state(latest_data, frame, selected=None):
     spinner = SPINNERS[frame % len(SPINNERS)]
     header = format_header()
     sep = f"\n\n{'─' * BAR_LINE_WIDTH}\n"
@@ -157,25 +200,30 @@ def build_loading_state(latest_data, frame):
     else:
         bar = make_empty_loading_bar(frame)
         tooltip = f"{header}\n\n{'─' * BAR_LINE_WIDTH}\n\n  Loading AI Provider Status {spinner}\n  {bar}"
-        
+
+    provider_text = get_selected_provider_name(latest_data, selected)
     return {
-        "text": f"{spinner} \U000F06A9",
+        "text": f"{provider_text} {spinner}" if provider_text != ICON else f"{ICON} {spinner}",
         "tooltip": tooltip.strip()
     }
 
-def build_final_state(latest_data):
+def build_final_state(latest_data, selected=None):
     header = format_header()
     sep = f"\n\n{'─' * BAR_LINE_WIDTH}\n"
+    selected_dir = selected.get("provider") if selected else None
+    selected_idx = selected.get("idx") if selected else None
+    selected_metric = selected.get("metric") if selected else None
     if latest_data:
         blocks = []
         for p in latest_data:
-            block = format_provider_block(p)
+            block = format_provider_block(p, selected_dir, selected_idx, selected_metric)
             if block: blocks.append(block)
         tooltip = f"{header}{sep}\n" + "\n".join(blocks)
     else:
         tooltip = f"{header}\n\n{'─' * BAR_LINE_WIDTH}"
-        
+
+    metric_text = get_selected_metric_text(latest_data, selected)
     return {
-        "text": "\U000F06A9",
+        "text": metric_text,
         "tooltip": tooltip.strip()
     }

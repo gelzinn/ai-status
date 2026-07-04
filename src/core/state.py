@@ -5,6 +5,7 @@ import time
 CACHE_FILE = os.path.expanduser("~/.cache/waybar-ai-status.json")
 LOCK_FILE = "/tmp/waybar-ai-status-query.lock"
 PID_FILE = "/tmp/waybar-ai-status.pids"
+SELECTED_FILE = os.path.expanduser("~/.config/waybar-ai-status/selected.json")
 
 def load_cache():
     if os.path.exists(CACHE_FILE):
@@ -63,6 +64,23 @@ def register_pid():
         with open(PID_FILE, "w") as f:
             for pid in pids:
                 f.write(f"{pid}\n")
+    except Exception:
+        pass
+
+def load_selected():
+    if os.path.exists(SELECTED_FILE):
+        try:
+            with open(SELECTED_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return None
+
+def save_selected(data):
+    try:
+        os.makedirs(os.path.dirname(SELECTED_FILE), exist_ok=True)
+        with open(SELECTED_FILE, "w") as f:
+            json.dump(data, f)
     except Exception:
         pass
 

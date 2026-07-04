@@ -46,10 +46,21 @@ def run():
     state.register_pid()
     signal.signal(signal.SIGUSR1, handle_signal)
     latest_data = state.load_cache()
+
+    if not state.load_selected():
+        for p in latest_data:
+            if p.get("metrics"):
+                state.save_selected({"provider": p["_dir"], "idx": p.get("_idx", 0), "metric": "rolling"})
+                break
+        else:
+            providers = cfgmod.enabled_order()
+            if providers:
+                state.save_selected({"provider": providers[0], "idx": 0, "metric": "rolling"})
     
     last_auto_update = time.time()
     last_update_check = 0
     last_config_mtime = 0
+    last_selected_mtime = 0
     should_update = True
     
     while True:
@@ -66,7 +77,13 @@ def run():
             if config_mtime != last_config_mtime:
                 last_config_mtime = config_mtime
                 should_update = True
-                
+
+            selected_mtime = 0
+            if os.path.exists(state.SELECTED_FILE):
+                selected_mtime = os.path.getmtime(state.SELECTED_FILE)
+            
+            selected = state.load_selected()
+            
             if should_update and not is_updating:
                 should_update = False
                 is_updating = True
@@ -76,14 +93,21 @@ def run():
                 
                 frame = 0
                 while is_updating:
-                    output = render.build_loading_state(latest_data, frame)
+                    output = render.build_loading_state(latest_data, frame, selected)
                     print(json.dumps(output, ensure_ascii=False), flush=True)
                     frame += 1
                     time.sleep(0.15)
                     
-                output = render.build_final_state(latest_data)
+                output = render.build_final_state(latest_data, selected)
                 print(json.dumps(output, ensure_ascii=False), flush=True)
                 last_auto_update = now
+                last_selected_mtime = selected_mtime
+
+            # Re-render on scroll (selected file changed, no re-fetch needed)
+            elif selected_mtime != last_selected_mtime and not is_updating:
+                last_selected_mtime = selected_mtime
+                output = render.build_final_state(latest_data, selected)
+                print(json.dumps(output, ensure_ascii=False), flush=True)
                 
             time.sleep(1)
             if now - last_auto_update >= 300:

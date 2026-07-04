@@ -106,5 +106,10 @@ def fetch_all_data():
     results = []
     for d in ordered_dirs:
         if d in dir_to_results:
+            dir_name = os.path.basename(d)
+            for idx, p in enumerate(dir_to_results[d]):
+                if isinstance(p, dict):
+                    p["_dir"] = dir_name
+                    p["_idx"] = idx
             results.extend(dir_to_results[d])
     return results

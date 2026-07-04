@@ -46,11 +46,14 @@ Then add the module to your Waybar config:
     "exec": "~/.local/bin/waybar-ai-status daemon",
     "on-click": "~/.local/bin/waybar-ai-status refresh",
     "on-click-right": "~/.local/bin/waybar-ai-status config",
+    "on-scroll-up": "~/.local/bin/waybar-ai-status scroll-up",
+    "on-scroll-down": "~/.local/bin/waybar-ai-status scroll-down",
+    "on-click-middle": "~/.local/bin/waybar-ai-status cycle-metric",
     "tooltip": true
 }
 ```
 
-Right-click the icon to open the provider configuration TUI -- toggle providers on or off and reorder them.
+The status bar shows the usage percentage of the active provider. Scroll up/down to switch providers, middle-click to cycle metric types (rolling → weekly → monthly). Right-click opens the provider configuration TUI -- toggle providers on or off and reorder them. Hover to see all providers with full details (the active one is marked with →).
 
 ## How It Works
 
