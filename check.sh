@@ -11,19 +11,25 @@ ERR_MSG=""
 
 # OS Check
 OS="$(uname -s)"
-if [ "$OS" != "Linux" ]; then
-    ERR_MSG+="Unsupported OS: $OS (This module is currently designed for Linux environments)\n"
-    MISSING_DEPS=1
-else
+if [ "$OS" = "Linux" ]; then
     echo "OK: OS: Linux"
+elif [ "$OS" = "Darwin" ]; then
+    echo "OK: OS: macOS"
+else
+    ERR_MSG+="Unsupported OS: $OS (This module is currently designed for Linux and macOS)\n"
+    MISSING_DEPS=1
 fi
 
 # Status Bar Check
-if ! command -v waybar >/dev/null 2>&1; then
-    ERR_MSG+="Missing Status Bar: 'waybar' was not found (This module renders tooltips specific to Waybar)\n"
-    MISSING_DEPS=1
-else
-    echo "OK: Status Bar: Waybar"
+if [ "$OS" = "Linux" ]; then
+    if ! command -v waybar >/dev/null 2>&1; then
+        ERR_MSG+="Missing Status Bar: 'waybar' was not found (Waybar is required on Linux)\n"
+        MISSING_DEPS=1
+    else
+        echo "OK: Status Bar: Waybar"
+    fi
+elif [ "$OS" = "Darwin" ]; then
+    echo "OK: Status Bar: SwiftBar / xbar (expected)"
 fi
 
 # Utilities Check
@@ -44,6 +50,7 @@ if [ $MISSING_DEPS -ne 0 ]; then
     echo ""
     echo "If you use a different OS (like macOS) or a different status bar (like Polybar),"
     echo "we would love your help to make $PROJECT_NAME support it."
+    echo ""
     echo "Please check our CONTRIBUTING.md guide and fork the project at:"
     echo "$REPO_URL"
     exit 1

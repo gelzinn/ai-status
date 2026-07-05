@@ -1,19 +1,9 @@
-from . import fetch
-
-TYPE_NAMES = {
-    "rolling": "Rolling Usage",
-    "daily": "Daily Usage",
-    "weekly": "Weekly Usage",
-    "monthly": "Monthly Usage",
-    "generic": "Usage"
-}
-
-TYPE_ORDER = {
-    "rolling": 0, "daily": 1, "weekly": 2, "monthly": 3, "generic": 4
-}
+from ... import fetch
+from ... import types as _types
 
 SPINNERS = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 BAR_LINE_WIDTH = 34
+_BAR_WIDTH = 25
 
 ICON = "\U000F06A9"
 
@@ -52,64 +42,6 @@ def get_selected_provider_name(latest_data, selected):
         return ICON
     return f"{ICON}\u2003{p.get('provider', '')}"
 
-def make_progress_bar(percentage, width=25):
-    percentage = max(0.0, min(100.0, percentage))
-    filled_len = int(round(width * percentage / 100))
-    bar_chars = []
-    for i in range(width):
-        if i < filled_len:
-            bar_chars.append("█")
-        else:
-            bar_chars.append("<span alpha='15%'>█</span>")
-    bar = "".join(bar_chars)
-    return f"[{bar}] {percentage:.0f}%"
-
-def make_loading_progress_bar(percentage, frame_index, width=25):
-    percentage = max(0.0, min(100.0, percentage))
-    filled_len = int(round(width * percentage / 100))
-    
-    bar_chars = []
-    sweep_range = filled_len if filled_len > 0 else width
-    pulse_center = frame_index % (sweep_range + 6) - 3
-    
-    for i in range(width):
-        if i < filled_len:
-            dist = abs(i - pulse_center)
-            if dist == 0: alpha = "100%"
-            elif dist == 1: alpha = "85%"
-            elif dist == 2: alpha = "60%"
-            else: alpha = "40%"
-            bar_chars.append(f"<span alpha='{alpha}'>█</span>")
-        else:
-            if filled_len == 0:
-                dist = abs(i - pulse_center)
-                if dist == 0: alpha = "80%"
-                elif dist == 1: alpha = "50%"
-                elif dist == 2: alpha = "30%"
-                else: alpha = "15%"
-            else:
-                alpha = "15%"
-            bar_chars.append(f"<span alpha='{alpha}'>█</span>")
-            
-    bar = "".join(bar_chars)
-    return f"[{bar}] {percentage:.0f}%"
-
-def make_empty_loading_bar(frame_index, width=25):
-    pos = frame_index % (2 * (width - 4))
-    if pos >= width - 4:
-        pos = (width - 4) - (pos - (width - 4))
-        
-    bar_chars = []
-    for i in range(width):
-        dist = abs(i - (pos + 1))
-        if dist == 0: alpha = "90%"
-        elif dist == 1: alpha = "65%"
-        elif dist == 2: alpha = "40%"
-        elif dist == 3: alpha = "25%"
-        else: alpha = "12%"
-        bar_chars.append(f"<span alpha='{alpha}'>█</span>")
-    bar = "".join(bar_chars)
-    return f"[{bar}] Loading..."
 
 def format_reset_time(seconds, mtype):
     if seconds is None:
@@ -138,11 +70,11 @@ def format_provider_block(provider_data, selected_dir=None, selected_idx=None, s
         err_icon = '<span foreground="#ef4444"> ●</span>'
         pad = max(1, BAR_LINE_WIDTH - len(prefix) - len(provider) - 2)
         line = f"{prefix}{provider}{' ' * pad}{err_icon}"
-    sorted_metrics = sorted(metrics, key=lambda m: TYPE_ORDER.get(m.get("type", "generic"), 4))
+    sorted_metrics = sorted(metrics, key=lambda m: _types.TYPE_ORDER.get(m.get("type", "generic"), 4))
     lines = [line, ""]
     for metric in sorted_metrics:
         mtype = metric.get("type", "generic")
-        name = TYPE_NAMES.get(mtype, "Usage")
+        name = _types.TYPE_NAMES.get(mtype, "Usage")
         is_active = is_selected and mtype == selected_metric
         pct = float(metric.get("percentage", 0.0))
         seconds = metric.get("reset_in_seconds")
@@ -153,7 +85,7 @@ def format_provider_block(provider_data, selected_dir=None, selected_idx=None, s
             lines.append(f"•   {name}:")
         else:
             lines.append(f"    {name}:")
-        lines.append(f"    {make_progress_bar(pct)}")
+        lines.append(f"    {_types.make_progress_bar(pct, width=_BAR_WIDTH, markup=True)}")
         if detail: lines.append(f"    {detail}")
         lines.append("")
     return "\n".join(lines)
@@ -163,7 +95,7 @@ def format_loading_provider_block(provider_data, frame_index):
     metrics = provider_data.get("metrics", [])
     if not metrics: return ""
         
-    sorted_metrics = sorted(metrics, key=lambda m: TYPE_ORDER.get(m.get("type", "generic"), 4))
+    sorted_metrics = sorted(metrics, key=lambda m: _types.TYPE_ORDER.get(m.get("type", "generic"), 4))
     spinner = SPINNERS[frame_index % len(SPINNERS)]
     line = f"{provider} {spinner}"
     if provider_data.get("_error"):
@@ -173,14 +105,14 @@ def format_loading_provider_block(provider_data, frame_index):
     lines = [line, ""]
     for metric in sorted_metrics:
         mtype = metric.get("type", "generic")
-        name = TYPE_NAMES.get(mtype, "Usage")
+        name = _types.TYPE_NAMES.get(mtype, "Usage")
         pct = float(metric.get("percentage", 0.0))
         seconds = metric.get("reset_in_seconds")
         detail = metric.get("detail")
         if detail is None: detail = format_reset_time(seconds, mtype)
             
         lines.append(f"  {name}:")
-        lines.append(f"  {make_loading_progress_bar(pct, frame_index)}")
+        lines.append(f"  {_types.make_loading_bar(pct, frame_index, width=_BAR_WIDTH, markup=True)}")
         if detail: lines.append(f"  {detail}")
         lines.append("")
     return "\n".join(lines)
@@ -208,7 +140,7 @@ def build_loading_state(latest_data, frame, selected=None):
             if block: blocks.append(block)
         tooltip = f"{header}{sep}\n" + "\n".join(blocks)
     else:
-        bar = make_empty_loading_bar(frame)
+        bar = _types.make_empty_loading_bar(frame, width=_BAR_WIDTH, markup=True)
         tooltip = f"{header}\n\n{'─' * BAR_LINE_WIDTH}\n\n  Loading AI Provider Status {spinner}\n  {bar}"
 
     provider_text = get_selected_provider_name(latest_data, selected)

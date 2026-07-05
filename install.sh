@@ -2,12 +2,12 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 if [ -f "$SCRIPT_DIR/config.sh" ]; then
-    # shellcheck source=./config.sh
     source "$SCRIPT_DIR/config.sh"
 fi
-: "${REPO_URL:=https://github.com/gelzinn/omarchy-ai-status}"
-INSTALL_DIR="$HOME/.local/share/omarchy-ai-status"
+
+INSTALL_DIR="$HOME/.local/share/ai-status"
 BIN_DIR="$HOME/.local/bin"
 
 if [ -d "$INSTALL_DIR/.git" ]; then
@@ -32,10 +32,26 @@ bash "$INSTALL_DIR/check.sh"
 
 # Create executable symlink
 mkdir -p "$BIN_DIR"
-ln -sf "$INSTALL_DIR/src/bin/waybar-ai-status" "$BIN_DIR/waybar-ai-status"
+ln -sf "$INSTALL_DIR/src/bin/ai-status" "$BIN_DIR/ai-status"
 
-# Restart Waybar to pick up the new module
-if command -v waybar &>/dev/null; then
+OS="$(uname -s)"
+if [ "$OS" = "Darwin" ]; then
+    SWIFTBAR_DIRS="${HOME}/.swiftbar/plugins ${HOME}/Library/Application Support/SwiftBar/Plugins"
+    for d in $SWIFTBAR_DIRS; do
+        if [ -d "$d" ]; then
+            mkdir -p "$d"
+            wrapper="$d/ai-status.5m.sh"
+            echo '#!/bin/bash' > "$wrapper"
+            echo "exec $BIN_DIR/ai-status swiftbar" >> "$wrapper"
+            chmod +x "$wrapper"
+            echo "SwiftBar plugin created at: $wrapper"
+            break
+        fi
+    done
+fi
+
+# Restart Waybar (Linux only)
+if [ "$OS" = "Linux" ] && command -v waybar &>/dev/null; then
     echo "Restarting Waybar..."
     pkill waybar 2>/dev/null || true
     sleep 0.5

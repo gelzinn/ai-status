@@ -16,7 +16,7 @@ Or from a local clone:
 
 ## How It Works
 
-The script maintains a clone at `~/.local/share/omarchy-ai-status/`. On each run it detects whether:
+The script maintains a clone at `~/.local/share/ai-status/`. On each run it detects whether:
 
 | State | Action |
 |---|---|
@@ -32,5 +32,5 @@ After updating, the script restarts Waybar automatically to apply changes.
 The current version is shown at the top of the Waybar tooltip. You can also check:
 
 ```bash
-cat ~/.local/share/omarchy-ai-status/VERSION
+cat ~/.local/share/ai-status/VERSION
 ```

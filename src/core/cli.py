@@ -1,20 +1,21 @@
 import os
 import sys
+import shutil
 import subprocess
+
 from . import daemon
 from . import state
 from . import tui
 from . import config as cfgmod
+from . import types as metric_types
 
-TERMINALS = ["foot", "alacritty", "kitty", "ghostty", "wezterm", "xterm"]
-
-METRIC_CYCLE = ["rolling", "weekly", "monthly"]
+TERMINALS = ["foot", "alacritty", "kitty", "ghostty", "wezterm", "xterm", "Terminal", "iTerm2", "warp"]
 
 def _first_metric_for(cache, dir_name, idx):
     for p in cache:
         if p.get("_dir") == dir_name and p.get("_idx") == idx:
-            available = {m.get("type") for m in p.get("metrics", []) if m.get("type") in METRIC_CYCLE}
-            for t in METRIC_CYCLE:
+            available = {m.get("type") for m in p.get("metrics", []) if m.get("type") in metric_types.METRIC_CYCLE}
+            for t in metric_types.METRIC_CYCLE:
                 if t in available:
                     return t
             if p.get("metrics"):
@@ -71,13 +72,13 @@ def cycle_metric():
         if p.get("_dir") == provider and p.get("_idx") == idx:
             for m in p.get("metrics", []):
                 t = m.get("type")
-                if t in METRIC_CYCLE:
+                if t in metric_types.METRIC_CYCLE:
                     available.add(t)
             break
 
-    cycle = sorted(available, key=lambda t: METRIC_CYCLE.index(t)) if available else METRIC_CYCLE
+    cycle = sorted(available, key=lambda t: metric_types.METRIC_CYCLE.index(t)) if available else metric_types.METRIC_CYCLE
     if not cycle:
-        cycle = METRIC_CYCLE
+        cycle = metric_types.METRIC_CYCLE
 
     if len(available) <= 1:
         return
@@ -90,26 +91,51 @@ def cycle_metric():
     new_metric = cycle[(pos + 1) % len(cycle)]
     state.save_selected({"provider": provider, "idx": idx, "metric": new_metric})
 
+def _swiftbar_output():
+    from .platform.macos import swiftbar
+    sys.stdout.write(swiftbar.render(state.load_cache(), state.load_selected()))
+    sys.stdout.flush()
+
+SWIFTBAR_ACTIONS = {
+    "swiftbar": lambda: None,
+    "swiftbar-refresh": state.trigger_refresh,
+    "swiftbar-scroll-up": scroll_up,
+    "swiftbar-scroll-down": scroll_down,
+    "swiftbar-cycle-metric": cycle_metric,
+}
+
+def run_config():
+    if not sys.stdout.isatty():
+        for term in TERMINALS:
+            if shutil.which(term):
+                subprocess.Popen([term, "-e", sys.argv[0], "config"])
+                return
+    tui.run()
+
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == "refresh":
+    if len(sys.argv) <= 1:
+        print("Usage: ai-status [daemon|refresh|config|scroll-up|scroll-down|cycle-metric|swiftbar|swiftbar-refresh|swiftbar-scroll-up|swiftbar-scroll-down|swiftbar-cycle-metric]")
+        sys.exit(1)
+
+    cmd = sys.argv[1]
+
+    if cmd == "refresh":
         state.trigger_refresh()
-    elif len(sys.argv) > 1 and sys.argv[1] == "daemon":
-        sys.stderr = open('/tmp/waybar-ai-status-error.log', 'w')
+    elif cmd == "daemon":
+        os.makedirs(state._cache_dir, exist_ok=True)
+        sys.stderr = open(os.path.join(state._cache_dir, "daemon.log"), 'w')
         daemon.run()
-    elif len(sys.argv) > 1 and sys.argv[1] == "config":
-        if not sys.stdout.isatty():
-            for term in TERMINALS:
-                if subprocess.run(["which", term], capture_output=True).returncode == 0:
-                    subprocess.Popen([term, "-e", sys.argv[0], "config"])
-                    break
-            return
-        tui.run()
-    elif len(sys.argv) > 1 and sys.argv[1] == "scroll-up":
+    elif cmd == "config":
+        run_config()
+    elif cmd == "scroll-up":
         scroll_up()
-    elif len(sys.argv) > 1 and sys.argv[1] == "scroll-down":
+    elif cmd == "scroll-down":
         scroll_down()
-    elif len(sys.argv) > 1 and sys.argv[1] == "cycle-metric":
+    elif cmd == "cycle-metric":
         cycle_metric()
+    elif cmd in SWIFTBAR_ACTIONS:
+        SWIFTBAR_ACTIONS[cmd]()
+        _swiftbar_output()
     else:
-        print("Usage: waybar-ai-status [daemon|refresh|config|scroll-up|scroll-down|cycle-metric]")
+        print(f"Unknown command: {cmd}")
         sys.exit(1)

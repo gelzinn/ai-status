@@ -1,7 +1,11 @@
 import os
 import json
+import sys
 
-CONFIG_DIR = os.path.expanduser("~/.config/waybar-ai-status")
+if sys.platform == "darwin":
+    CONFIG_DIR = os.path.expanduser("~/Library/Application Support/ai-status")
+else:
+    CONFIG_DIR = os.path.expanduser("~/.config/ai-status")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "providers.json")
 
 
@@ -26,7 +30,7 @@ def load_config():
         try:
             with open(CONFIG_FILE) as f:
                 return json.load(f)
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             pass
     return None
 

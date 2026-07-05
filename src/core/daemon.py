@@ -4,9 +4,10 @@ import json
 import signal
 import sys
 import threading
+
 from . import state
 from . import fetch
-from . import render
+from .platform.linux import waybar as render
 from . import config as cfgmod
 
 should_update = True
@@ -31,8 +32,8 @@ def update_task():
                 if not os.path.exists(state.LOCK_FILE):
                     break
             latest_data = state.load_cache()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"update_task failed: {e}", file=sys.stderr)
     finally:
         is_updating = False
 
@@ -115,5 +116,6 @@ def run():
                 
         except KeyboardInterrupt:
             break
-        except Exception:
+        except Exception as e:
+            print(f"daemon loop error: {e}", file=sys.stderr)
             time.sleep(5)

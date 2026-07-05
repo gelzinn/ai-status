@@ -18,9 +18,9 @@ cd omarchy-ai-status
 
 | Step | Action |
 |---|---|
-| 1 | Clones (or pulls) the repository to `~/.local/share/omarchy-ai-status/` |
+| 1 | Clones (or pulls) the repository to `~/.local/share/ai-status/` |
 | 2 | Checks system dependencies (Linux, Waybar, python3, jq, curl, git) |
-| 3 | Creates a symlink at `~/.local/bin/waybar-ai-status` |
+| 3 | Creates a symlink at `~/.local/bin/ai-status` |
 | 4 | Restarts Waybar to load the new module |
 
 ## After Installing
@@ -31,12 +31,12 @@ Add the module to your Waybar config:
 "custom/ai-status": {
     "format": "{}",
     "return-type": "json",
-    "exec": "~/.local/bin/waybar-ai-status daemon",
-    "on-click": "~/.local/bin/waybar-ai-status refresh",
-    "on-click-right": "~/.local/bin/waybar-ai-status config",
-    "on-scroll-up": "~/.local/bin/waybar-ai-status scroll-up",
-    "on-scroll-down": "~/.local/bin/waybar-ai-status scroll-down",
-    "on-click-middle": "~/.local/bin/waybar-ai-status cycle-metric",
+    "exec": "~/.local/bin/ai-status daemon",
+    "on-click": "~/.local/bin/ai-status refresh",
+    "on-click-right": "~/.local/bin/ai-status config",
+    "on-scroll-up": "~/.local/bin/ai-status scroll-up",
+    "on-scroll-down": "~/.local/bin/ai-status scroll-down",
+    "on-click-middle": "~/.local/bin/ai-status cycle-metric",
     "tooltip": true
 }
 ```

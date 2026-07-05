@@ -1,5 +1,6 @@
 import curses
 import os
+
 from . import config
 
 
@@ -25,7 +26,7 @@ def run():
 
     try:
         curses.curs_set(0)
-    except Exception:
+    except curses.error:
         pass
 
     changed = False
@@ -112,6 +113,6 @@ def run():
     curses.echo()
     try:
         curses.curs_set(1)
-    except Exception:
+    except curses.error:
         pass
     curses.endwin()

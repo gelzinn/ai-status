@@ -1,18 +1,26 @@
 import os
 import json
 import time
+import sys
 
-CACHE_FILE = os.path.expanduser("~/.cache/waybar-ai-status.json")
-LOCK_FILE = "/tmp/waybar-ai-status-query.lock"
-PID_FILE = "/tmp/waybar-ai-status.pids"
-SELECTED_FILE = os.path.expanduser("~/.config/waybar-ai-status/selected.json")
+if sys.platform == "darwin":
+    _cache_dir = os.path.expanduser("~/Library/Caches/ai-status")
+    _config_dir = os.path.expanduser("~/Library/Application Support/ai-status")
+else:
+    _cache_dir = os.path.expanduser("~/.cache/ai-status")
+    _config_dir = os.path.expanduser("~/.config/ai-status")
+
+CACHE_FILE = os.path.join(_cache_dir, "status.json")
+LOCK_FILE = os.path.join(_cache_dir, "query.lock")
+PID_FILE = os.path.join(_cache_dir, "pids")
+SELECTED_FILE = os.path.join(_config_dir, "selected.json")
 
 def load_cache():
     if os.path.exists(CACHE_FILE):
         try:
-            with open(CACHE_FILE, "r") as f:
+            with open(CACHE_FILE) as f:
                 return json.load(f)
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             pass
     return []
 
@@ -21,7 +29,7 @@ def save_cache(data):
         os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
         with open(CACHE_FILE, "w") as f:
             json.dump(data, f)
-    except Exception:
+    except OSError:
         pass
 
 def acquire_lock():
@@ -33,21 +41,21 @@ def acquire_lock():
         with open(LOCK_FILE, "w") as f:
             f.write(str(os.getpid()))
         return True
-    except Exception:
+    except OSError:
         return False
 
 def release_lock():
     try:
         if os.path.exists(LOCK_FILE):
             os.remove(LOCK_FILE)
-    except Exception:
+    except OSError:
         pass
 
 def register_pid():
     pids = []
     if os.path.exists(PID_FILE):
         try:
-            with open(PID_FILE, "r") as f:
+            with open(PID_FILE) as f:
                 for line in f:
                     try:
                         pid = int(line.strip())
@@ -55,7 +63,7 @@ def register_pid():
                         pids.append(pid)
                     except (ValueError, OSError):
                         pass
-        except Exception:
+        except OSError:
             pass
     my_pid = os.getpid()
     if my_pid not in pids:
@@ -64,15 +72,15 @@ def register_pid():
         with open(PID_FILE, "w") as f:
             for pid in pids:
                 f.write(f"{pid}\n")
-    except Exception:
+    except OSError:
         pass
 
 def load_selected():
     if os.path.exists(SELECTED_FILE):
         try:
-            with open(SELECTED_FILE, "r") as f:
+            with open(SELECTED_FILE) as f:
                 return json.load(f)
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             pass
     return None
 
@@ -81,18 +89,18 @@ def save_selected(data):
         os.makedirs(os.path.dirname(SELECTED_FILE), exist_ok=True)
         with open(SELECTED_FILE, "w") as f:
             json.dump(data, f)
-    except Exception:
+    except OSError:
         pass
 
 def trigger_refresh():
     if os.path.exists(PID_FILE):
         try:
-            with open(PID_FILE, "r") as f:
+            with open(PID_FILE) as f:
                 for line in f:
                     try:
                         pid = int(line.strip())
-                        os.kill(pid, 10) # SIGUSR1
+                        os.kill(pid, 10)
                     except (ValueError, OSError):
                         pass
-        except Exception:
+        except OSError:
             pass

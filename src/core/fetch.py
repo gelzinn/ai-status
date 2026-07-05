@@ -3,14 +3,16 @@ import subprocess
 import json
 import importlib.util
 import urllib.request
+import urllib.error
 import re
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from . import __version__
 from . import config as cfgmod
 
-CACHE_DIR = os.path.join(tempfile.gettempdir(), "waybar-ai-status-cache")
+CACHE_DIR = os.path.join(tempfile.gettempdir(), "ai-status-cache")
 CACHE_TTL = 3600
 
 
@@ -24,7 +26,7 @@ def _save_cache(provider_dir, data):
     try:
         with open(path, "w") as f:
             json.dump({"timestamp": time.time(), "data": data}, f)
-    except Exception:
+    except OSError:
         pass
 
 
@@ -37,7 +39,7 @@ def _load_cache(provider_dir):
             cache = json.load(f)
         if time.time() - cache.get("timestamp", 0) < CACHE_TTL:
             return cache["data"]
-    except Exception:
+    except (OSError, json.JSONDecodeError):
         pass
     return None
 
@@ -132,13 +134,13 @@ def check_for_updates():
     try:
         req = urllib.request.Request(
             "https://api.github.com/repos/gelzinn/omarchy-ai-status/releases/latest",
-            headers={"Accept": "application/vnd.github.v3+json", "User-Agent": "omarchy-ai-status"}
+            headers={"Accept": "application/vnd.github.v3+json", "User-Agent": "ai-status"}
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read())
             tag = data.get("tag_name", "")
             _latest_version = tag.lstrip("v")
-    except Exception:
+    except (OSError, json.JSONDecodeError, urllib.error.URLError):
         pass
 
 def get_version_info():
@@ -185,8 +187,8 @@ def fetch_all_data():
             if data and "error" not in data:
                 providers = data if isinstance(data, list) else [data]
                 dir_to_results[d] = providers
-        except Exception:
-            pass
+    except OSError:
+        pass
     
     results = []
     for d in ordered_dirs:
