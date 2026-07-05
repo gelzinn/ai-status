@@ -77,7 +77,9 @@ def _extract_error_detail(result):
 
 
 def run_provider(provider_dir):
-    query_script = os.path.join(provider_dir, "query.sh")
+    query_script = os.path.join(provider_dir, "query.py")
+    if not os.path.exists(query_script):
+        query_script = os.path.join(provider_dir, "query.sh")
     parse_script = os.path.join(provider_dir, "parse.py")
     
     if not os.path.exists(query_script):

@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# shellcheck source=./config.sh
 source "$(dirname "$0")/config.sh"
 
 echo "Checking system requirements for $PROJECT_NAME..."

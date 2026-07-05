@@ -2,7 +2,11 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_URL="https://github.com/gelzinn/omarchy-ai-status"
+if [ -f "$SCRIPT_DIR/config.sh" ]; then
+    # shellcheck source=./config.sh
+    source "$SCRIPT_DIR/config.sh"
+fi
+: "${REPO_URL:=https://github.com/gelzinn/omarchy-ai-status}"
 INSTALL_DIR="$HOME/.local/share/omarchy-ai-status"
 BIN_DIR="$HOME/.local/bin"
 
