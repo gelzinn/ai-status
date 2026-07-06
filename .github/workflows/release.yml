@@ -17,10 +17,22 @@ jobs:
 
       - name: Check for release commit
         id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          for commit in $(echo '${{ toJson(github.event.commits) }}' | jq -r '.[].message'); do
-            if echo "$commit" | grep -q '^chore: release v'; then
-              VERSION=$(echo "$commit" | sed 's/^chore: release v//')
+          for COMMIT_JSON in $(echo '${{ toJson(github.event.commits) }}' | jq -r '.[] | @base64'); do
+            _jq() { echo "$COMMIT_JSON" | base64 -d | jq -r "$1"; }
+
+            MSG=$(_jq '.message')
+            ID=$(_jq '.id')
+
+            if echo "$MSG" | grep -q '^chore: release v'; then
+              VERIFIED=$(gh api repos/${{ github.repository }}/commits/$ID --jq '.commit.verification.verified')
+              if [ "$VERIFIED" != "true" ]; then
+                echo "Ignoring unverified commit: $ID"
+                continue
+              fi
+              VERSION=$(echo "$MSG" | sed 's/^chore: release v//; s/ .*//')
               echo "new=$VERSION" >> $GITHUB_OUTPUT
               echo "found=true" >> $GITHUB_OUTPUT
               exit 0
