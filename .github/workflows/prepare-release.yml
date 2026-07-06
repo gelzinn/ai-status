@@ -1,0 +1,52 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Bump version
+        id: version
+        run: |
+          LATEST=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          CURRENT="${LATEST#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          HAS_FEAT=$(git log "${LATEST}..HEAD" --oneline --grep="^feat" 2>/dev/null | head -1)
+          if [ -n "$HAS_FEAT" ]; then
+            NEW="$MAJOR.$((MINOR + 1)).0"
+          else
+            NEW="$MAJOR.$MINOR.$((PATCH + 1))"
+          fi
+          echo "new=$NEW" >> $GITHUB_OUTPUT
+
+      - name: Create release branch and PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.new }}"
+          BRANCH="release/v${VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          echo "$VERSION" > VERSION
+          git add VERSION
+          git commit -m "chore: release v${VERSION}"
+
+          git push origin "HEAD:${BRANCH}"
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: release v${VERSION}" \
+            --body "Version bump to v${VERSION}. Merge to create the release."

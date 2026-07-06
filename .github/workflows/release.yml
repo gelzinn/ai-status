@@ -1,11 +1,11 @@
 name: Release
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [main]
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   release:
@@ -15,82 +15,32 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Bump version
+      - name: Check for release commit
         id: version
         run: |
-          LATEST=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          CURRENT="${LATEST#v}"
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-          HAS_FEAT=$(git log "${LATEST}..HEAD" --oneline --grep="^feat" 2>/dev/null | head -1)
-          if [ -n "$HAS_FEAT" ]; then
-            NEW="$MAJOR.$((MINOR + 1)).0"
-          else
-            NEW="$MAJOR.$MINOR.$((PATCH + 1))"
-          fi
-          echo "new=$NEW" >> $GITHUB_OUTPUT
-
-      - name: Create release branch
-        env:
-          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
-        run: |
-          VERSION="${{ steps.version.outputs.new }}"
-          BRANCH="release/v${VERSION}"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          echo "$VERSION" > VERSION
-          git add VERSION
-          git commit -m "chore: bump version to ${VERSION}"
-
-          git push origin "HEAD:${BRANCH}"
-
-      - name: Open release PR with auto-merge
-        env:
-          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
-        run: |
-          VERSION="${{ steps.version.outputs.new }}"
-          BRANCH="release/v${VERSION}"
-
-          gh pr create \
-            --base main \
-            --head "$BRANCH" \
-            --title "chore: release v${VERSION}" \
-            --body "Version bump to v${VERSION}." \
-            --fill
-
-          gh pr merge --squash --auto "$BRANCH"
-
-      - name: Wait for PR merge
-        env:
-          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
-        run: |
-          BRANCH="release/v${{ steps.version.outputs.new }}"
-          for i in $(seq 1 30); do
-            STATE=$(gh pr view "$BRANCH" --json state --jq '.state')
-            if [ "$STATE" = "MERGED" ]; then
-              echo "PR merged!"
+          for commit in $(echo '${{ toJson(github.event.commits) }}' | jq -r '.[].message'); do
+            if echo "$commit" | grep -q '^chore: release v'; then
+              VERSION=$(echo "$commit" | sed 's/^chore: release v//')
+              echo "new=$VERSION" >> $GITHUB_OUTPUT
+              echo "found=true" >> $GITHUB_OUTPUT
               exit 0
             fi
-            echo "Waiting for PR merge... ($i/30)"
-            sleep 10
           done
-          echo "PR was not merged in time"
-          exit 1
+          echo "found=false" >> $GITHUB_OUTPUT
 
-      - name: Tag the merge commit
+      - name: Create tag
+        if: steps.version.outputs.found == 'true'
         env:
-          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${{ steps.version.outputs.new }}"
-          COMMIT_SHA=$(gh api repos/${{ github.repository }}/git/refs/heads/main --jq '.object.sha')
           gh api repos/${{ github.repository }}/git/refs \
-            --field ref="refs/tags/v${VERSION}" \
-            --field sha="$COMMIT_SHA"
+            --field ref="refs/tags/v${{ steps.version.outputs.new }}" \
+            --field sha="${{ github.sha }}"
 
       - name: Create GitHub Release
+        if: steps.version.outputs.found == 'true'
         env:
-          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="v${{ steps.version.outputs.new }}"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -102,10 +52,3 @@ jobs:
               --generate-notes \
               --latest
           fi
-
-      - name: Clean up release branch
-        env:
-          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
-        run: |
-          BRANCH="release/v${{ steps.version.outputs.new }}"
-          gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/${BRANCH}"
