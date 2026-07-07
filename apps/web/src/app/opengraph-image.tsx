@@ -1,5 +1,4 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
+
 import { ImageResponse } from "next/og";
 import { Logo } from "@/components/logo";
 import { PROJECT_NAME, PROJECT_DESCRIPTION, REPO_API_URL } from "@/lib/env";
@@ -11,12 +10,13 @@ export const contentType = "image/png";
 export const alt = `${PROJECT_NAME} - ${PROJECT_DESCRIPTION}`;
 
 // Satori silently falls back to a serif face unless fonts are embedded explicitly.
-const fontDir = path.join(
-  process.cwd(),
-  "node_modules/geist/dist/fonts/geist-sans",
-);
-const geistRegular = readFileSync(path.join(fontDir, "Geist-Regular.ttf"));
-const geistSemiBold = readFileSync(path.join(fontDir, "Geist-SemiBold.ttf"));
+// Fetch from Google Fonts at build time to avoid monorepo hoisting issues with node_modules paths.
+const geistRegular = fetch(
+  "https://cdn.jsdelivr.net/npm/geist@1.5.1/dist/fonts/geist-sans/Geist-Regular.ttf",
+).then((res) => res.arrayBuffer());
+const geistSemiBold = fetch(
+  "https://cdn.jsdelivr.net/npm/geist@1.5.1/dist/fonts/geist-sans/Geist-SemiBold.ttf",
+).then((res) => res.arrayBuffer());
 
 const PAGE_BG = "#09090b";
 const BORDER = "rgba(250, 250, 250, 0.10)";
@@ -371,8 +371,8 @@ export default async function OgImage() {
     {
       ...size,
       fonts: [
-        { name: "Geist", data: geistRegular, weight: 400, style: "normal" },
-        { name: "Geist", data: geistSemiBold, weight: 600, style: "normal" },
+        { name: "Geist", data: await geistRegular, weight: 400, style: "normal" },
+        { name: "Geist", data: await geistSemiBold, weight: 600, style: "normal" },
       ],
     },
   );
