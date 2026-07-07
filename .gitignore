@@ -3,6 +3,7 @@
 .env.*
 *.json
 !package.json
+!tsconfig.json
 *.key
 *.pem
 *.cert
