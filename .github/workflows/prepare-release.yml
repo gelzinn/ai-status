@@ -51,8 +51,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          echo "$VERSION" > VERSION
-          git add VERSION
+          echo "$VERSION" > packages/lib/VERSION
+          git add packages/lib/VERSION
           git commit -m "chore: release v${VERSION}"
 
           git push origin --delete "$BRANCH" 2>/dev/null || true

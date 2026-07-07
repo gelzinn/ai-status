@@ -1,0 +1,8 @@
+{
+  "name": "ai-status-monorepo",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}

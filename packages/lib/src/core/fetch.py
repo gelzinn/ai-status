@@ -1,16 +1,17 @@
-import os
-import subprocess
-import json
 import importlib.util
-import urllib.request
+import json
+import os
 import re
+import subprocess
 import tempfile
 import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from . import __version__
 from . import config as cfgmod
 
-CACHE_DIR = os.path.join(tempfile.gettempdir(), "waybar-ai-status-cache")
+CACHE_DIR = os.path.join(tempfile.gettempdir(), "ai-status-cache")
 CACHE_TTL = 3600
 
 
@@ -70,7 +71,7 @@ def _extract_error_detail(result):
                 return d
         return "Unknown error"
     if isinstance(result, dict):
-        for m in (result.get("metrics") or []):
+        for m in result.get("metrics") or []:
             if m.get("detail"):
                 return m["detail"]
     return "Unknown error"
@@ -81,19 +82,21 @@ def run_provider(provider_dir):
     if not os.path.exists(query_script):
         query_script = os.path.join(provider_dir, "query.sh")
     parse_script = os.path.join(provider_dir, "parse.py")
-    
+
     if not os.path.exists(query_script):
         return None
-        
+
     try:
         res = subprocess.run([query_script], capture_output=True, text=True, timeout=20)
         if res.returncode != 0:
-            return _load_cache(provider_dir) or {"error": f"Query failed for {os.path.basename(provider_dir)}"}
-            
+            return _load_cache(provider_dir) or {
+                "error": f"Query failed for {os.path.basename(provider_dir)}"
+            }
+
         raw_output = res.stdout.strip()
         if not raw_output:
             return _load_cache(provider_dir) or None
-            
+
         if os.path.exists(parse_script):
             spec = importlib.util.spec_from_file_location("parse", parse_script)
             module = importlib.util.module_from_spec(spec)
@@ -101,7 +104,7 @@ def run_provider(provider_dir):
             result = module.parse(raw_output)
         else:
             result = json.loads(raw_output)
-        
+
         if _is_error_result(result):
             cached = _load_cache(provider_dir)
             if cached:
@@ -117,22 +120,28 @@ def run_provider(provider_dir):
                     cached["_error"] = detail
                 return cached
             return result
-        
+
         _save_cache(provider_dir, result)
         return result
-        
+
     except subprocess.TimeoutExpired:
         return _load_cache(provider_dir) or {"error": "Timeout"}
     except Exception as e:
         return _load_cache(provider_dir) or {"error": str(e)}
+
+
 _latest_version = None
+
 
 def check_for_updates():
     global _latest_version
     try:
         req = urllib.request.Request(
-            "https://api.github.com/repos/gelzinn/omarchy-ai-status/releases/latest",
-            headers={"Accept": "application/vnd.github.v3+json", "User-Agent": "omarchy-ai-status"}
+            "https://api.github.com/repos/gelzinn/ai-status/releases/latest",
+            headers={
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "ai-status",
+            },
         )
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read())
@@ -141,23 +150,27 @@ def check_for_updates():
     except Exception:
         pass
 
+
 def get_version_info():
     return {
         "current": __version__,
         "latest": _latest_version,
-        "has_update": _latest_version is not None and _latest_version != __version__
+        "has_update": _latest_version is not None and _latest_version != __version__,
     }
 
+
 def fetch_all_data():
-    repo_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "providers")
+    repo_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "providers"
+    )
     script_dir = repo_dir
-    
+
     if not os.path.exists(script_dir):
         return []
-        
+
     enabled_order = cfgmod.enabled_order()
     enabled_set = set(enabled_order)
-    
+
     provider_dirs = []
     for d in os.listdir(script_dir):
         if not os.path.isdir(os.path.join(script_dir, d)):
@@ -167,16 +180,16 @@ def fetch_all_data():
         if d not in enabled_set:
             continue
         provider_dirs.append((d, os.path.join(script_dir, d)))
-    
+
     name_to_dir = {name: path for name, path in provider_dirs}
     ordered_dirs = []
     for name in enabled_order:
         if name in name_to_dir:
             ordered_dirs.append(name_to_dir[name])
-    
+
     with ThreadPoolExecutor(max_workers=max(1, len(ordered_dirs))) as executor:
         future_to_dir = {executor.submit(run_provider, d): d for d in ordered_dirs}
-        
+
     dir_to_results = {}
     for future in as_completed(future_to_dir):
         d = future_to_dir[future]
@@ -187,7 +200,7 @@ def fetch_all_data():
                 dir_to_results[d] = providers
         except Exception:
             pass
-    
+
     results = []
     for d in ordered_dirs:
         if d in dir_to_results:

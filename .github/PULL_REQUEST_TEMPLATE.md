@@ -12,5 +12,5 @@ Closes #
 ## Checklist
 
 - [ ] `./install.sh` runs without errors
-- [ ] `waybar-ai-status daemon` starts and refreshes correctly
+- [ ] `ai-status daemon` starts and refreshes correctly
 - [ ] Provider scripts (if added) include both `query.sh` and `parse.py`

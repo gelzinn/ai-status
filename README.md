@@ -1,6 +1,6 @@
-# Omarchy AI Status
+# AI Status
 
-**Monitor AI provider usage limits in your Waybar -- across Claude, Copilot, Codex, Z.AI, Kiro, Antigravity, and OpenCode in real time.**
+Monitor AI provider usage limits in your Waybar — across Claude, Copilot, Codex, Z.AI, Kiro, Antigravity, and OpenCode in real time.
 
 <img width="348" height="954" alt="Screenshot" src="https://github.com/user-attachments/assets/dcba0b97-d462-452e-b1b6-000cc445b803" />
 
@@ -29,10 +29,13 @@
 
 See the [Providers & Authentication Guide](PROVIDERS.md) for setup details.
 
+## ⚠️ Upgrading from v0.4.x (omarchy-ai-status)?
+The project has been renamed to **AI Status**. When you run the install script below, your existing configurations will be migrated automatically. However, **you must update your Waybar config** to use the new `ai-status` command instead of `waybar-ai-status`.
+
 ## Quick Start
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/gelzinn/omarchy-ai-status/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/gelzinn/ai-status/main/packages/lib/install.sh)
 ```
 
 This single command installs, configures symlinks, and restarts Waybar. Run it again to update.
@@ -43,12 +46,12 @@ Then add the module to your Waybar config:
 "custom/ai-status": {
     "format": "{}",
     "return-type": "json",
-    "exec": "~/.local/bin/waybar-ai-status daemon",
-    "on-click": "~/.local/bin/waybar-ai-status refresh",
-    "on-click-right": "~/.local/bin/waybar-ai-status config",
-    "on-scroll-up": "~/.local/bin/waybar-ai-status scroll-up",
-    "on-scroll-down": "~/.local/bin/waybar-ai-status scroll-down",
-    "on-click-middle": "~/.local/bin/waybar-ai-status cycle-metric",
+    "exec": "~/.local/bin/ai-status daemon",
+    "on-click": "~/.local/bin/ai-status refresh",
+    "on-click-right": "~/.local/bin/ai-status config",
+    "on-scroll-up": "~/.local/bin/ai-status scroll-up",
+    "on-scroll-down": "~/.local/bin/ai-status scroll-down",
+    "on-click-middle": "~/.local/bin/ai-status cycle-metric",
     "tooltip": true
 }
 ```
@@ -65,7 +68,7 @@ The daemon outputs JSON for Waybar's `return-type: json` custom module format, w
 
 | Path | Purpose |
 |---|---|
-| `src/bin/waybar-ai-status` | CLI entry point |
+| `src/bin/ai-status` | CLI entry point |
 | `src/core/` | Core logic: daemon, fetch, render, state, config management |
 | `src/providers/<name>/` | Per-provider query and parse scripts |
 | `install.sh` | Self-updating install script |

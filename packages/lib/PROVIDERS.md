@@ -1,6 +1,6 @@
 # Providers & Authentication Guide
 
-**Omarchy AI Status never ships or hardcodes API keys.** Every provider script reads credentials from your existing local authentication files -- OpenCode tokens, Copilot OAuth sessions, `.codex/auth.json`, and similar. Below is how each provider authenticates.
+**AI Status never ships or hardcodes API keys.** Every provider script reads credentials from your existing local authentication files -- OpenCode tokens, Copilot OAuth sessions, `.codex/auth.json`, and similar. Below is how each provider authenticates.
 
 ## Provider Overview
 
@@ -112,7 +112,7 @@ Each provider lives in `src/providers/<name>/` with two files:
 | `query.sh` | Fetches raw data -- makes API calls, runs CLI commands, or scrapes output |
 | `parse.py` | Parses the raw output into a standardized JSON structure via a `parse(raw_output)` function |
 
-To add a new provider, create a new directory under `src/providers/` with these two files and register it via `waybar-ai-status config`.
+To add a new provider, create a new directory under `src/providers/` with these two files and register it via `ai-status config`.
 
 ## Troubleshooting
 

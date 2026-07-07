@@ -14,7 +14,7 @@ jobs:
       - name: Run shellcheck
         uses: ludeeus/action-shellcheck@master
         with:
-          scandir: "."
+          scandir: "packages/lib"
           format: tty
           severity: warning
 
@@ -25,5 +25,5 @@ jobs:
 
       - name: Check Python syntax
         run: |
-          python -m py_compile src/core/*.py
-          python -m py_compile src/providers/**/*.py
+          python -m py_compile packages/lib/src/core/*.py
+          python -m py_compile packages/lib/src/providers/**/*.py

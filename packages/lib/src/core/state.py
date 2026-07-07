@@ -2,10 +2,10 @@ import os
 import json
 import time
 
-CACHE_FILE = os.path.expanduser("~/.cache/waybar-ai-status.json")
-LOCK_FILE = "/tmp/waybar-ai-status-query.lock"
-PID_FILE = "/tmp/waybar-ai-status.pids"
-SELECTED_FILE = os.path.expanduser("~/.config/waybar-ai-status/selected.json")
+CACHE_FILE = os.path.expanduser("~/.cache/ai-status.json")
+LOCK_FILE = "/tmp/ai-status-query.lock"
+PID_FILE = "/tmp/ai-status.pids"
+SELECTED_FILE = os.path.expanduser("~/.config/ai-status/selected.json")
 
 def load_cache():
     if os.path.exists(CACHE_FILE):

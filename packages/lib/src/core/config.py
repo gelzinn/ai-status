@@ -1,7 +1,7 @@
 import os
 import json
 
-CONFIG_DIR = os.path.expanduser("~/.config/waybar-ai-status")
+CONFIG_DIR = os.path.expanduser("~/.config/ai-status")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "providers.json")
 
 

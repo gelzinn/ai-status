@@ -11,7 +11,7 @@ A clear description of what the bug is.
 
 **To reproduce**
 Steps to reproduce:
-1. Run `waybar-ai-status ...`
+1. Run `ai-status ...`
 
 **Expected behavior**
 What you expected to happen.

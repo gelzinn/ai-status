@@ -94,7 +94,7 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "refresh":
         state.trigger_refresh()
     elif len(sys.argv) > 1 and sys.argv[1] == "daemon":
-        sys.stderr = open('/tmp/waybar-ai-status-error.log', 'w')
+        sys.stderr = open('/tmp/ai-status-error.log', 'w')
         daemon.run()
     elif len(sys.argv) > 1 and sys.argv[1] == "config":
         if not sys.stdout.isatty():
@@ -111,5 +111,5 @@ def main():
     elif len(sys.argv) > 1 and sys.argv[1] == "cycle-metric":
         cycle_metric()
     else:
-        print("Usage: waybar-ai-status [daemon|refresh|config|scroll-up|scroll-down|cycle-metric]")
+        print("Usage: ai-status [daemon|refresh|config|scroll-up|scroll-down|cycle-metric]")
         sys.exit(1)
