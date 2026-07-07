@@ -6,6 +6,7 @@ WORKSPACE_CONFIG="$(dirname "$0")/../../workspace.config"
 if [ -f "$WORKSPACE_CONFIG" ]; then
   # Sourcing the variables safely
   set -a
+  # shellcheck source=/dev/null
   source "$WORKSPACE_CONFIG"
   set +a
 fi
