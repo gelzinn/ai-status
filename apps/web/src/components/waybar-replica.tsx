@@ -245,14 +245,14 @@ export function WaybarReplica({ version }: { version: string }) {
               </div>
             </div>
 
-            <div className="flex flex-col gap-2 overflow-hidden mask-[linear-gradient(to_bottom,black_70%,transparent_100%)] p-4">
+            <div className="flex flex-col overflow-hidden mask-[linear-gradient(to_bottom,black_70%,transparent_100%)] p-2">
               {WAYBAR_DATA.map((item, idx) => {
                 const isActive = activeIdx === idx;
 
                 return (
                   <div
                     key={idx}
-                    className="flex flex-col gap-4 cursor-pointer p-2 rounded-lg hover:bg-foreground/5 transition-colors"
+                    className="flex flex-col gap-4 cursor-pointer p-4 rounded-xl hover:bg-foreground/5"
                     onClick={() => {
                       setActiveIdx(idx);
                       setActiveStatIdx(0);
@@ -272,7 +272,7 @@ export function WaybarReplica({ version }: { version: string }) {
 
                       <img
                         src={item.logo}
-                        alt=""
+                        alt={item.provider}
                         className="size-3.5 object-contain opacity-80 filter brightness-110"
                       />
 
@@ -288,25 +288,27 @@ export function WaybarReplica({ version }: { version: string }) {
                       </span>
                     </div>
 
-                    <div className="flex flex-col gap-4 pl-4">
+                    <div className="flex flex-col gap-4 px-4">
                       {item.stats.map((stat, statIdx) => {
                         const isStatActive =
                           isActive && statIdx === activeStatIdx;
+
                         return (
                           <div
                             key={statIdx}
                             className={cn(
-                              "flex flex-col gap-1 pl-4 relative rounded p-1 -mx-1 transition-colors",
+                              "flex flex-col gap-1 pl-4 relative rounded-lg px-2 py-1 -mx-2",
                               !isStatActive && "hover:bg-foreground/5",
                             )}
                             onClick={(e) => {
                               e.stopPropagation();
+
                               setActiveIdx(idx);
                               setActiveStatIdx(statIdx);
                             }}
                           >
                             {isStatActive && (
-                              <span className="absolute -left-4 top-0 text-foreground text-[10px] leading-none mt-0.5">
+                              <span className="absolute -left-2 top-1 text-foreground text-xs leading-none mt-0.5">
                                 •
                               </span>
                             )}
