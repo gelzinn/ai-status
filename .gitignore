@@ -28,3 +28,4 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+!packages/shared/providers/providers.json
