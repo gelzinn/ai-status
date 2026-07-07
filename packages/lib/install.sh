@@ -14,9 +14,6 @@ BIN_DIR="$HOME/.local/bin"
 if [ -d "$HOME/.config/waybar-ai-status" ] && [ ! -d "$HOME/.config/ai-status" ]; then
     mv "$HOME/.config/waybar-ai-status" "$HOME/.config/ai-status"
 fi
-if [ -L "$BIN_DIR/waybar-ai-status" ]; then
-    rm -f "$BIN_DIR/waybar-ai-status"
-fi
 if [ -d "$HOME/.local/share/omarchy-ai-status" ] && [ ! -d "$INSTALL_DIR" ]; then
     echo "Migrating old installation directory..."
     mv "$HOME/.local/share/omarchy-ai-status" "$INSTALL_DIR"
@@ -46,6 +43,8 @@ bash "$INSTALL_DIR/packages/lib/check.sh"
 # Create executable symlink
 mkdir -p "$BIN_DIR"
 ln -sf "$INSTALL_DIR/packages/lib/src/bin/ai-status" "$BIN_DIR/ai-status"
+# Legacy symlink so users' waybar config doesn't break instantly
+ln -sf "$BIN_DIR/ai-status" "$BIN_DIR/waybar-ai-status"
 
 # Restart Waybar to pick up the new module
 if command -v waybar &>/dev/null; then
