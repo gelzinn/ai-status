@@ -14,10 +14,8 @@ from . import config as cfgmod
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "ai-status-cache")
 CACHE_TTL = 3600
 
-
 def _cache_path(provider_dir):
     return os.path.join(CACHE_DIR, f"{os.path.basename(provider_dir)}.json")
-
 
 def _save_cache(provider_dir, data):
     os.makedirs(CACHE_DIR, exist_ok=True)
@@ -27,7 +25,6 @@ def _save_cache(provider_dir, data):
             json.dump({"timestamp": time.time(), "data": data}, f)
     except Exception:
         pass
-
 
 def _load_cache(provider_dir):
     path = _cache_path(provider_dir)
@@ -41,7 +38,6 @@ def _load_cache(provider_dir):
     except Exception:
         pass
     return None
-
 
 def _is_error_result(result):
     if result is None:
@@ -62,7 +58,6 @@ def _is_error_result(result):
                     return True
     return False
 
-
 def _extract_error_detail(result):
     if isinstance(result, list):
         for item in result:
@@ -75,7 +70,6 @@ def _extract_error_detail(result):
             if m.get("detail"):
                 return m["detail"]
     return "Unknown error"
-
 
 def run_provider(provider_dir):
     query_script = os.path.join(provider_dir, "query.py")
@@ -129,9 +123,7 @@ def run_provider(provider_dir):
     except Exception as e:
         return _load_cache(provider_dir) or {"error": str(e)}
 
-
 _latest_version = None
-
 
 def check_for_updates():
     global _latest_version
@@ -150,14 +142,12 @@ def check_for_updates():
     except Exception:
         pass
 
-
 def get_version_info():
     return {
         "current": __version__,
         "latest": _latest_version,
         "has_update": _latest_version is not None and _latest_version != __version__,
     }
-
 
 def fetch_all_data():
     repo_dir = os.path.join(

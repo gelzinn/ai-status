@@ -115,5 +115,10 @@ def run():
                 
         except KeyboardInterrupt:
             break
+        except BrokenPipeError:
+            break
         except Exception:
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            sys.stderr.flush()
             time.sleep(5)

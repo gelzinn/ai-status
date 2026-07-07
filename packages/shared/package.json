@@ -1,0 +1,7 @@
+{
+  "name": "@ai-status/shared",
+  "version": "1.0.0",
+  "private": true,
+  "main": "providers/providers.ts",
+  "types": "providers/providers.ts"
+}

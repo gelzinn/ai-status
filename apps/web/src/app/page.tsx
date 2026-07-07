@@ -16,7 +16,7 @@ import { WaybarReplica } from "@/components/waybar-replica";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
-import { SUPPORTED_PROVIDERS } from "@/lib/providers";
+import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
 import { REPO_API_URL, REPO_URL } from "@/lib/env";
 
 export default async function Homepage() {

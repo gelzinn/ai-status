@@ -4,12 +4,10 @@ import json
 CONFIG_DIR = os.path.expanduser("~/.config/ai-status")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "providers.json")
 
-
 def providers_dir():
     return os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "providers"
     )
-
 
 def available_providers():
     d = providers_dir()
@@ -20,7 +18,6 @@ def available_providers():
         if os.path.isdir(os.path.join(d, p)) and not p.startswith("__")
     )
 
-
 def load_config():
     if os.path.exists(CONFIG_FILE):
         try:
@@ -30,12 +27,10 @@ def load_config():
             pass
     return None
 
-
 def save_config(order):
     os.makedirs(CONFIG_DIR, exist_ok=True)
     with open(CONFIG_FILE, "w") as f:
         json.dump(order, f, indent=2)
-
 
 def enabled_order():
     cfg = load_config()

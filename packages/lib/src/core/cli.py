@@ -51,7 +51,12 @@ def _scroll(direction):
 
     new_dir, new_idx = items[(idx + direction) % len(items)]
     new_metric = _first_metric_for(cache, new_dir, new_idx)
-    state.save_selected({"provider": new_dir, "idx": new_idx, "metric": new_metric})
+    
+    selected["provider"] = new_dir
+    selected["idx"] = new_idx
+    selected["metric"] = new_metric
+    
+    state.save_selected(selected)
 
 def scroll_up():
     _scroll(-1)
@@ -88,7 +93,43 @@ def cycle_metric():
         pos = -1
     
     new_metric = cycle[(pos + 1) % len(cycle)]
-    state.save_selected({"provider": provider, "idx": idx, "metric": new_metric})
+    
+    selected["provider"] = provider
+    selected["idx"] = idx
+    selected["metric"] = new_metric
+
+    state.save_selected(selected)
+
+def print_logo():
+    selected = state.load_selected() or {}
+    provider = selected.get("provider", "antigravity")
+    
+    shared_json_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "shared", "providers", "providers.json")
+    try:
+        import json, urllib.request
+        with open(shared_json_path, 'r') as f:
+            providers = json.load(f)
+        
+        logo_url = providers.get(provider, {}).get("logo")
+        if not logo_url:
+            logo_url = providers.get("antigravity", {}).get("logo")
+            
+        if logo_url:
+            cache_dir = os.path.expanduser("~/.cache/ai-status/logos")
+            os.makedirs(cache_dir, exist_ok=True)
+            # Basic extension extraction, defaulting to svg for google favicons etc
+            ext = logo_url.split(".")[-1]
+            if len(ext) > 4 or "?" in ext: ext = "svg"
+            local_path = os.path.join(cache_dir, f"{provider}.{ext}")
+            
+            if not os.path.exists(local_path):
+                req = urllib.request.Request(logo_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, timeout=5) as response, open(local_path, 'wb') as out_file:
+                    out_file.write(response.read())
+                    
+            print(local_path)
+    except Exception as e:
+        print("")
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "refresh":
@@ -110,6 +151,8 @@ def main():
         scroll_down()
     elif len(sys.argv) > 1 and sys.argv[1] == "cycle-metric":
         cycle_metric()
+    elif len(sys.argv) > 1 and sys.argv[1] == "logo":
+        print_logo()
     else:
-        print("Usage: ai-status [daemon|refresh|config|scroll-up|scroll-down|cycle-metric]")
+        print("Usage: ai-status [daemon|refresh|config|scroll-up|scroll-down|cycle-metric|logo]")
         sys.exit(1)

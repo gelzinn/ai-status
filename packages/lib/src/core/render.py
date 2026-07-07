@@ -1,3 +1,4 @@
+import re
 from . import fetch
 
 TYPE_NAMES = {
@@ -14,7 +15,6 @@ SPINNERS = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"
 BAR_LINE_WIDTH = 34
 
 ICON = "\U000f06a9"
-
 
 def _find_selected_provider(latest_data, selected):
     if not selected or not latest_data:
@@ -34,24 +34,79 @@ def get_selected_metric_text(latest_data, selected):
     p = _find_selected_provider(latest_data, selected)
     if not p:
         return ICON
-    provider_name = p.get("provider", "")
+    
+    provider_full_name = p.get("provider", "")
     metric_type = selected.get("metric", "rolling")
     metrics = p.get("metrics", [])
-    for m in metrics:
-        if m.get("type") == metric_type:
-            pct = float(m.get("percentage", 0.0))
-            return f"{ICON}\u2003{provider_name} {pct:.0f}%"
-    if metrics:
-        pct = float(metrics[0].get("percentage", 0.0))
-        return f"{ICON}\u2003{provider_name} {pct:.0f}%"
-    return f"{ICON}\u2003{provider_name}"
+    
+    show_provider = selected.get("show_provider", True)
+    show_model = selected.get("show_model", True)
+    show_metric = selected.get("show_metric", False)
+    show_pct = selected.get("show_pct", True)
+    
+    show_icon = selected.get("show_icon", True)
+    
+    if not (show_provider or show_model or show_metric or show_pct):
+        show_provider = True
+        show_pct = True
+    
+    main_name = provider_full_name
+    model_name = ""
+    match = re.match(r"^([^(]+)(?:\s*\(([^)]+)\))?$", provider_full_name)
+    if match:
+        main_name = match.group(1).strip()
+        if match.group(2):
+            model_name = match.group(2).strip()
+            
+    m = None
+    for item in metrics:
+        if item.get("type") == metric_type:
+            m = item
+            break
+    if not m and metrics:
+        m = metrics[0]
+        metric_type = m.get("type", "rolling")
+        
+    metric_name = TYPE_NAMES.get(metric_type, "Usage")
+    
+    if m:
+        pct = float(m.get("percentage", 0.0))
+        pct_str = f"{pct:.0f}%"
+    else:
+        pct_str = "0%"
+
+    parts = []
+    if show_provider and main_name:
+        parts.append(main_name)
+    if show_model and model_name:
+        if show_provider:
+            parts.append(f"({model_name})")
+        else:
+            parts.append(model_name)
+    if show_metric:
+        parts.append(metric_name)
+    if show_pct:
+        parts.append(pct_str)
+        
+    text = " ".join(parts)
+    if show_icon:
+        return f"{ICON}\u2003{text}" if text else ICON
+    else:
+        return text
 
 
 def get_selected_provider_name(latest_data, selected):
     p = _find_selected_provider(latest_data, selected)
+    show_icon = selected.get("show_icon", True) if selected else True
+    
     if not p:
-        return ICON
-    return f"{ICON}\u2003{p.get('provider', '')}"
+        return ICON if show_icon else ""
+        
+    text = p.get('provider', '')
+    if show_icon:
+        return f"{ICON}\u2003{text}" if text else ICON
+    else:
+        return text
 
 
 def make_progress_bar(percentage, width=25):
@@ -253,10 +308,16 @@ def build_loading_state(latest_data, frame, selected=None):
         tooltip = f"{header}\n\n{'─' * BAR_LINE_WIDTH}\n\n  Loading AI Provider Status {spinner}\n  {bar}"
 
     provider_text = get_selected_provider_name(latest_data, selected)
+    
+    if provider_text == ICON:
+        final_text = f"{ICON} {spinner}"
+    elif not provider_text:
+        final_text = spinner
+    else:
+        final_text = f"{provider_text} {spinner}"
+        
     return {
-        "text": f"{provider_text} {spinner}"
-        if provider_text != ICON
-        else f"{ICON} {spinner}",
+        "text": final_text,
         "tooltip": tooltip.strip(),
     }
 

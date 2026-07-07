@@ -1,3 +1,6 @@
+# Dependencies
+node_modules/
+
 # Environment and secrets
 .env
 .env.*
@@ -25,3 +28,4 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+!packages/shared/providers/providers.json

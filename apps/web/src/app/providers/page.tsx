@@ -1,6 +1,6 @@
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
-import { SUPPORTED_PROVIDERS } from "@/lib/providers";
+import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -47,7 +47,7 @@ export default function ProvidersPage() {
 						href="https://github.com/gelzinn/ai-status/issues/new"
 						target="_blank"
 						rel="noreferrer"
-						className="group flex items-center justify-center gap-4 rounded-xl border-2 border-dashed border-border/50 bg-transparent p-4 shadow-sm transition-all hover:border-foreground/30 hover:bg-muted/50 min-h-[5.5rem]"
+						className="group flex items-center justify-center gap-4 rounded-xl border-2 border-dashed border-border/50 bg-transparent p-4 shadow-sm transition-all hover:border-foreground/30 hover:bg-muted/50 min-h-22"
 					>
 						<span className="font-heading text-lg font-semibold text-muted-foreground transition-colors group-hover:text-foreground">
 							+ Add new provider

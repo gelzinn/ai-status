@@ -2,7 +2,7 @@
 import { ImageResponse } from "next/og";
 import { Logo } from "@/components/logo";
 import { PROJECT_NAME, PROJECT_DESCRIPTION, REPO_API_URL } from "@/lib/env";
-import { PROVIDERS } from "@/lib/providers";
+import { PROVIDERS } from "@ai-status/shared";
 
 export const runtime = "nodejs";
 export const size = { width: 1200, height: 630 };

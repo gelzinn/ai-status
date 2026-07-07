@@ -3,7 +3,7 @@
 import { Bot, Wifi, Bluetooth } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useEffect, useRef } from "react";
-import { PROVIDERS } from "@/lib/providers";
+import { PROVIDERS } from "@ai-status/shared";
 import { PROJECT_NAME } from "@/lib/env";
 
 type Stat = {
@@ -65,8 +65,8 @@ const WAYBAR_DATA: WaybarData[] = [
     ],
   },
   {
-    provider: `${PROVIDERS.Z_AI.name} Coding Plan (PRO)`,
-    logo: PROVIDERS.Z_AI.logo,
+    provider: `${PROVIDERS.ZAI.name} Coding Plan (PRO)`,
+    logo: PROVIDERS.ZAI.logo,
     stats: [
       { label: "Rolling Usage:", percent: 0, resets: "no reset available" },
       { label: "Weekly Usage:", percent: 6, resets: "Resets in 7h 26m" },
@@ -144,16 +144,24 @@ export function WaybarReplica({ version }: { version: string }) {
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!cardRef.current) return;
+
+    const prefersReducedMotion = typeof window !== "undefined" && (window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+    if (prefersReducedMotion) return;
+
+
     const rect = cardRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
     setMousePos({ x, y });
 
     // Calculate 3D tilt
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
+
     const rotateX = ((y - centerY) / centerY) * -4; // Max 4 deg
     const rotateY = ((x - centerX) / centerX) * 4;
+
     setTransform(
       `perspective(1200px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`,
     );
@@ -245,14 +253,14 @@ export function WaybarReplica({ version }: { version: string }) {
               </div>
             </div>
 
-            <div className="flex flex-col gap-2 overflow-hidden mask-[linear-gradient(to_bottom,black_70%,transparent_100%)] p-4">
+            <div className="flex flex-col overflow-hidden mask-[linear-gradient(to_bottom,black_70%,transparent_100%)] p-2">
               {WAYBAR_DATA.map((item, idx) => {
                 const isActive = activeIdx === idx;
 
                 return (
                   <div
                     key={idx}
-                    className="flex flex-col gap-4 cursor-pointer p-2 rounded-lg hover:bg-foreground/5 transition-colors"
+                    className="flex flex-col gap-4 cursor-pointer p-4 rounded-xl hover:bg-foreground/5"
                     onClick={() => {
                       setActiveIdx(idx);
                       setActiveStatIdx(0);
@@ -272,7 +280,7 @@ export function WaybarReplica({ version }: { version: string }) {
 
                       <img
                         src={item.logo}
-                        alt=""
+                        alt={item.provider}
                         className="size-3.5 object-contain opacity-80 filter brightness-110"
                       />
 
@@ -288,25 +296,27 @@ export function WaybarReplica({ version }: { version: string }) {
                       </span>
                     </div>
 
-                    <div className="flex flex-col gap-4 pl-4">
+                    <div className="flex flex-col gap-4 px-4">
                       {item.stats.map((stat, statIdx) => {
                         const isStatActive =
                           isActive && statIdx === activeStatIdx;
+
                         return (
                           <div
                             key={statIdx}
                             className={cn(
-                              "flex flex-col gap-1 pl-4 relative rounded p-1 -mx-1 transition-colors",
+                              "flex flex-col gap-1 pl-4 relative rounded-lg px-2 py-1 -mx-2",
                               !isStatActive && "hover:bg-foreground/5",
                             )}
                             onClick={(e) => {
                               e.stopPropagation();
+
                               setActiveIdx(idx);
                               setActiveStatIdx(statIdx);
                             }}
                           >
                             {isStatActive && (
-                              <span className="absolute -left-4 top-0 text-foreground text-[10px] leading-none mt-0.5">
+                              <span className="absolute -left-2 top-1 text-foreground text-xs leading-none mt-0.5">
                                 •
                               </span>
                             )}
@@ -378,7 +388,7 @@ export function WaybarReplica({ version }: { version: string }) {
                               className={cn(
                                 "text-muted-foreground/60",
                                 stat.resets === "no reset available" &&
-                                  "opacity-50",
+                                "opacity-50",
                               )}
                             >
                               {stat.resets}
