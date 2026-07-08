@@ -3,6 +3,12 @@ import os
 from . import config
 from . import state
 
+ICON_MODE_LABELS = {
+    "off": "Off",
+    "bot": "Bot Icon (e.g. 󰚩)",
+    "logo": "Provider Logo (image)",
+}
+
 def get_selectable_items():
     cache = state.load_cache()
     items = []
@@ -63,6 +69,7 @@ def run():
     show_model = current_selected.get("show_model", True)
     show_metric = current_selected.get("show_metric", False)
     show_pct = current_selected.get("show_pct", True)
+    icon_mode_idx = state.ICON_MODES.index(state.get_icon_mode(current_selected))
 
     selected_idx = 0
     scroll_offset = 0
@@ -78,6 +85,12 @@ def run():
         curses.curs_set(0)
     except Exception:
         pass
+
+    def safe_addstr(y, x, text, attr=curses.A_NORMAL):
+        try:
+            stdscr.addstr(y, x, text, attr)
+        except curses.error:
+            pass
 
     def draw():
         nonlocal scroll_offset
@@ -96,7 +109,7 @@ def run():
         stdscr.clear()
 
         title = " AI Status Config "
-        stdscr.addstr(0, max(0, (w - len(title)) // 2), title,
+        safe_addstr(0, max(0, (w - len(title)) // 2), title,
                        curses.A_REVERSE | curses.A_BOLD)
 
         # 1. Active Provider
@@ -105,50 +118,51 @@ def run():
         if len(prov_text) > w:
             prov_text = prov_text[:w]
         attr = curses.A_REVERSE if selected_idx == 0 else curses.A_NORMAL
-        stdscr.addstr(2, 0, prov_text, attr)
+        safe_addstr(2, 0, prov_text, attr)
 
         # Display Options
         opt_header = "--- Display Settings (SPACE to toggle) ---"
         if len(opt_header) > w:
             opt_header = opt_header[:w]
-        stdscr.addstr(4, 0, opt_header, curses.A_DIM)
+        safe_addstr(4, 0, opt_header, curses.A_DIM)
 
         # 2. Show Provider
         flag_p = "[x]" if show_provider else "[ ]"
         p_text = f"   {flag_p} Show Provider (e.g. Gemini)"
         attr = curses.A_REVERSE if selected_idx == 1 else curses.A_NORMAL
-        stdscr.addstr(5, 0, p_text, attr)
+        safe_addstr(5, 0, p_text, attr)
 
         # 3. Show Plan/Origin
         flag_m = "[x]" if show_model else "[ ]"
         m_text = f"   {flag_m} Show Plan/Origin (e.g. Antigravity)"
         attr = curses.A_REVERSE if selected_idx == 2 else curses.A_NORMAL
-        stdscr.addstr(6, 0, m_text, attr)
+        safe_addstr(6, 0, m_text, attr)
 
         # 4. Show Metric
         flag_mt = "[x]" if show_metric else "[ ]"
         mt_text = f"   {flag_mt} Show Metric Name (e.g. Rolling Usage)"
         attr = curses.A_REVERSE if selected_idx == 3 else curses.A_NORMAL
-        stdscr.addstr(7, 0, mt_text, attr)
+        safe_addstr(7, 0, mt_text, attr)
 
         # 5. Show Percentage
         flag_pct = "[x]" if show_pct else "[ ]"
         pct_text = f"   {flag_pct} Show Percentage (e.g. 4%)"
         attr = curses.A_REVERSE if selected_idx == 4 else curses.A_NORMAL
-        stdscr.addstr(8, 0, pct_text, attr)
+        safe_addstr(8, 0, pct_text, attr)
         
-        # 6. Show Text Icon
-        show_icon = current_selected.get("show_icon", True)
-        flag_icon = "[x]" if show_icon else "[ ]"
-        icon_text = f"   {flag_icon} Show Text Icon (e.g. 󰚩)"
+        # 6. Provider Icon
+        icon_label = ICON_MODE_LABELS[state.ICON_MODES[icon_mode_idx]]
+        icon_text = f"   Provider Icon: < {icon_label} >"
+        if len(icon_text) > w:
+            icon_text = icon_text[:w]
         attr = curses.A_REVERSE if selected_idx == 5 else curses.A_NORMAL
-        stdscr.addstr(9, 0, icon_text, attr)
+        safe_addstr(9, 0, icon_text, attr)
 
         # Header for providers
         header_text = "--- Providers List (SPACE to toggle, Shift+J/K to reorder) ---"
         if len(header_text) > w:
             header_text = header_text[:w]
-        stdscr.addstr(11, 0, header_text, curses.A_DIM)
+        safe_addstr(11, 0, header_text, curses.A_DIM)
 
         # Draw providers list
         visible = order[scroll_offset:scroll_offset + list_height]
@@ -163,13 +177,15 @@ def run():
             if len(text) > w:
                 text = text[:w]
             attr = curses.A_REVERSE if scroll_offset + i + 6 == selected_idx else curses.A_NORMAL
-            stdscr.addstr(y, 0, text, attr)
+            safe_addstr(y, 0, text, attr)
 
         help_text = (
             "\u2191\u2193 navigate  \u2190\u2192 change active  "
             "SPACE toggle  Shift+J/K move  ENTER save  ESC cancel"
         )
-        stdscr.addstr(h - 1, max(0, (w - len(help_text)) // 2), help_text)
+        if len(help_text) > w:
+            help_text = help_text[:w]
+        safe_addstr(h - 1, max(0, (w - len(help_text)) // 2), help_text)
 
         stdscr.refresh()
 
@@ -204,7 +220,7 @@ def run():
                     "show_model": show_model,
                     "show_metric": show_metric,
                     "show_pct": final_show_pct,
-                    "show_icon": show_icon
+                    "icon_mode": state.ICON_MODES[icon_mode_idx]
                 }
                 state.save_selected(new_selected)
                 
@@ -221,9 +237,15 @@ def run():
             if selected_idx == 0:
                 selected_item_idx = (selected_item_idx - 1) % len(selectable_items)
                 selected_changed = True
+            elif selected_idx == 5:
+                icon_mode_idx = (icon_mode_idx - 1) % len(state.ICON_MODES)
+                selected_changed = True
         elif key in (curses.KEY_RIGHT,):
             if selected_idx == 0:
                 selected_item_idx = (selected_item_idx + 1) % len(selectable_items)
+                selected_changed = True
+            elif selected_idx == 5:
+                icon_mode_idx = (icon_mode_idx + 1) % len(state.ICON_MODES)
                 selected_changed = True
         elif key == ord(" "):
             if selected_idx == 0:
@@ -242,7 +264,7 @@ def run():
                 show_pct = not show_pct
                 selected_changed = True
             elif selected_idx == 5:
-                show_icon = not show_icon
+                icon_mode_idx = (icon_mode_idx + 1) % len(state.ICON_MODES)
                 selected_changed = True
             elif selected_idx >= 6:
                 prov = order[selected_idx - 6]
