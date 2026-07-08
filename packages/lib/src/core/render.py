@@ -1,5 +1,6 @@
 import re
 from . import fetch
+from . import state
 
 TYPE_NAMES = {
     "rolling": "Rolling Usage",
@@ -44,8 +45,8 @@ def get_selected_metric_text(latest_data, selected):
     show_metric = selected.get("show_metric", False)
     show_pct = selected.get("show_pct", True)
     
-    show_icon = selected.get("show_icon", True)
-    
+    show_icon = state.get_icon_mode(selected) == "bot"
+
     if not (show_provider or show_model or show_metric or show_pct):
         show_provider = True
         show_pct = True
@@ -97,8 +98,8 @@ def get_selected_metric_text(latest_data, selected):
 
 def get_selected_provider_name(latest_data, selected):
     p = _find_selected_provider(latest_data, selected)
-    show_icon = selected.get("show_icon", True) if selected else True
-    
+    show_icon = state.get_icon_mode(selected) == "bot"
+
     if not p:
         return ICON if show_icon else ""
         

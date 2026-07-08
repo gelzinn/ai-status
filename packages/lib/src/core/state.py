@@ -8,6 +8,16 @@ SELECTED_FILE = os.path.expanduser("~/.config/ai-status/selected.json")
 LOCK_FILE = "/tmp/ai-status-query.lock"
 PID_FILE = "/tmp/ai-status.pids"
 
+ICON_MODES = ["off", "bot", "logo"]
+
+def get_icon_mode(selected):
+    if not selected:
+        return "bot"
+    mode = selected.get("icon_mode")
+    if mode in ICON_MODES:
+        return mode
+    return "bot" if selected.get("show_icon", True) else "off"
+
 def load_cache():
     if os.path.exists(CACHE_FILE):
         try:

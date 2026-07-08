@@ -102,8 +102,13 @@ def cycle_metric():
 
 def print_logo():
     selected = state.load_selected() or {}
+
+    if state.get_icon_mode(selected) != "logo":
+        print("")
+        return
+
     provider = selected.get("provider", "antigravity")
-    
+
     shared_json_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "shared", "providers", "providers.json")
     try:
         import json, urllib.request
