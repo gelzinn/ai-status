@@ -7,6 +7,7 @@ import threading
 from . import state
 from . import fetch
 from . import render
+from . import logos
 from . import config as cfgmod
 
 should_update = True
@@ -56,7 +57,10 @@ def run():
             providers = cfgmod.enabled_order()
             if providers:
                 state.save_selected({"provider": providers[0], "idx": 0, "metric": "rolling"})
-    
+
+    # Seed the waybar logo (current.png) for the selected provider on startup.
+    logos.update_current(state.load_selected())
+
     last_auto_update = time.time()
     last_update_check = 0
     last_config_mtime = 0
@@ -103,13 +107,16 @@ def run():
                 last_auto_update = now
                 last_selected_mtime = selected_mtime
 
-            # Re-render on scroll (selected file changed, no re-fetch needed)
+            # Re-render on scroll (selected file changed, no re-fetch needed).
+            # Polled at a short interval so the text/percentage follow the logo
+            # (which the scroll command updates instantly) without a visible lag.
             elif selected_mtime != last_selected_mtime and not is_updating:
                 last_selected_mtime = selected_mtime
                 output = render.build_final_state(latest_data, selected)
                 print(json.dumps(output, ensure_ascii=False), flush=True)
-                
-            time.sleep(1)
+                logos.update_current(selected)
+
+            time.sleep(0.1)
             if now - last_auto_update >= 300:
                 should_update = True
                 

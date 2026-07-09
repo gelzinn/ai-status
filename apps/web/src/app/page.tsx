@@ -18,6 +18,11 @@ import { ArrowRight } from "lucide-react";
 
 import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
 import { REPO_API_URL, REPO_URL } from "@/lib/env";
+import {
+  WAYBAR_CUSTOM_MODULE,
+  WAYBAR_LOGO_MODULE,
+  WAYBAR_LAYOUT,
+} from "@/lib/waybar-config";
 
 export default async function Homepage() {
   let latestVersion = "v1.3.0";
@@ -49,31 +54,6 @@ export default async function Homepage() {
     console.error("Failed to fetch github release:", e);
   }
 
-  const waybarConfig = `"custom/ai-status": {
-    "format": "{}",
-    "return-type": "json",
-    "exec": "~/.local/bin/ai-status daemon",
-    "on-click": "~/.local/bin/ai-status refresh",
-    "on-click-right": "~/.local/bin/ai-status config",
-    "on-scroll-up": "~/.local/bin/ai-status scroll-up",
-    "on-scroll-down": "~/.local/bin/ai-status scroll-down",
-    "on-click-middle": "~/.local/bin/ai-status cycle-metric",
-    "tooltip": true
-}`;
-
-  const waybarModule = `{
-    // ...
-    "modules-right": [
-        "network",
-        "cpu",
-        "memory",
-        "custom/ai-status",
-        "clock",
-        "tray"
-    ],
-    // ...
-}`;
-
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-8 sm:gap-16 p-6 sm:py-16">
       <Header />
@@ -93,12 +73,46 @@ export default async function Homepage() {
               </p>
             </div>
             <HighlightedCodeBlock
-              code={waybarConfig}
+              code={WAYBAR_CUSTOM_MODULE}
               lang="json"
               label="~/.config/waybar/config.jsonc"
             />
             <p className="text-sm text-muted-foreground">
-              Then, include{" "}
+              To display the active provider's logo next to the text, add the
+              image module as well. The one-command install with{" "}
+              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
+                --icon-mode logo
+              </code>{" "}
+              sets all of this up for you. To do it by hand: use an absolute{" "}
+              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
+                path
+              </code>{" "}
+              (Waybar does not expand{" "}
+              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
+                ~
+              </code>
+              ), install an SVG rasterizer (imagemagick or librsvg), and enable
+              logo mode in the config TUI (right-click the module, set{" "}
+              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
+                Provider Icon
+              </code>{" "}
+              to{" "}
+              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
+                Provider Logo
+              </code>
+              ):
+            </p>
+            <HighlightedCodeBlock
+              code={WAYBAR_LOGO_MODULE}
+              lang="json"
+              label="~/.config/waybar/config.jsonc"
+            />
+            <p className="text-sm text-muted-foreground">
+              Then, include both{" "}
+              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
+                "image#ai-status"
+              </code>{" "}
+              and{" "}
               <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
                 "custom/ai-status"
               </code>{" "}
@@ -109,7 +123,7 @@ export default async function Homepage() {
               ):
             </p>
             <CodeBlock
-              code={waybarModule}
+              code={WAYBAR_LAYOUT}
               label="~/.config/waybar/config.jsonc"
             >
               <span className="text-muted-foreground/40">{"{\n"}</span>
@@ -117,6 +131,12 @@ export default async function Homepage() {
               <span className="text-muted-foreground/40">
                 {'    "modules-right": [\n'}
               </span>
+              {"        "}
+              <span className="text-[#ffcfa3]">"image#ai-status"</span>
+              <span className="text-muted-foreground/40">{",\n"}</span>
+              {"        "}
+              <span className="text-[#ffcfa3]">"custom/ai-status"</span>
+              <span className="text-muted-foreground/40">{",\n"}</span>
               <span className="text-muted-foreground/40">
                 {'        "network",\n'}
               </span>
@@ -126,9 +146,6 @@ export default async function Homepage() {
               <span className="text-muted-foreground/40">
                 {'        "memory",\n'}
               </span>
-              {"        "}
-              <span className="text-[#ffcfa3]">"custom/ai-status"</span>
-              <span className="text-muted-foreground/40">{",\n"}</span>
               <span className="text-muted-foreground/40">
                 {'        "clock",\n'}
               </span>
@@ -139,6 +156,13 @@ export default async function Homepage() {
               <span className="text-muted-foreground/30">{"    // ...\n"}</span>
               <span className="text-muted-foreground/40">{"}"}</span>
             </CodeBlock>
+
+            <Link
+              href="/llms.txt"
+              className="inline-flex items-center gap-1 text-sm font-medium text-foreground hover:text-muted-foreground transition-colors w-fit mt-1"
+            >
+              Copy-paste install guide for LLMs <ArrowRight className="size-3.5" />
+            </Link>
           </section>
 
           <section className="flex flex-col gap-8 relative">

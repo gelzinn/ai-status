@@ -1,9 +1,9 @@
 {
-  "opencode": { "name": "OpenCode", "logo": "https://svgl.app/library/opencode-dark.svg" },
-  "copilot": { "name": "Copilot", "logo": "https://svgl.app/library/copilot_dark.svg" },
   "claude": { "name": "Claude", "logo": "https://svgl.app/library/claude-ai-icon.svg" },
   "codex": { "name": "Codex", "logo": "https://svgl.app/library/codex_dark.svg" },
+  "opencode": { "name": "OpenCode", "logo": "https://svgl.app/library/opencode-dark.svg" },
   "antigravity": { "name": "Antigravity", "logo": "https://svgl.app/library/antigravity.svg" },
+  "copilot": { "name": "Copilot", "logo": "https://svgl.app/library/copilot_dark.svg" },
   "zai": { "name": "Z.AI", "logo": "https://z-cdn.chatglm.cn/z-ai/static/logo.svg" },
   "kiro": { "name": "Kiro", "logo": "https://www.google.com/s2/favicons?sz=64&domain=kiro.dev" }
 }

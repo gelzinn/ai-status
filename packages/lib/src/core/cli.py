@@ -4,6 +4,7 @@ import subprocess
 from . import daemon
 from . import state
 from . import tui
+from . import logos
 from . import config as cfgmod
 
 TERMINALS = ["foot", "alacritty", "kitty", "ghostty", "wezterm", "xterm"]
@@ -55,8 +56,9 @@ def _scroll(direction):
     selected["provider"] = new_dir
     selected["idx"] = new_idx
     selected["metric"] = new_metric
-    
+
     state.save_selected(selected)
+    logos.update_current(selected)
 
 def scroll_up():
     _scroll(-1)
@@ -101,39 +103,20 @@ def cycle_metric():
     state.save_selected(selected)
 
 def print_logo():
-    selected = state.load_selected() or {}
+    """Seed ``current.png`` for the selected provider and print its path.
 
+    The waybar image module reads a static ``path`` (``current.png``); it is
+    kept in sync by scroll/refresh + a reload signal (see core/logos.py). This
+    command exists so the install and a manual refresh can seed that file.
+    """
+    selected = state.load_selected() or {}
     if state.get_icon_mode(selected) != "logo":
         print("")
         return
-
-    provider = selected.get("provider", "antigravity")
-
-    shared_json_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "shared", "providers", "providers.json")
-    try:
-        import json, urllib.request
-        with open(shared_json_path, 'r') as f:
-            providers = json.load(f)
-        
-        logo_url = providers.get(provider, {}).get("logo")
-        if not logo_url:
-            logo_url = providers.get("antigravity", {}).get("logo")
-            
-        if logo_url:
-            cache_dir = os.path.expanduser("~/.cache/ai-status/logos")
-            os.makedirs(cache_dir, exist_ok=True)
-            # Basic extension extraction, defaulting to svg for google favicons etc
-            ext = logo_url.split(".")[-1]
-            if len(ext) > 4 or "?" in ext: ext = "svg"
-            local_path = os.path.join(cache_dir, f"{provider}.{ext}")
-            
-            if not os.path.exists(local_path):
-                req = urllib.request.Request(logo_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=5) as response, open(local_path, 'wb') as out_file:
-                    out_file.write(response.read())
-                    
-            print(local_path)
-    except Exception as e:
+    logos.update_current(selected, notify=False)
+    if os.path.exists(logos.CURRENT_PNG):
+        print(logos.CURRENT_PNG)
+    else:
         print("")
 
 def main():
