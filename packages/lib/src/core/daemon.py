@@ -14,12 +14,40 @@ should_update = True
 is_updating = False
 latest_data = []
 
+# Streaming fetch state: update_task fills these per provider as results arrive,
+# and the render loop reads them so each provider shows its own loading state and
+# the selected one appears the moment it's ready (not after the slowest one).
+_results_by_dir = {}
+_pending = set()
+
+
+def _group_by_dir(data):
+    groups = {}
+    for p in (data or []):
+        groups.setdefault(p.get("_dir"), []).append(p)
+    return groups
+
+
+def _ordered_merged(order):
+    out = []
+    for name in order:
+        entries = _results_by_dir.get(name)
+        if entries:
+            out.extend(entries)
+    return out
+
+
 def update_task():
     global latest_data, is_updating
     try:
         if state.acquire_lock():
             try:
-                data = fetch.fetch_all_data()
+                def on_result(dir_name, providers):
+                    if providers:
+                        _results_by_dir[dir_name] = providers
+                    _pending.discard(dir_name)
+
+                data = fetch.fetch_all_data(on_result=on_result)
                 if data:
                     latest_data = data
                     state.save_cache(data)
@@ -35,6 +63,7 @@ def update_task():
     except Exception:
         pass
     finally:
+        _pending.clear()
         is_updating = False
 
 def handle_signal(signum, frame):
@@ -42,8 +71,8 @@ def handle_signal(signum, frame):
     should_update = True
 
 def run():
-    global should_update, is_updating, latest_data
-    
+    global should_update, is_updating, latest_data, _results_by_dir, _pending
+
     state.register_pid()
     signal.signal(signal.SIGUSR1, handle_signal)
     latest_data = state.load_cache()
@@ -91,17 +120,27 @@ def run():
             if should_update and not is_updating:
                 should_update = False
                 is_updating = True
-                
+
+                # Seed streaming state: start from the cached data (so each
+                # provider animates its previous value) and mark every enabled
+                # provider pending until its fresh result arrives.
+                order = cfgmod.enabled_order()
+                _results_by_dir = _group_by_dir(latest_data)
+                _pending = set(order)
+
                 t = threading.Thread(target=update_task)
                 t.start()
-                
+
                 frame = 0
                 while is_updating:
-                    output = render.build_loading_state(latest_data, frame, selected)
+                    merged = _ordered_merged(order)
+                    output = render.build_loading_state(
+                        merged, frame, selected, pending=_pending
+                    )
                     print(json.dumps(output, ensure_ascii=False), flush=True)
                     frame += 1
                     time.sleep(0.15)
-                    
+
                 output = render.build_final_state(latest_data, selected)
                 print(json.dumps(output, ensure_ascii=False), flush=True)
                 last_auto_update = now

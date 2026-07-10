@@ -149,7 +149,7 @@ def get_version_info():
         "has_update": _latest_version is not None and _latest_version != __version__,
     }
 
-def fetch_all_data():
+def fetch_all_data(on_result=None):
     repo_dir = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "providers"
     )
@@ -177,27 +177,31 @@ def fetch_all_data():
         if name in name_to_dir:
             ordered_dirs.append(name_to_dir[name])
 
+    dir_to_results = {}
     with ThreadPoolExecutor(max_workers=max(1, len(ordered_dirs))) as executor:
         future_to_dir = {executor.submit(run_provider, d): d for d in ordered_dirs}
-
-    dir_to_results = {}
-    for future in as_completed(future_to_dir):
-        d = future_to_dir[future]
-        try:
-            data = future.result(timeout=18)
-            if data and "error" not in data:
-                providers = data if isinstance(data, list) else [data]
-                dir_to_results[d] = providers
-        except Exception:
-            pass
+        for future in as_completed(future_to_dir):
+            d = future_to_dir[future]
+            dir_name = os.path.basename(d)
+            providers = None
+            try:
+                data = future.result(timeout=18)
+                if data and "error" not in data:
+                    providers = data if isinstance(data, list) else [data]
+                    for idx, p in enumerate(providers):
+                        if isinstance(p, dict):
+                            p["_dir"] = dir_name
+                            p["_idx"] = idx
+                    dir_to_results[d] = providers
+            except Exception:
+                providers = None
+            # Report each provider the moment it finishes so callers can render
+            # incrementally instead of waiting for the slowest one.
+            if on_result:
+                on_result(dir_name, providers)
 
     results = []
     for d in ordered_dirs:
         if d in dir_to_results:
-            dir_name = os.path.basename(d)
-            for idx, p in enumerate(dir_to_results[d]):
-                if isinstance(p, dict):
-                    p["_dir"] = dir_name
-                    p["_idx"] = idx
             results.extend(dir_to_results[d])
     return results
