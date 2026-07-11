@@ -71,22 +71,46 @@ fi
 # Ensure the parent exists before cp/clone — a minimal $HOME may lack ~/.local/share.
 mkdir -p "$(dirname "$INSTALL_DIR")"
 
-if [ -d "$INSTALL_DIR/.git" ]; then
-    echo -e "  ${C_DIM}> updating...${C_RESET}"
-    git -C "$INSTALL_DIR" pull --ff-only 2>&1 | while IFS= read -r line; do echo -e "  ${C_DIM}${line}${C_RESET}"; done
-    [ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
-elif [ -d "$INSTALL_DIR" ]; then
+# Never nuke the directory we're running from (an installed copy) or an empty
+# path — both would be destructive with the rm -rf inside lean_extract.
+RUNNING_FROM_INSTALL=false
+case "$SCRIPT_DIR/" in "$INSTALL_DIR"/*) RUNNING_FROM_INSTALL=true ;; esac
+
+# Install/update by extracting ONLY the lib (packages/lib + packages/shared)
+# into INSTALL_DIR. The module needs nothing else from the monorepo, so
+# apps/web, node_modules and build output never land on the user's disk. A
+# re-run is also the update — and the cleanup for older installs that copied
+# the whole 800M+ repo (including untracked node_modules a git pull can't drop).
+lean_extract() {
+    local src="$1"
+    [ -d "$src/packages/lib" ] || { echo -e "  ${C_DIM}error: packages/lib not found in $src${C_RESET}" >&2; exit 1; }
+    [ -n "$INSTALL_DIR" ] || { echo -e "  ${C_DIM}error: INSTALL_DIR is empty, refusing to remove${C_RESET}" >&2; exit 1; }
     rm -rf "$INSTALL_DIR"
-    cp -r "$SCRIPT_DIR" "$INSTALL_DIR"
-elif [ "$SCRIPT_DIR" = "$INSTALL_DIR" ]; then
-    :
-elif git -C "$SCRIPT_DIR" rev-parse --git-dir > /dev/null 2>&1; then
-    REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-    cp -r "$REPO_ROOT" "$INSTALL_DIR"
-else
+    mkdir -p "$INSTALL_DIR/packages"
+    cp -r "$src/packages/lib" "$INSTALL_DIR/packages/lib"
+    cp -r "$src/packages/shared" "$INSTALL_DIR/packages/shared"
+}
+
+if [ "$RUNNING_FROM_INSTALL" = true ]; then
+    echo -e "  ${C_DIM}> running from the installed copy — nothing to extract${C_RESET}"
+elif [ "$USE_LOCAL_LIB" = true ]; then
+    # Dev checkout: extract straight from the local tree so local edits ship.
     echo -e "  ${C_DIM}> installing...${C_RESET}"
-    git clone "$REPO_URL" "$INSTALL_DIR" 2>&1 | while IFS= read -r line; do echo -e "  ${C_DIM}${line}${C_RESET}"; done
+    REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+    lean_extract "$REPO_ROOT"
+else
+    # curl | bash: shallow-clone to a temp dir, extract the lib, drop the clone.
+    echo -e "  ${C_DIM}> installing...${C_RESET}"
+    TMP_CLONE="$(mktemp -d)"
+    trap 'rm -rf "$TMP_CLONE"' EXIT
+    git clone --depth 1 "$REPO_URL" "$TMP_CLONE/repo" 2>&1 | while IFS= read -r line; do echo -e "  ${C_DIM}${line}${C_RESET}"; done
+    # Validate the clone BEFORE lean_extract's rm -rf runs: a failed/offline
+    # clone exits here with the existing install untouched. Never reorder the
+    # nuke ahead of a proven-present source.
     [ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
+    lean_extract "$TMP_CLONE/repo"
+    rm -rf "$TMP_CLONE"
+    trap - EXIT
 fi
 
 # Check requirements
