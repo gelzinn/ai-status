@@ -44,7 +44,7 @@ Uses the Codex access token and account ID from `~/.codex/auth.json` to call Ope
 |---|---|
 | **Auth** | `~/.codex/auth.json` with valid `access_token` and `account_id` |
 | **Endpoint** | `https://chatgpt.com/backend-api/wham/usage` |
-| **Metrics** | Plan type, usage percentage, and reset timer |
+| **Metrics** | Plan type; a 5-hour and a weekly usage window on paid plans (a single monthly window on free), each with a reset timer |
 
 ### Copilot
 

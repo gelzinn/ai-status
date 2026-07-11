@@ -78,21 +78,23 @@ export default async function Homepage() {
               label="~/.config/waybar/config.jsonc"
             />
             <p className="text-sm text-muted-foreground">
-              To display the active provider's logo next to the text, add the
-              image module as well. The one-command install with{" "}
+              To also show the active provider's logo — and get the same
+              breakdown when you hover it — add the image module. The one-command
+              install with{" "}
               <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
                 --icon-mode logo
               </code>{" "}
-              sets all of this up for you. To do it by hand: use an absolute{" "}
+              sets this up for you. To do it by hand: the{" "}
               <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
-                path
+                exec
               </code>{" "}
-              (Waybar does not expand{" "}
+              prints the logo path and its tooltip,{" "}
               <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
-                ~
-              </code>
-              ), install an SVG rasterizer (imagemagick or librsvg), and enable
-              logo mode in the config TUI (right-click the module, set{" "}
+                interval
+              </code>{" "}
+              keeps it refreshed, and you need an SVG rasterizer (imagemagick or
+              librsvg). Then enable logo mode in the config TUI (right-click the
+              module, set{" "}
               <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
                 Provider Icon
               </code>{" "}

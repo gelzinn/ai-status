@@ -21,7 +21,7 @@ Monitor AI provider usage limits in your Waybar — across Claude, Copilot, Code
 |---|---|---|
 | Antigravity | agy CLI (PTY) | Gemini and Claude/GPT rolling + weekly usage |
 | Claude | OpenCode session tokens | Usage metrics |
-| Codex | .codex/auth.json API | Usage percentage + reset timer |
+| Codex | .codex/auth.json API | 5-hour and weekly usage limits |
 | Copilot | GitHub Copilot token | Chat and completions usage |
 | Kiro | Session cookie scraping | Usage percentage + reset timer |
 | OpenCode | OpenCode Go binary | Rolling, weekly, and monthly usage |
@@ -56,7 +56,9 @@ Then add the module to your Waybar config:
 }
 ```
 
-The status bar shows the usage percentage of the active provider. Scroll up/down to switch providers, middle-click to cycle metric types (rolling → weekly → monthly). Right-click opens the provider configuration TUI -- toggle providers on or off and reorder them. Hover to see all providers with full details (the active one is marked with →).
+The status bar shows the usage percentage of the active provider. Scroll up/down to switch providers, middle-click to cycle through the active provider's limits (rolling, weekly, monthly — including per-model ones, like Claude's Fable weekly). Right-click opens the provider configuration TUI -- toggle providers on or off and reorder them. Hover to see all providers with full details (the active one is marked with →).
+
+**Want the provider's logo too?** Run the installer with `--icon-mode logo`, or add the `image#ai-status` module manually (see [INSTALL.md](packages/lib/INSTALL.md)). The logo sits next to the text and shows the same tooltip on hover.
 
 ## How It Works
 
