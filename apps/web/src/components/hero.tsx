@@ -1,10 +1,10 @@
 import { HighlightedCodeBlock } from "@/components/code-highlight";
 import { ArrowRightIcon } from "lucide-react";
-import { REPO_URL, REPO_RAW_INSTALL_URL } from "@/lib/env";
+import { site } from "@/lib/env";
 import { InstallTabs } from "@/components/install-tabs";
 
 export function Hero() {
-	const installCmd = `curl -fsSL ${REPO_RAW_INSTALL_URL} | bash`;
+	const installCmd = `curl -fsSL ${site.installUrl} | bash`;
 	return (
 		<section className="flex flex-col gap-8">
 			<h1 className="font-heading max-w-2xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl motion-safe:animate-fade-up">

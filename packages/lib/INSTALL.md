@@ -1,40 +1,68 @@
 # Installing AI Status
 
-## ⚠️ Upgrading from v0.4.x (omarchy-ai-status)?
-The project has been renamed to **AI Status**. When you run the install script below, your existing configurations will be migrated automatically. However, **you must update your Waybar config** to use the new `ai-status` command instead of `waybar-ai-status`.
+## One-command install (recommended for LLMs)
 
-## Quick Install
+Copy and run this single command. It installs everything and configures Waybar automatically with sensible defaults (provider logo, name, model, and percentage shown):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gelzinn/ai-status/main/packages/lib/install.sh | bash -s -- \
+  --icon-mode logo \
+  --show-provider true \
+  --show-model true \
+  --show-metric false \
+  --show-pct true \
+  --configure-waybar true \
+  --no-interactive
+```
+
+If you prefer no logo (text-only), swap `--icon-mode logo` for `--icon-mode off`. All preferences can be changed later via the config TUI (right-click the module).
+
+## Interactive install
+
+Prefer to choose each option manually? Run the wizard:
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/gelzinn/ai-status/main/packages/lib/install.sh)
 ```
 
-## From a Local Clone
+Arrow keys toggle Yes/No, Enter confirms. On first run the wizard asks:
 
-```bash
-git clone https://github.com/gelzinn/ai-status.git
-cd ai-status
-./packages/lib/install.sh
-```
+1. Show provider logo as an image?
+2. Show provider name? (e.g. "Claude")
+3. Show model/plan name? (e.g. "(Pro)")
+4. Show metric type? (e.g. "Rolling Usage")
+5. Show percentage? (e.g. "4%")
+6. Add modules to Waybar config automatically?
 
-## What the Install Script Does
+## Manual Waybar config
 
-| Step | Action |
-|---|---|
-| 1 | Clones (or pulls) the repository to `~/.local/share/ai-status/` |
-| 2 | Checks system dependencies (Linux, Waybar, python3, jq, curl, git) |
-| 3 | Creates a symlink at `~/.local/bin/ai-status` |
-| 4 | Restarts Waybar to load the new module |
-
-## After Installing
-
-Add the module to your Waybar config:
+If you skipped automatic Waybar setup, add these blocks to `~/.config/waybar/config.jsonc`:
 
 ```jsonc
 "custom/ai-status": {
-    "format": "{}",
-    "return-type": "json",
     "exec": "~/.local/bin/ai-status daemon",
+    "restart-interval": 1,
+    "return-type": "json",
+    "format": "{}",
+    "tooltip": true,
+    "on-click": "~/.local/bin/ai-status refresh",
+    "on-click-right": "~/.local/bin/ai-status config",
+    "on-scroll-up": "~/.local/bin/ai-status scroll-up",
+    "on-scroll-down": "~/.local/bin/ai-status scroll-down",
+    "on-click-middle": "~/.local/bin/ai-status cycle-metric"
+}
+```
+
+To also show the provider logo (with the same tooltip on hover), add this image module.
+
+> The one-command install with `--icon-mode logo` sets all of this up for you. The manual steps below are only needed if you skipped automatic Waybar setup.
+
+```jsonc
+"image#ai-status": {
+    "exec": "~/.local/bin/ai-status logo",
+    "size": 14,
+    "interval": 3,
+    "signal": 11,
     "on-click": "~/.local/bin/ai-status refresh",
     "on-click-right": "~/.local/bin/ai-status config",
     "on-scroll-up": "~/.local/bin/ai-status scroll-up",
@@ -44,15 +72,56 @@ Add the module to your Waybar config:
 }
 ```
 
+Notes for the logo module:
+
+- `ai-status logo` prints the logo PNG path on line 1 and the tooltip on line 2, so hovering the logo shows the same breakdown (loading animation included) as the text module.
+- `"interval"` is required for the image to render; `"signal": 11` refreshes it instantly on provider/data changes.
+- Rendering the logo needs an SVG rasterizer (`imagemagick` or `librsvg`); logos are rasterised to opaque RGB PNGs. Without a rasterizer the logo is simply skipped.
+
+Include both in your layout section, with `image#ai-status` before `custom/ai-status`:
+
+```jsonc
+"modules-right": [
+    "image#ai-status",
+    "custom/ai-status",
+    "network",
+    "clock",
+    "tray"
+]
+```
+
+Then enable logo mode: right-click the module, open the config TUI, set **Provider Icon** to **Provider Logo**.
+
+## Reverting
+
+When you let the installer configure Waybar automatically, it backs up your existing config to `~/.config/waybar/config.jsonc.ai-status.bak` **before** touching anything. If something looks off, restore it with:
+
+```bash
+ai-status revert
+```
+
+This copies the backup back (saving the current one as `.pre-revert` first) and reloads Waybar. If you added the modules by hand, there's no backup — just remove them yourself.
+
+## Usage
+
 | Action | Behavior |
 |---|---|
 | Left-click | Refresh data immediately |
 | Right-click | Open provider configuration TUI |
-| Scroll up/down | Switch between providers in the status text |
-| Middle-click | Cycle metric type (rolling → weekly → monthly) |
+| Scroll up/down | Switch between providers |
+| Middle-click | Cycle through the provider's limits (rolling → weekly → monthly, and per-model ones like Claude's Fable weekly) |
 
-The status text shows the usage percentage of the selected provider. Hover to see all providers in the tooltip (the active one is marked with →).
+The config TUI lets you enable/disable providers, reorder with Shift+J/K, toggle display settings, and switch icon modes (bot, logo, off).
 
-## Updating
+## CLI flags reference
 
-Run the same command again -- it detects the existing installation and pulls the latest changes, then restarts Waybar.
+| Flag | Values |
+|---|---|
+| `--icon-mode` | `logo`, `off`, `bot` |
+| `--show-provider` | `true`, `false` |
+| `--show-model` | `true`, `false` |
+| `--show-metric` | `true`, `false` |
+| `--show-pct` | `true`, `false` |
+| `--configure-waybar` | `true`, `false` |
+| `--no-interactive` | skip wizard |
+| `--skip-check` | skip dependency check |

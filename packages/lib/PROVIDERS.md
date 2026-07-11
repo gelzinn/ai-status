@@ -4,15 +4,15 @@
 
 ## Provider Overview
 
-| Provider | Auth Source | Key File |
-|---|---|---|
-| Antigravity | agy CLI session | agy login state (handled by Antigravity CLI) |
-| Claude | Claude Code OAuth (fallback: OpenCode) | `~/.claude/.credentials.json`, `~/.local/share/opencode/auth.json` |
-| Codex | Codex auth token | `~/.codex/auth.json` |
-| Copilot | GitHub Copilot OAuth | `~/.config/github-copilot/host.json` |
-| Kiro | Session cookie | Browser/extension session export |
-| OpenCode | OpenCode auth | `~/.local/share/opencode/auth.json` |
-| Z.AI | Bearer token | `~/.config/z.ai/` config files |
+| Provider | Tracks | Auth Source | Key File |
+|---|---|---|---|
+| Antigravity | Weekly + 5-hour limits per model (Gemini, Claude/GPT) | agy CLI session | agy login state (handled by Antigravity CLI) |
+| Claude | Session (5h) + weekly, including per-model weekly limits | Claude Code OAuth (fallback: OpenCode) | `~/.claude/.credentials.json`, `~/.local/share/opencode/auth.json` |
+| Codex | 5-hour + weekly (a single monthly window on free plans) | Codex auth token | `~/.codex/auth.json` |
+| Copilot | Chat + completions usage | GitHub Copilot OAuth | `~/.config/github-copilot/host.json` |
+| Kiro | Usage percentage + reset timer | Session cookie | Browser/extension session export |
+| OpenCode | Rolling, weekly, monthly usage | OpenCode auth | `~/.local/share/opencode/auth.json` |
+| Z.AI | Rolling, weekly, monthly usage | Bearer token | `~/.config/z.ai/` config files |
 
 ## Per-Provider Details
 
@@ -44,7 +44,7 @@ Uses the Codex access token and account ID from `~/.codex/auth.json` to call Ope
 |---|---|
 | **Auth** | `~/.codex/auth.json` with valid `access_token` and `account_id` |
 | **Endpoint** | `https://chatgpt.com/backend-api/wham/usage` |
-| **Metrics** | Plan type, usage percentage, and reset timer |
+| **Metrics** | Plan type; a 5-hour and a weekly usage window on paid plans (a single monthly window on free), each with a reset timer |
 
 ### Copilot
 
@@ -116,10 +116,14 @@ To add a new provider, create a new directory under `src/providers/` with these 
 
 ## Troubleshooting
 
-If a provider shows "API unreachable" or 0%:
+If a provider shows **"API unreachable"**, **0%**, or nothing at all:
 
-1. Check that the relevant auth file exists and contains valid tokens
-2. Run the provider's `query.sh` directly to see raw API output
-3. Verify the `parse.py` can handle the raw output format
+1. **Check the auth file.** Confirm the key file from the table above exists and holds a valid, non-expired token. The most common cause is an expired login — re-authenticate with that provider's own CLI or app.
+2. **Run the query by hand.** Each provider has a `query.sh` you can run directly to see the raw API response:
+   ```bash
+   bash ~/.local/share/ai-status/packages/lib/src/providers/<name>/query.sh
+   ```
+3. **Read the daemon log.** Errors are written to `/tmp/ai-status-error.log`.
+4. **Refresh without restarting.** After fixing credentials, left-click the module (or run `ai-status refresh`) — no need to restart Waybar.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development details.

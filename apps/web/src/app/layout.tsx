@@ -5,11 +5,11 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
-import { PROJECT_NAME, PROJECT_DESCRIPTION } from "@/lib/env";
+import { site } from "@/lib/env";
 
 import "./globals.css";
 
-const description = PROJECT_DESCRIPTION;
+const description = site.description;
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -17,15 +17,15 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: `${PROJECT_NAME} | Waybar Module`,
+  title: `${site.name} | Waybar Module`,
   description,
   icons: {
     icon: "/favicon.svg",
   },
   openGraph: {
-    title: PROJECT_NAME,
+    title: site.name,
     description,
-    siteName: PROJECT_NAME,
+    siteName: site.name,
     type: "website",
   },
   twitter: {

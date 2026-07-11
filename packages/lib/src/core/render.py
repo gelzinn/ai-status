@@ -1,4 +1,5 @@
 import re
+import math
 from . import fetch
 from . import state
 
@@ -17,6 +18,28 @@ BAR_LINE_WIDTH = 34
 
 ICON = "\U000f06a9"
 
+DIM_INACTIVE = 55   # non-selected providers and inactive metrics
+DIM_RESET = 60      # reset lines
+
+
+def _dim(text, alpha):
+    return f"<span alpha='{alpha}%'>{text}</span>"
+
+
+def metric_key(metric):
+    """Stable per-metric id within a provider. Normally just the type, but when
+    a provider exposes two metrics of the same type (e.g. Claude's general vs
+    Fable weekly limit) the label prefix in ``detail`` disambiguates them so
+    each can be selected independently."""
+    t = metric.get("type", "generic")
+    detail = metric.get("detail") or ""
+    if " · " in detail:
+        label = detail.split(" · ", 1)[0].strip()
+        if label:
+            return f"{t}:{label}"
+    return t
+
+
 def _find_selected_provider(latest_data, selected):
     if not selected or not latest_data:
         return None
@@ -31,21 +54,22 @@ def _find_selected_provider(latest_data, selected):
     return None
 
 
-def get_selected_metric_text(latest_data, selected):
+def get_selected_metric_text(latest_data, selected, spinner=None):
     p = _find_selected_provider(latest_data, selected)
+    show_icon = state.get_icon_mode(selected) == "bot"
     if not p:
+        if spinner is not None:
+            return f"{ICON} {spinner}" if show_icon else spinner
         return ICON
-    
+
     provider_full_name = p.get("provider", "")
-    metric_type = selected.get("metric", "rolling")
+    selected_key = selected.get("metric", "rolling")
     metrics = p.get("metrics", [])
-    
+
     show_provider = selected.get("show_provider", True)
     show_model = selected.get("show_model", True)
     show_metric = selected.get("show_metric", False)
     show_pct = selected.get("show_pct", True)
-    
-    show_icon = state.get_icon_mode(selected) == "bot"
 
     if not (show_provider or show_model or show_metric or show_pct):
         show_provider = True
@@ -61,16 +85,21 @@ def get_selected_metric_text(latest_data, selected):
             
     m = None
     for item in metrics:
-        if item.get("type") == metric_type:
+        if metric_key(item) == selected_key:
             m = item
             break
     if not m and metrics:
         m = metrics[0]
-        metric_type = m.get("type", "rolling")
-        
-    metric_name = TYPE_NAMES.get(metric_type, "Usage")
-    
-    if m:
+
+    metric_name = TYPE_NAMES.get(m.get("type", "generic"), "Usage") if m else "Usage"
+
+    if spinner is not None:
+        # While loading the percentage isn't known yet — show the spinner in
+        # its place, forced on so the loading indicator stays visible even when
+        # the percentage is configured off.
+        pct_str = spinner
+        show_pct = True
+    elif m:
         pct = float(m.get("percentage", 0.0))
         pct_str = f"{pct:.0f}%"
     else:
@@ -96,20 +125,6 @@ def get_selected_metric_text(latest_data, selected):
         return text
 
 
-def get_selected_provider_name(latest_data, selected):
-    p = _find_selected_provider(latest_data, selected)
-    show_icon = state.get_icon_mode(selected) == "bot"
-
-    if not p:
-        return ICON if show_icon else ""
-        
-    text = p.get('provider', '')
-    if show_icon:
-        return f"{ICON}\u2003{text}" if text else ICON
-    else:
-        return text
-
-
 def make_progress_bar(percentage, width=25):
     percentage = max(0.0, min(100.0, percentage))
     filled_len = int(round(width * percentage / 100))
@@ -123,66 +138,34 @@ def make_progress_bar(percentage, width=25):
     return f"[{bar}] {percentage:.0f}%"
 
 
-def make_loading_progress_bar(percentage, frame_index, width=25):
-    percentage = max(0.0, min(100.0, percentage))
-    filled_len = int(round(width * percentage / 100))
-
+def _loading_bar_body(frame_index, width=25):
+    """A soft highlight sweeping left -> right over a dim track — the terminal
+    analogue of the replica's shimmer gradient. The travel extends far enough
+    past both edges that the highlight fully leaves one side before re-entering
+    the other, so the loop reads as a continuous sweep rather than a reset.
+    Returns the bracketed bar string (no trailing value)."""
+    sigma = width / 4.5                          # highlight half-width
+    margin = int(round(3.2 * sigma))             # clear the bar before wrapping
+    span = width + 2 * margin
+    center = (frame_index * 3) % span - margin   # -margin .. width-1+margin
+    base, peak = 0.10, 1.0
     bar_chars = []
-    sweep_range = filled_len if filled_len > 0 else width
-    pulse_center = frame_index % (sweep_range + 6) - 3
-
     for i in range(width):
-        if i < filled_len:
-            dist = abs(i - pulse_center)
-            if dist == 0:
-                alpha = "100%"
-            elif dist == 1:
-                alpha = "85%"
-            elif dist == 2:
-                alpha = "60%"
-            else:
-                alpha = "40%"
-            bar_chars.append(f"<span alpha='{alpha}'>█</span>")
-        else:
-            if filled_len == 0:
-                dist = abs(i - pulse_center)
-                if dist == 0:
-                    alpha = "80%"
-                elif dist == 1:
-                    alpha = "50%"
-                elif dist == 2:
-                    alpha = "30%"
-                else:
-                    alpha = "15%"
-            else:
-                alpha = "15%"
-            bar_chars.append(f"<span alpha='{alpha}'>█</span>")
+        d = i - center
+        intensity = math.exp(-(d * d) / (2 * sigma * sigma))
+        alpha = int(round((base + (peak - base) * intensity) * 100))
+        bar_chars.append(f"<span alpha='{alpha}%'>█</span>")
+    return "[" + "".join(bar_chars) + "]"
 
-    bar = "".join(bar_chars)
-    return f"[{bar}] {percentage:.0f}%"
+
+def make_shimmer_bar(frame_index, spinner, width=25):
+    # Loading bar: an empty shimmer track with the spinner where the percentage
+    # would be — mirrors the replica (hidden fill + shimmer, spinner for number).
+    return f"{_loading_bar_body(frame_index, width)} {spinner}"
 
 
 def make_empty_loading_bar(frame_index, width=25):
-    pos = frame_index % (2 * (width - 4))
-    if pos >= width - 4:
-        pos = (width - 4) - (pos - (width - 4))
-
-    bar_chars = []
-    for i in range(width):
-        dist = abs(i - (pos + 1))
-        if dist == 0:
-            alpha = "90%"
-        elif dist == 1:
-            alpha = "65%"
-        elif dist == 2:
-            alpha = "40%"
-        elif dist == 3:
-            alpha = "25%"
-        else:
-            alpha = "12%"
-        bar_chars.append(f"<span alpha='{alpha}'>█</span>")
-    bar = "".join(bar_chars)
-    return f"[{bar}] Loading..."
+    return f"{_loading_bar_body(frame_index, width)} Loading..."
 
 
 def format_reset_time(seconds, mtype):
@@ -217,65 +200,91 @@ def format_provider_block(
         and provider_data.get("_idx") == selected_idx
     )
     prefix = "→ " if is_selected else "  "
-    line = f"{prefix}{provider}"
     if provider_data.get("_error"):
         err_icon = '<span foreground="#ef4444"> ●</span>'
         pad = max(1, BAR_LINE_WIDTH - len(prefix) - len(provider) - 2)
-        line = f"{prefix}{provider}{' ' * pad}{err_icon}"
+        header = f"{prefix}{provider}{' ' * pad}{err_icon}"
+    else:
+        header = f"{prefix}{provider}"
+    # Dim non-selected providers so the selected one stands out (like the replica)
+    if not is_selected:
+        header = _dim(header, DIM_INACTIVE)
     sorted_metrics = sorted(
         metrics, key=lambda m: TYPE_ORDER.get(m.get("type", "generic"), 4)
     )
-    lines = [line, ""]
+    lines = [header, ""]
     for metric in sorted_metrics:
         mtype = metric.get("type", "generic")
         name = TYPE_NAMES.get(mtype, "Usage")
-        is_active = is_selected and mtype == selected_metric
-        pct = float(metric.get("percentage", 0.0))
+        is_active = is_selected and metric_key(metric) == selected_metric
         seconds = metric.get("reset_in_seconds")
         detail = metric.get("detail")
         if detail is None:
             detail = format_reset_time(seconds, mtype)
 
-        if is_active:
-            lines.append(f"•   {name}:")
-        else:
-            lines.append(f"    {name}:")
-        lines.append(f"    {make_progress_bar(pct)}")
+        # Only the active metric of the selected provider stays bright.
+        recede = None if is_active else DIM_INACTIVE
+        label = f"•   {name}:" if is_active else f"    {name}:"
+        if recede:
+            label = _dim(label, recede)
+        bar_str = make_progress_bar(float(metric.get("percentage", 0.0)))
+        bar_line = ("    " + _dim(bar_str, recede)) if recede else f"    {bar_str}"
+
+        lines.append(label)
+        lines.append(bar_line)
         if detail:
-            lines.append(f"    {detail}")
+            lines.append("    " + _dim(detail, recede if recede else DIM_RESET))
         lines.append("")
     return "\n".join(lines)
 
 
-def format_loading_provider_block(provider_data, frame_index):
+def format_loading_provider_block(
+    provider_data, frame_index, selected_dir=None, selected_idx=None, selected_metric=None
+):
     provider = provider_data.get("provider", "AI Provider")
     metrics = provider_data.get("metrics", [])
     if not metrics:
         return ""
 
+    # Identical layout to format_provider_block (prefix arrow, active bullet,
+    # indentation) so nothing shifts when loading resolves — only the bar (a
+    # shimmer) and the value (a spinner) differ.
+    is_selected = (
+        provider_data.get("_dir") == selected_dir
+        and provider_data.get("_idx") == selected_idx
+    )
+    prefix = "→ " if is_selected else "  "
+    spinner = SPINNERS[frame_index % len(SPINNERS)]
+    if provider_data.get("_error"):
+        err_icon = '<span foreground="#ef4444"> ●</span>'
+        pad = max(1, BAR_LINE_WIDTH - len(prefix) - len(provider) - 2)
+        header = f"{prefix}{provider}{' ' * pad}{err_icon}"
+    else:
+        header = f"{prefix}{provider}"
+    if not is_selected:
+        header = _dim(header, DIM_INACTIVE)
+
     sorted_metrics = sorted(
         metrics, key=lambda m: TYPE_ORDER.get(m.get("type", "generic"), 4)
     )
-    spinner = SPINNERS[frame_index % len(SPINNERS)]
-    line = f"{provider} {spinner}"
-    if provider_data.get("_error"):
-        err_icon = '<span foreground="#ef4444"> ●</span>'
-        pad = max(1, BAR_LINE_WIDTH - len(provider) - len(spinner) - 3)
-        line = f"{provider} {spinner}{' ' * pad}{err_icon}"
-    lines = [line, ""]
+    lines = [header, ""]
     for metric in sorted_metrics:
         mtype = metric.get("type", "generic")
         name = TYPE_NAMES.get(mtype, "Usage")
-        pct = float(metric.get("percentage", 0.0))
+        is_active = is_selected and metric_key(metric) == selected_metric
         seconds = metric.get("reset_in_seconds")
         detail = metric.get("detail")
         if detail is None:
             detail = format_reset_time(seconds, mtype)
 
-        lines.append(f"  {name}:")
-        lines.append(f"  {make_loading_progress_bar(pct, frame_index)}")
+        recede = None if is_active else DIM_INACTIVE
+        label = f"•   {name}:" if is_active else f"    {name}:"
+        if recede:
+            label = _dim(label, recede)
+        lines.append(label)
+        lines.append(f"    {make_shimmer_bar(frame_index, spinner)}")
         if detail:
-            lines.append(f"  {detail}")
+            lines.append("    " + _dim(detail, recede if recede else DIM_RESET))
         lines.append("")
     return "\n".join(lines)
 
@@ -293,14 +302,36 @@ def format_header():
     return line
 
 
-def build_loading_state(latest_data, frame, selected=None):
+def build_loading_state(latest_data, frame, selected=None, pending=None):
+    """Render while data is being fetched.
+
+    ``pending`` is the set of provider ``_dir`` names still loading. Providers
+    in it animate a loading block; the rest render their final block. This lets
+    each provider finish independently — the selected provider (and the module
+    text) update the moment it's done, without waiting for the slowest one.
+    ``pending=None`` keeps the legacy behaviour (everything loading).
+    """
     spinner = SPINNERS[frame % len(SPINNERS)]
     header = format_header()
     sep = f"\n\n{'─' * BAR_LINE_WIDTH}\n"
+    selected_dir = selected.get("provider") if selected else None
+    selected_idx = selected.get("idx") if selected else None
+    selected_metric = selected.get("metric") if selected else None
+
+    def _is_pending(p):
+        return True if pending is None else (p.get("_dir") in pending)
+
     if latest_data:
         blocks = []
         for p in latest_data:
-            block = format_loading_provider_block(p, frame)
+            if _is_pending(p):
+                block = format_loading_provider_block(
+                    p, frame, selected_dir, selected_idx, selected_metric
+                )
+            else:
+                block = format_provider_block(
+                    p, selected_dir, selected_idx, selected_metric
+                )
             if block:
                 blocks.append(block)
         tooltip = f"{header}{sep}\n" + "\n".join(blocks)
@@ -308,17 +339,21 @@ def build_loading_state(latest_data, frame, selected=None):
         bar = make_empty_loading_bar(frame)
         tooltip = f"{header}\n\n{'─' * BAR_LINE_WIDTH}\n\n  Loading AI Provider Status {spinner}\n  {bar}"
 
-    provider_text = get_selected_provider_name(latest_data, selected)
-    
-    if provider_text == ICON:
-        final_text = f"{ICON} {spinner}"
-    elif not provider_text:
-        final_text = spinner
+    # Module text honours the display settings (only the % is swapped for the
+    # spinner). Show the spinner only while the *selected* provider is loading;
+    # once it's done, show its real percentage even if others still load.
+    if pending is None:
+        selected_pending = True
+    elif selected_dir is not None:
+        selected_pending = selected_dir in pending
     else:
-        final_text = f"{provider_text} {spinner}"
-        
+        selected_pending = bool(pending)
+    text = get_selected_metric_text(
+        latest_data, selected, spinner=(spinner if selected_pending else None)
+    )
+
     return {
-        "text": final_text,
+        "text": text,
         "tooltip": tooltip.strip(),
     }
 

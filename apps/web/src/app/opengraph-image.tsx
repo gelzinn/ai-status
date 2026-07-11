@@ -1,13 +1,13 @@
 
 import { ImageResponse } from "next/og";
 import { Logo } from "@/components/logo";
-import { PROJECT_NAME, PROJECT_DESCRIPTION, REPO_API_URL } from "@/lib/env";
+import { site, repo } from "@/lib/env";
 import { PROVIDERS } from "@ai-status/shared";
 
 export const runtime = "nodejs";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
-export const alt = `${PROJECT_NAME} - ${PROJECT_DESCRIPTION}`;
+export const alt = `${site.name} - ${site.description}`;
 
 // Satori silently falls back to a serif face unless fonts are embedded explicitly.
 // Fetch from Google Fonts at build time to avoid monorepo hoisting issues with node_modules paths.
@@ -24,9 +24,9 @@ const FG = "#fafafa";
 const FG_MUTED = "#a1a1aa";
 
 export default async function OgImage() {
-  let version = "v0.1.0";
+  let version = "v0.6.1";
   try {
-    const res = await fetch(REPO_API_URL, { next: { revalidate: 3600 } });
+    const res = await fetch(repo.apiUrl, { next: { revalidate: 3600 } });
     if (res.ok) {
       const data = await res.json();
       if (data.tag_name) {
@@ -136,7 +136,7 @@ export default async function OgImage() {
               color: FG,
             }}
           >
-            {PROJECT_NAME}
+            {site.name}
           </div>
           <div
             style={{
@@ -146,7 +146,7 @@ export default async function OgImage() {
               lineHeight: 1.4,
             }}
           >
-            {PROJECT_DESCRIPTION}
+            {site.description}
           </div>
         </div>
       </div>
@@ -187,7 +187,7 @@ export default async function OgImage() {
               color: "#d4d4d8",
             }}
           >
-            {PROJECT_NAME}
+            {site.name}
           </div>
           <div style={{ display: "flex", fontSize: 24, color: "#71717a" }}>
             {version}

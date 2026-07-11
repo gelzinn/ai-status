@@ -4,7 +4,7 @@ import { Bot, Wifi, Bluetooth } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useEffect, useRef } from "react";
 import { PROVIDERS } from "@ai-status/shared";
-import { PROJECT_NAME } from "@/lib/env";
+import { site } from "@/lib/env";
 
 type Stat = {
   label: string;
@@ -21,9 +21,39 @@ type WaybarData = {
 
 const WAYBAR_DATA: WaybarData[] = [
   {
+    provider: `${PROVIDERS.CLAUDE.name} (Max)`,
+    logo: PROVIDERS.CLAUDE.logo,
+    isActive: true,
+    stats: [
+      { label: "Rolling Usage:", percent: 2, resets: "Resets in 4h 55m" },
+      { label: "Weekly Usage:", percent: 24, resets: "Resets in 3d 16h" },
+      {
+        label: "Weekly Usage:",
+        percent: 53,
+        resets: "Fable · Resets in 3d 16h",
+      },
+    ],
+  },
+  {
+    provider: `${PROVIDERS.CODEX.name} (Plus)`,
+    logo: PROVIDERS.CODEX.logo,
+    stats: [
+      { label: "Rolling Usage:", percent: 3, resets: "Resets in 4h 25m" },
+      { label: "Weekly Usage:", percent: 25, resets: "Resets in 6d 12h" },
+    ],
+  },
+  {
+    provider: `${PROVIDERS.OPENCODE.name} (Go)`,
+    logo: PROVIDERS.OPENCODE.logo,
+    stats: [
+      { label: "Rolling Usage:", percent: 5, resets: "Resets in 5h 0m" },
+      { label: "Weekly Usage:", percent: 32, resets: "Resets in 5d 20h" },
+      { label: "Monthly Usage:", percent: 91, resets: "Resets in 4d 18h" },
+    ],
+  },
+  {
     provider: `Gemini (${PROVIDERS.ANTIGRAVITY.name})`,
     logo: PROVIDERS.ANTIGRAVITY.logo,
-    isActive: true,
     stats: [
       {
         label: "Rolling Usage:",
@@ -43,29 +73,7 @@ const WAYBAR_DATA: WaybarData[] = [
     ],
   },
   {
-    provider: `${PROVIDERS.CLAUDE.name} (Pro)`,
-    logo: PROVIDERS.CLAUDE.logo,
-    stats: [
-      { label: "Rolling Usage:", percent: 0, resets: "Resets in 4h 55m" },
-      { label: "Weekly Usage:", percent: 29, resets: "Resets in 3d 16h" },
-      {
-        label: "Weekly Usage:",
-        percent: 39,
-        resets: "Fable · Resets in 3d 16h",
-      },
-    ],
-  },
-  {
-    provider: `${PROVIDERS.OPENCODE.name} (Go)`,
-    logo: PROVIDERS.OPENCODE.logo,
-    stats: [
-      { label: "Rolling Usage:", percent: 0, resets: "Resets in 5h 0m" },
-      { label: "Weekly Usage:", percent: 0, resets: "Resets in 5d 20h" },
-      { label: "Monthly Usage:", percent: 90, resets: "Resets in 4d 18h" },
-    ],
-  },
-  {
-    provider: `${PROVIDERS.ZAI.name} Coding Plan (PRO)`,
+    provider: `${PROVIDERS.ZAI.name} Coding Plan (Max)`,
     logo: PROVIDERS.ZAI.logo,
     stats: [
       { label: "Rolling Usage:", percent: 0, resets: "no reset available" },
@@ -79,15 +87,18 @@ const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', 
 
 export function WaybarReplica({ version }: { version: string }) {
   const [mounted, setMounted] = useState(false);
+
   const [activeIdx, setActiveIdx] = useState(0);
   const [activeStatIdx, setActiveStatIdx] = useState(0);
+
   const [isOpen, setIsOpen] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
   const [spinnerFrame, setSpinnerFrame] = useState(0);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [transform, setTransform] = useState(
     "perspective(1200px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)",
   );
+
   const cardRef = useRef<HTMLDivElement>(null);
   const topbarRef = useRef<HTMLDivElement>(null);
 
@@ -152,8 +163,6 @@ export function WaybarReplica({ version }: { version: string }) {
     const rect = cardRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-
-    setMousePos({ x, y });
 
     // Calculate 3D tilt
     const centerX = rect.width / 2;
@@ -246,7 +255,7 @@ export function WaybarReplica({ version }: { version: string }) {
             <div className="flex flex-col gap-2 p-4 border-b border-border/50">
               <div className="flex items-center justify-between text-muted-foreground">
                 <span className="font-semibold text-foreground">
-                  {PROJECT_NAME}
+                  {site.name}
                 </span>
 
                 <span className="text-muted-foreground">{version}</span>

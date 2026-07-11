@@ -34,7 +34,8 @@ export function InstallTabs({
 
 			<div className={cn("flex flex-wrap items-center gap-3 mt-1 text-sm font-medium", align === "center" && "sm:justify-center")}>
 				{platforms.map((p) => {
-					const isActive = activeOs === p.id;
+          const isActive = activeOs === p.id;
+
 					return (
 						<button
 							key={p.id}

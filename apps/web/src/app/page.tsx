@@ -4,27 +4,25 @@ import { Header } from "@/components/header";
 import { Hero } from "@/components/hero";
 import { CodeBlock } from "@/components/code-block";
 import { HighlightedCodeBlock } from "@/components/code-highlight";
-import {
-  MultiProviderVisual,
-  LiveUpdatesVisual,
-  TooltipDetailVisual,
-  ConfigurableVisual,
-  SelfUpdatingVisual,
-  ZeroDependenciesVisual,
-} from "@/components/features-visuals";
+import { FeatureVisuals } from "@/components/features-visuals";
 import { WaybarReplica } from "@/components/waybar-replica";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
 import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
-import { REPO_API_URL, REPO_URL } from "@/lib/env";
+import { repo } from "@/lib/env";
+import {
+  WAYBAR_CUSTOM_MODULE,
+  WAYBAR_LOGO_MODULE,
+  WAYBAR_LAYOUT,
+} from "@/lib/waybar-config";
 
 export default async function Homepage() {
-  let latestVersion = "v1.3.0";
-  let oldVersion = "v1.2.0";
+  let latestVersion = "v0.6.1";
+  let oldVersion = "v0.6.0";
 
   try {
-    const res = await fetch(REPO_API_URL, {
+    const res = await fetch(repo.apiUrl, {
       next: { revalidate: 3600 },
     });
 
@@ -49,31 +47,6 @@ export default async function Homepage() {
     console.error("Failed to fetch github release:", e);
   }
 
-  const waybarConfig = `"custom/ai-status": {
-    "format": "{}",
-    "return-type": "json",
-    "exec": "~/.local/bin/ai-status daemon",
-    "on-click": "~/.local/bin/ai-status refresh",
-    "on-click-right": "~/.local/bin/ai-status config",
-    "on-scroll-up": "~/.local/bin/ai-status scroll-up",
-    "on-scroll-down": "~/.local/bin/ai-status scroll-down",
-    "on-click-middle": "~/.local/bin/ai-status cycle-metric",
-    "tooltip": true
-}`;
-
-  const waybarModule = `{
-    // ...
-    "modules-right": [
-        "network",
-        "cpu",
-        "memory",
-        "custom/ai-status",
-        "clock",
-        "tray"
-    ],
-    // ...
-}`;
-
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-8 sm:gap-16 p-6 sm:py-16">
       <Header />
@@ -93,12 +66,48 @@ export default async function Homepage() {
               </p>
             </div>
             <HighlightedCodeBlock
-              code={waybarConfig}
+              code={WAYBAR_CUSTOM_MODULE}
               lang="json"
               label="~/.config/waybar/config.jsonc"
             />
             <p className="text-sm text-muted-foreground">
-              Then, include{" "}
+              To also show the active provider's logo — and get the same
+              breakdown when you hover it — add the image module. The one-command
+              install with{" "}
+              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
+                --icon-mode logo
+              </code>{" "}
+              sets this up for you. To do it by hand: the{" "}
+              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
+                exec
+              </code>{" "}
+              prints the logo path and its tooltip,{" "}
+              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
+                interval
+              </code>{" "}
+              keeps it refreshed, and you need an SVG rasterizer (imagemagick or
+              librsvg). Then enable logo mode in the config TUI (right-click the
+              module, set{" "}
+              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
+                Provider Icon
+              </code>{" "}
+              to{" "}
+              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
+                Provider Logo
+              </code>
+              ):
+            </p>
+            <HighlightedCodeBlock
+              code={WAYBAR_LOGO_MODULE}
+              lang="json"
+              label="~/.config/waybar/config.jsonc"
+            />
+            <p className="text-sm text-muted-foreground">
+              Then, include both{" "}
+              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
+                "image#ai-status"
+              </code>{" "}
+              and{" "}
               <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
                 "custom/ai-status"
               </code>{" "}
@@ -109,7 +118,7 @@ export default async function Homepage() {
               ):
             </p>
             <CodeBlock
-              code={waybarModule}
+              code={WAYBAR_LAYOUT}
               label="~/.config/waybar/config.jsonc"
             >
               <span className="text-muted-foreground/40">{"{\n"}</span>
@@ -117,6 +126,12 @@ export default async function Homepage() {
               <span className="text-muted-foreground/40">
                 {'    "modules-right": [\n'}
               </span>
+              {"        "}
+              <span className="text-[#ffcfa3]">"image#ai-status"</span>
+              <span className="text-muted-foreground/40">{",\n"}</span>
+              {"        "}
+              <span className="text-[#ffcfa3]">"custom/ai-status"</span>
+              <span className="text-muted-foreground/40">{",\n"}</span>
               <span className="text-muted-foreground/40">
                 {'        "network",\n'}
               </span>
@@ -126,9 +141,6 @@ export default async function Homepage() {
               <span className="text-muted-foreground/40">
                 {'        "memory",\n'}
               </span>
-              {"        "}
-              <span className="text-[#ffcfa3]">"custom/ai-status"</span>
-              <span className="text-muted-foreground/40">{",\n"}</span>
               <span className="text-muted-foreground/40">
                 {'        "clock",\n'}
               </span>
@@ -139,6 +151,13 @@ export default async function Homepage() {
               <span className="text-muted-foreground/30">{"    // ...\n"}</span>
               <span className="text-muted-foreground/40">{"}"}</span>
             </CodeBlock>
+
+            <Link
+              href="/llms.txt"
+              className="inline-flex items-center gap-1 text-sm font-medium text-foreground hover:text-muted-foreground transition-colors w-fit mt-1"
+            >
+              Copy-paste install guide for LLMs <ArrowRight className="size-3.5" />
+            </Link>
           </section>
 
           <section className="flex flex-col gap-8 relative">
@@ -152,38 +171,38 @@ export default async function Homepage() {
                 </p>
               </div>
               <div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 sm:gap-4">
                   {[
                     {
                       title: "Multi-Provider",
                       description:
                         "Tracks API usage limits across seven AI services simultaneously.",
-                      visual: MultiProviderVisual,
+                      visual: FeatureVisuals.MultiProvider,
                     },
                     {
                       title: "Live Updates",
                       description:
                         "Auto-refreshes every 5 minutes with animated loading states.",
-                      visual: LiveUpdatesVisual,
+                      visual: FeatureVisuals.LiveUpdates,
                     },
                     {
                       title: "Tooltip Detail",
                       description:
                         "Per-provider breakdown with progress bars, percentages, and reset timers.",
-                      visual: TooltipDetailVisual,
+                      visual: FeatureVisuals.TooltipDetail,
                     },
                     {
                       title: "Configurable",
                       description:
                         "Enable, disable, or reorder providers via an interactive TUI (right-click).",
-                      visual: ConfigurableVisual,
+                      visual: FeatureVisuals.Configurable,
                     },
                     {
                       title: "Self-Updating",
                       description:
                         "One command installs and keeps the module up to date automatically.",
                       visual: () => (
-                        <SelfUpdatingVisual
+                        <FeatureVisuals.SelfUpdating
                           latestVersion={latestVersion}
                           oldVersion={oldVersion}
                         />
@@ -193,7 +212,7 @@ export default async function Homepage() {
                       title: "Zero Dependencies",
                       description:
                         "Written in pure Python and Bash. No heavy runtimes required.",
-                      visual: ZeroDependenciesVisual,
+                      visual: FeatureVisuals.ZeroDependencies,
                     },
                   ].map((feature) => (
                     <div
@@ -233,7 +252,7 @@ export default async function Homepage() {
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2 items-center mt-4">
+            <div className="flex flex-wrap gap-2 items-center">
               {SUPPORTED_PROVIDERS.map((provider) => (
                 <div
                   key={provider.name}
@@ -254,7 +273,7 @@ export default async function Homepage() {
               <a
                 target="_blank"
                 rel="noreferrer"
-                href={`${REPO_URL}/issues/new`}
+                href={`${repo.url}/issues/new`}
                 className="group flex items-center gap-2 rounded-full border border-dashed border-border bg-card px-4 py-2 transition-all text-muted-foreground/50"
               >
                 <span className="flex size-5 items-center justify-center rounded-sm transition-colors group-hover:text-foreground">

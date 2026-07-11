@@ -5,25 +5,28 @@
 ## Update Command
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/gelzinn/ai-status/main/install.sh)
+curl -fsSL https://ai-status.gelzin.com/install | bash
 ```
 
 Or from a local clone:
 
 ```bash
-./install.sh
+bash packages/lib/install.sh
 ```
 
 ## How It Works
 
-The script maintains a clone at `~/.local/share/ai-status/`. On each run it detects whether:
+The script installs a **lean copy** at `~/.local/share/ai-status/` — only the
+library itself (`packages/lib` plus the shared provider metadata), never the
+website, `node_modules`, or build output. Each run re-extracts that copy, so the
+same command covers every case:
 
 | State | Action |
 |---|---|
-| First install | Clones the repository and sets up symlinks |
-| Already installed | Pulls latest changes via `git pull` |
-| Stale directory | Removes and reclones |
-| Local clone | Copies files directly |
+| First install | Extracts the lib and sets up symlinks |
+| Already installed | Re-extracts the latest version (this is the update) |
+| Local checkout | Extracts from your working tree, local edits included |
+| Older full-repo install | Replaced with the lean copy automatically |
 
 After updating, the script restarts Waybar automatically to apply changes.
 
@@ -32,5 +35,5 @@ After updating, the script restarts Waybar automatically to apply changes.
 The current version is shown at the top of the Waybar tooltip. You can also check:
 
 ```bash
-cat ~/.local/share/ai-status/VERSION
+cat ~/.local/share/ai-status/packages/lib/VERSION
 ```

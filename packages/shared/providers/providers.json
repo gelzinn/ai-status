@@ -1,9 +1,44 @@
 {
-  "opencode": { "name": "OpenCode", "logo": "https://svgl.app/library/opencode-dark.svg" },
-  "copilot": { "name": "Copilot", "logo": "https://svgl.app/library/copilot_dark.svg" },
-  "claude": { "name": "Claude", "logo": "https://svgl.app/library/claude-ai-icon.svg" },
-  "codex": { "name": "Codex", "logo": "https://svgl.app/library/codex_dark.svg" },
-  "antigravity": { "name": "Antigravity", "logo": "https://svgl.app/library/antigravity.svg" },
-  "zai": { "name": "Z.AI", "logo": "https://z-cdn.chatglm.cn/z-ai/static/logo.svg" },
-  "kiro": { "name": "Kiro", "logo": "https://www.google.com/s2/favicons?sz=64&domain=kiro.dev" }
+  "claude": {
+    "name": "Claude",
+    "logo": "https://svgl.app/library/claude-ai-icon.svg",
+    "tracks": "Session (5h) and weekly usage, including per-model weekly limits",
+    "auth": "Claude Code OAuth (OpenCode fallback)"
+  },
+  "codex": {
+    "name": "Codex",
+    "logo": "https://svgl.app/library/codex_dark.svg",
+    "tracks": "5-hour and weekly limits (a single monthly window on free plans)",
+    "auth": "~/.codex/auth.json"
+  },
+  "opencode": {
+    "name": "OpenCode",
+    "logo": "https://svgl.app/library/opencode-dark.svg",
+    "tracks": "Rolling, weekly, and monthly usage",
+    "auth": "OpenCode auth + workspace config"
+  },
+  "antigravity": {
+    "name": "Antigravity",
+    "logo": "https://svgl.app/library/antigravity.svg",
+    "tracks": "Weekly and 5-hour limits per model (Gemini and Claude/GPT)",
+    "auth": "agy CLI session"
+  },
+  "copilot": {
+    "name": "Copilot",
+    "logo": "https://svgl.app/library/copilot_dark.svg",
+    "tracks": "Chat and completions usage",
+    "auth": "GitHub Copilot OAuth"
+  },
+  "zai": {
+    "name": "Z.AI",
+    "logo": "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    "tracks": "Rolling, weekly, and monthly usage",
+    "auth": "Bearer token (~/.config/z.ai/)"
+  },
+  "kiro": {
+    "name": "Kiro",
+    "logo": "https://www.google.com/s2/favicons?sz=64&domain=kiro.dev",
+    "tracks": "Usage percentage and reset timer",
+    "auth": "Session cookie"
+  }
 }

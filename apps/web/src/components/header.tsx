@@ -1,6 +1,6 @@
 import { GithubIcon } from "@/components/github-icon";
 import { Logo } from "@/components/logo";
-import { PROJECT_NAME, REPO_URL } from "@/lib/env";
+import { site, repo } from "@/lib/env";
 
 export async function Header() {
 	let stars = null;
@@ -20,10 +20,10 @@ export async function Header() {
 		<header className="flex items-center justify-between">
 			<span className="flex items-center gap-2 font-mono text-sm font-medium">
 				<Logo className="size-5" />
-				{PROJECT_NAME}
+				{site.name}
 			</span>
 			<a
-				href={REPO_URL}
+				href={repo.url}
 				target="_blank"
 				rel="noreferrer"
 				className="flex items-center gap-2 rounded-full bg-white pl-4 pr-1.5 py-1.5 text-sm font-medium text-black transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background hover:bg-white/90"
