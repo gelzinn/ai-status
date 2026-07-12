@@ -53,6 +53,10 @@ const CREDENTIAL_SOURCES: Record<string, { source: string; note: string }> = {
 		source: "kiro-cli",
 		note: "Runs the official kiro-cli and reads its session usage — no file touched.",
 	},
+	commandcode: {
+		source: "~/.commandcode/auth.json",
+		note: "The API key the cmd CLI saved on login.",
+	},
 };
 
 const NEVER = [
@@ -308,11 +312,11 @@ export default function SecurityPage() {
 											className="group flex flex-col gap-3 p-4 hover:bg-muted sm:flex-row sm:items-center sm:justify-between sm:gap-6"
 										>
 											<div className="flex items-center gap-3">
-												<div className="flex size-9 shrink-0 items-center justify-center rounded-2xl border border-border bg-background">
+												<div className="flex [--tile:2.25rem] size-(--tile) shrink-0 items-center justify-center rounded-[calc(var(--tile)/4)] border border-border bg-background">
 													<img
 														src={provider.logo}
 														alt={provider.name}
-														className="size-5 rounded-sm object-contain"
+														className="[--logo:1.25rem] size-(--logo) rounded-[calc(var(--logo)/6)] object-contain"
 													/>
 												</div>
 												<div className="flex flex-col">

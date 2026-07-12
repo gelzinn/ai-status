@@ -275,11 +275,11 @@ export default async function Homepage() {
                   href={`/providers/${provider.slug}`}
                   className="group flex items-center gap-3 rounded-2xl border border-border bg-card p-3 transition-all hover:-translate-y-0.5 hover:border-foreground/20"
                 >
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-border bg-background">
+                  <div className="flex [--tile:2.25rem] size-(--tile) shrink-0 items-center justify-center rounded-[calc(var(--tile)/4)] border border-border bg-background">
                     <img
                       src={provider.logo}
                       alt={provider.name}
-                      className="size-5 rounded-sm object-contain"
+                      className="[--logo:1.25rem] size-(--logo) rounded-[calc(var(--logo)/6)] object-contain"
                     />
                   </div>
                   <span className="font-heading text-sm font-semibold text-foreground">
@@ -295,7 +295,7 @@ export default async function Homepage() {
                 href={`${repo.url}/issues/new`}
                 className="group flex items-center gap-3 rounded-2xl border border-dashed border-border bg-card p-3 text-muted-foreground transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:text-foreground"
               >
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-border bg-background">
+                <div className="flex [--tile:2.25rem] size-(--tile) shrink-0 items-center justify-center rounded-[calc(var(--tile)/4)] border border-border bg-background">
                   <Plus className="size-4" />
                 </div>
                 <span className="font-heading text-sm font-semibold">

@@ -10,11 +10,15 @@ import {
 	CircleDot,
 	KeyRound,
 	ShieldCheck,
-	Terminal,
 } from "lucide-react";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { GithubIcon } from "@/components/github-icon";
+import {
+	InstallCtaProvider,
+	HeroInstallCta,
+	StickyInstallCta,
+} from "@/components/install-cta";
 import { SUPPORTED_PROVIDERS, type Provider } from "@ai-status/shared";
 import { site, repo, LIB_NAME } from "@/lib/env";
 import { renderMarkdown } from "@/lib/markdown";
@@ -73,7 +77,8 @@ export default async function ProviderPage({
 		<div className="mx-auto flex max-w-7xl flex-col gap-8 sm:gap-16 p-6 sm:py-16">
 			<Header />
 
-			<main className="flex flex-col gap-10">
+			<InstallCtaProvider heroId="provider-hero">
+				<main className="flex flex-col gap-10">
 				{/* Breadcrumb */}
 				<nav className="flex items-center gap-1.5 text-sm text-muted-foreground">
 					<Link
@@ -88,17 +93,20 @@ export default async function ProviderPage({
 				</nav>
 
 				{/* Hero */}
-				<section className="relative overflow-hidden rounded-3xl border border-border bg-card p-4">
+				<section
+					id="provider-hero"
+					className="relative overflow-hidden rounded-3xl border border-border bg-card p-4"
+				>
 					<div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] bg-[size:24px_24px] [mask-image:radial-gradient(ellipse_60%_80%_at_30%_0%,#000_20%,transparent_100%)] opacity-30" />
 					<div className="pointer-events-none absolute -top-24 left-1/4 h-64 w-full max-w-md -translate-x-1/2 rounded-full bg-foreground/5 blur-[100px]" />
 
 					<div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 						<div className="flex items-center gap-4">
-							<div className="flex size-16 shrink-0 items-center justify-center rounded-2xl border border-border bg-background shadow-sm">
+							<div className="flex [--tile:4rem] size-(--tile) shrink-0 items-center justify-center rounded-[calc(var(--tile)/4)] border border-border bg-background shadow-sm">
 								<img
 									src={provider.logo}
 									alt={provider.name}
-									className="size-9 rounded-md object-contain"
+									className="[--logo:2.25rem] size-(--logo) rounded-[calc(var(--logo)/6)] object-contain"
 								/>
               </div>
 
@@ -108,13 +116,7 @@ export default async function ProviderPage({
 						</div>
 
 						<div className="flex shrink-0 flex-col gap-2.5 sm:flex-row sm:items-center">
-							<Link
-								href="/"
-								className="flex items-center justify-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background hover:bg-white/90"
-							>
-								<Terminal className="-ml-1 size-4" />
-								Install {site.name}
-              </Link>
+							<HeroInstallCta label={`Install ${site.name}`} />
 
 							<a
 								href={sourceUrl(slug)}
@@ -163,6 +165,9 @@ export default async function ProviderPage({
 					</article>
 
 					<aside className="flex flex-col gap-4 lg:sticky lg:top-8 lg:self-start">
+						{/* Install CTA — morphs in from the hero once it scrolls off. */}
+						<StickyInstallCta label={`Install ${site.name}`} />
+
 						{/* Details card — mirrors the provider listing card:
 						    content + a bg-muted footer bar with the auth source. */}
 						<div className="overflow-hidden rounded-2xl border border-border bg-card">
@@ -208,23 +213,16 @@ export default async function ProviderPage({
 
 								<ArrowUpRight className="size-3.5" />
 							</a>
-						</div>
-
-            <div className="overflow-hidden rounded-2xl border border-border bg-card">
-							<header className="flex items-center gap-2 border-b border-border bg-muted p-4 text-sm text-muted-foreground">
-                <ShieldCheck className="size-4 shrink-0" />
-
-                <span>
-                  Disclaimer
-                </span>
-              </header>
-
-              <div className="flex flex-col gap-1.5 p-4 text-muted-foreground/80">
-                <p className="text-xs leading-relaxed">
-     							{site.name} ships no API keys. Credentials are read locally and never
-     							leave your machine.
-                </p>
-							</div>
+								<Link
+									href="/security"
+									className="flex items-center justify-between gap-2 border-t border-border p-4 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+								>
+									<span className="inline-flex items-center gap-2">
+										<ShieldCheck className="size-4" />
+										Security &amp; privacy
+									</span>
+									<ArrowUpRight className="size-3.5" />
+								</Link>
 						</div>
 					</aside>
 				</div>
@@ -249,11 +247,11 @@ export default async function ProviderPage({
 								href={`/providers/${p.slug}`}
 								className="group flex items-center gap-3 rounded-2xl border border-border bg-card p-3 transition-all hover:-translate-y-0.5 hover:bg-card"
 							>
-								<div className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-border bg-background">
+								<div className="flex [--tile:2.25rem] size-(--tile) shrink-0 items-center justify-center rounded-[calc(var(--tile)/4)] border border-border bg-background">
 									<img
 										src={p.logo}
 										alt={p.name}
-										className="size-5 rounded-sm object-contain"
+										className="[--logo:1.25rem] size-(--logo) rounded-[calc(var(--logo)/6)] object-contain"
 									/>
 								</div>
 								<span className="font-heading text-sm font-semibold text-foreground">
@@ -265,6 +263,7 @@ export default async function ProviderPage({
 					</div>
 				</section>
 			</main>
+			</InstallCtaProvider>
 
 			<Footer />
 		</div>

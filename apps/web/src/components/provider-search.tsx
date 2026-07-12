@@ -232,11 +232,11 @@ export function ProviderSearch({ providers }: { providers: Provider[] }) {
 					>
 						<div className="flex flex-col gap-4 p-4">
 							<header className="flex items-center gap-3">
-								<div className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background shadow-sm">
+								<div className="flex [--tile:2.75rem] size-(--tile) shrink-0 items-center justify-center rounded-[calc(var(--tile)/4)] border border-border bg-background shadow-sm">
 									<img
 										src={provider.logo}
 										alt={provider.name}
-										className="size-6 rounded-sm object-contain"
+										className="[--logo:1.5rem] size-(--logo) rounded-[calc(var(--logo)/6)] object-contain"
 									/>
 								</div>
 								<h2 className="font-heading text-lg font-semibold text-foreground">

@@ -99,6 +99,8 @@
 	/* backwards fill so delayed hero items stay hidden until their turn */
 	--animate-fade-up: fade-up 500ms cubic-bezier(0.2, 0, 0, 1) backwards;
 	--animate-shimmer: shimmer 1.5s infinite linear;
+	/* Route-change enter animation (see app/template.tsx). */
+	--animate-page-in: page-in 350ms cubic-bezier(0.2, 0, 0, 1);
 
 	@keyframes shimmer {
 		0% { transform: translateX(-100%); }
@@ -116,6 +118,12 @@
 			opacity: 0;
 			translate: 0 12px;
 			filter: blur(4px);
+		}
+	}
+	@keyframes page-in {
+		from {
+			opacity: 0;
+			translate: 0 8px;
 		}
 	}
 }
