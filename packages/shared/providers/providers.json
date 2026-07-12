@@ -47,5 +47,12 @@
     "tracks": "Usage percentage and reset timer",
     "auth": "kiro-cli session",
     "authType": "cli"
+  },
+  "commandcode": {
+    "name": "Command Code",
+    "logo": "https://www.google.com/s2/favicons?sz=64&domain=commandcode.ai",
+    "tracks": "Monthly spend against your remaining credit balance",
+    "auth": "~/.commandcode/auth.json (cmd login)",
+    "authType": "cli"
   }
 }
