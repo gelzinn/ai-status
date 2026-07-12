@@ -54,12 +54,16 @@ export function CopyButton({
 	);
 }
 
-/** ponytail: hand-tinted spans instead of shiki — four static snippets don't earn a highlighter */
+/**
+ * Chrome (label bar + copy button) around already-rendered code content:
+ * the shiki-highlighted `<pre>` React tree from HighlightedCodeBlock, or the
+ * hand-tinted `<pre><code>` spans a caller passes as children. No HTML string
+ * is ever injected — `children` is real React, so no dangerouslySetInnerHTML.
+ */
 export function CodeBlock({
 	label,
 	actions,
 	code,
-	html,
 	children,
 	className,
 }: {
@@ -67,16 +71,16 @@ export function CodeBlock({
 	/** Right-side controls rendered before the copy button. */
 	actions?: ReactNode;
 	code: string;
-	html?: string;
+	/** The rendered code: a shiki `<pre>` tree or a manual `<pre><code>…`. */
 	children?: ReactNode;
 	className?: string;
 }) {
 	const [copied, setCopied] = useState(false);
-	const preRef = useRef<HTMLPreElement>(null);
+	const scrollRef = useRef<HTMLDivElement>(null);
 	const [scrollState, setScrollState] = useState<"none" | "start" | "middle" | "end">("none");
 
 	useEffect(() => {
-		const el = preRef.current;
+		const el = scrollRef.current;
 		if (!el) return;
 
 		const checkScroll = () => {
@@ -105,6 +109,7 @@ export function CodeBlock({
 			observer.disconnect();
 		};
 	}, []);
+
 	const copy = async () => {
 		await navigator.clipboard.writeText(code);
 		setCopied(true);
@@ -121,24 +126,15 @@ export function CodeBlock({
 					{actions}
 					<CopyButton copied={copied} onCopy={copy} subject="code" />
 				</div>
-      </div>
+			</div>
 
-			{html ? (
-				<div
-					ref={preRef as any}
-					data-scroll={scrollState}
-					dangerouslySetInnerHTML={{ __html: html }}
-					className="scroll-fade-x overflow-x-auto font-mono text-[13px] leading-relaxed [&>pre]:bg-transparent! [&>pre]:p-4! [&>pre]:m-0! [&>pre]:font-mono! [&>pre]:overflow-visible! [&>pre]:w-max! [&>pre]:min-w-full! [&_code]:font-mono!"
-				/>
-			) : (
-				<pre
-					ref={preRef}
-					data-scroll={scrollState}
-					className="scroll-fade-x overflow-x-auto p-4 font-mono text-[13px] leading-relaxed"
-				>
-					<code>{children}</code>
-				</pre>
-			)}
+			<div
+				ref={scrollRef}
+				data-scroll={scrollState}
+				className="scroll-fade-x overflow-x-auto font-mono text-[13px] leading-relaxed [&>pre]:bg-transparent! [&>pre]:p-4! [&>pre]:m-0! [&>pre]:font-mono! [&>pre]:w-max! [&>pre]:min-w-full! [&_code]:font-mono!"
+			>
+				{children}
+			</div>
 		</div>
 	);
 }

@@ -3,10 +3,11 @@ import { Footer } from "@/components/footer";
 import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
 import { site, repo } from "@/lib/env";
 import { KeyRound, Plus, ShieldCheck } from "lucide-react";
+import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-	title: "Supported Providers | AI Status",
+	title: `Supported Providers | ${site.name}`,
 	description:
 		"Every AI provider ai-status can track in your Waybar — what each one reports and where it reads your credentials from.",
 };
@@ -49,11 +50,9 @@ export default function ProvidersPage() {
 				{/* Provider grid */}
 				<section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 					{SUPPORTED_PROVIDERS.map((provider) => (
-						<a
+						<Link
               key={provider.name}
-              href={`${repo.url}/tree/main/packages/lib/src/providers/${provider.slug}`}
-              target="_blank"
-              rel="noreferrer"
+              href={`/providers/${provider.slug}`}
 							className="group relative flex flex-col gap-4 rounded-2xl border border-border bg-card/50 shadow-sm backdrop-blur-md transition-transform hover:-translate-y-0.5 hover:bg-card hover:shadow-md overflow-hidden"
 						>
               <div className="flex flex-col gap-4 p-4">
@@ -82,7 +81,7 @@ export default function ProvidersPage() {
 									{provider.auth}
 								</span>
 							</footer>
-						</a>
+						</Link>
 					))}
 
 					{/* Add provider */}
@@ -111,18 +110,13 @@ export default function ProvidersPage() {
 
           <div className="flex flex-col gap-2 leading-relaxed">
             <span className="font-medium text-emerald-500">
-							Your credentials never leave your machine.
+              Your credentials never leave your machine.
             </span>
 
             <div className="text-muted-foreground">
               <p>
-    						{site.name} ships no API keys — each provider reads tokens straight from
-    						the local auth files you already have, and only talks to that
-    						provider's own API. Nothing is proxied through us.
-              </p>
-
-              <p>
-                We do not store your credentials or tokens on our servers, any credentials are stored locally ONLY on your machine.
+                {site.name} ships zero API keys. Every provider reads its tokens directly from the auth files you already keep on disk — OAuth sessions, config files, cookies. Your machine talks straight to
+                each provider's API. Nothing passes through us. No telemetry, no cloud proxy, no remote storage. Credentials live and die on your machine.
               </p>
             </div>
           </div>

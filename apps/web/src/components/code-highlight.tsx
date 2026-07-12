@@ -1,4 +1,4 @@
-import { codeToHtml } from "shiki";
+import { highlightToReact } from "@/lib/highlight";
 import { CodeBlock } from "./code-block";
 
 export async function HighlightedCodeBlock({
@@ -8,18 +8,15 @@ export async function HighlightedCodeBlock({
 	className,
 }: {
 	code: string;
-	lang: any;
+	lang: string;
 	label?: React.ReactNode;
 	className?: string;
 }) {
-	const html = await codeToHtml(code, {
-		lang,
-		theme: "vesper", // Premium dark theme
-	});
+	const highlighted = await highlightToReact(code, lang);
 
 	return (
-		<CodeBlock code={code} html={html} label={label} className={className}>
-			{code}
+		<CodeBlock code={code} label={label} className={className}>
+			{highlighted}
 		</CodeBlock>
 	);
 }

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./markdown.css";
 
 @utility scroll-fade-x {
 	--scroll-fade-distance: 64px;

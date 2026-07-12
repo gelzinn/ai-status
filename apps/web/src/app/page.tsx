@@ -10,7 +10,7 @@ import Link from "next/link";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 
 import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
-import { repo } from "@/lib/env";
+import { site, repo } from "@/lib/env";
 import {
   WAYBAR_CUSTOM_MODULE,
   WAYBAR_LOGO_MODULE,
@@ -133,6 +133,8 @@ export default async function Homepage() {
               code={WAYBAR_LAYOUT}
               label="~/.config/waybar/config.jsonc"
             >
+              <pre>
+                <code>
               <span className="text-muted-foreground/40">{"{\n"}</span>
               <span className="text-muted-foreground/30">{"    // ...\n"}</span>
               <span className="text-muted-foreground/40">
@@ -162,6 +164,8 @@ export default async function Homepage() {
               <span className="text-muted-foreground/40">{"    ],\n"}</span>
               <span className="text-muted-foreground/30">{"    // ...\n"}</span>
               <span className="text-muted-foreground/40">{"}"}</span>
+                </code>
+              </pre>
             </CodeBlock>
 
             <Link
@@ -266,8 +270,11 @@ export default async function Homepage() {
 
             <div className="flex flex-wrap gap-2 items-center">
               {SUPPORTED_PROVIDERS.map((provider) => (
-                <div
+                <a
                   key={provider.name}
+                  href={`${repo.url}/tree/main/packages/lib/src/providers/${provider.slug}`}
+                  target="_blank"
+                  rel="noreferrer"
                   className="group flex cursor-default items-center gap-2 rounded-full bg-card border border-border px-4 py-2 shadow-sm backdrop-blur-md transition-all hover:border-border hover:bg-card/80 hover:shadow-md"
                 >
                   <img
@@ -275,35 +282,34 @@ export default async function Homepage() {
                     alt={provider.name}
                     className="h-5 w-5 rounded-sm"
                   />
-
                   <span className="font-heading text-base font-medium text-foreground/80 transition-colors group-hover:text-foreground">
                     {provider.name}
                   </span>
-                </div>
+                </a>
               ))}
 
               <a
                 target="_blank"
                 rel="noreferrer"
                 href={`${repo.url}/issues/new`}
-                className="group flex items-center gap-2 rounded-2xl border border-dashed border-border bg-card px-4 py-2 transition-all text-muted-foreground/50"
+                className="group flex items-center gap-2 rounded-full border border-dashed border-border bg-card px-4 py-2 transition-all text-muted-foreground/50"
               >
                 <span className="flex size-5 items-center justify-center rounded-sm transition-colors group-hover:text-foreground">
                   +
                 </span>
-
                 <span className="font-heading text-base font-medium transition-colors group-hover:text-foreground">
                   Add provider
                 </span>
               </a>
             </div>
 
-            <div className="flex items-start gap-3 rounded-2xl border border-emerald-500/10 bg-emerald-500/10 p-4 text-sm text-emerald-500">
-              <ShieldCheck className="mt-0.5 size-5 shrink-0" />
-
-    					<p className="max-w-3xl leading-relaxed font-medium">
-    						Your credentials never leave your machine.
-    					</p>
+            <div className="flex items-start gap-4 rounded-2xl border border-emerald-500/10 bg-emerald-500/10 p-4 text-sm">
+              <ShieldCheck className="mt-0.5 size-5 shrink-0 text-emerald-500" />
+              <p className="text-emerald-500 text-pretty">
+                Your credentials never leave your machine. {site.name} reads
+                tokens directly from your local auth files — nothing is proxied
+                through us.
+              </p>
             </div>
 
             <Link
