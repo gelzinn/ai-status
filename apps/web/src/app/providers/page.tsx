@@ -1,7 +1,7 @@
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
-import { repo } from "@/lib/env";
+import { site, repo } from "@/lib/env";
 import { KeyRound, Plus, ShieldCheck } from "lucide-react";
 import type { Metadata } from "next";
 
@@ -16,7 +16,7 @@ export default function ProvidersPage() {
 		<div className="mx-auto flex max-w-7xl flex-col gap-8 sm:gap-16 p-6 sm:py-16">
 			<Header />
 
-			<main className="flex flex-col gap-12 mt-8 lg:mt-16">
+			<main className="flex flex-col gap-12">
 				{/* Hero */}
 				<section className="relative overflow-hidden rounded-3xl border border-border bg-card/40 px-6 py-12 sm:px-12 sm:py-16">
 					{/* Grid pattern */}
@@ -29,12 +29,15 @@ export default function ProvidersPage() {
 							<span className="relative flex size-1.5">
 								<span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-foreground/40" />
 								<span className="relative inline-flex size-1.5 rounded-full bg-foreground/70" />
-							</span>
+              </span>
+
 							{SUPPORTED_PROVIDERS.length} providers supported
-						</span>
+            </span>
+
 						<h1 className="font-heading text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
 							Supported Providers
-						</h1>
+            </h1>
+
 						<p className="max-w-2xl text-lg text-muted-foreground">
 							Every AI service ai-status can track in your Waybar — what each one
 							reports, and where it reads your credentials from. Scroll, hover,
@@ -46,34 +49,40 @@ export default function ProvidersPage() {
 				{/* Provider grid */}
 				<section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 					{SUPPORTED_PROVIDERS.map((provider) => (
-						<article
-							key={provider.name}
-							className="group relative flex flex-col gap-4 rounded-2xl border border-border bg-card/50 p-5 shadow-sm backdrop-blur-md transition-all hover:-translate-y-0.5 hover:border-foreground/20 hover:bg-card hover:shadow-md"
+						<a
+              key={provider.name}
+              href={`${repo.url}/tree/main/packages/lib/src/providers/${provider.slug}`}
+              target="_blank"
+              rel="noreferrer"
+							className="group relative flex flex-col gap-4 rounded-2xl border border-border bg-card/50 shadow-sm backdrop-blur-md transition-transform hover:-translate-y-0.5 hover:bg-card hover:shadow-md overflow-hidden"
 						>
-							<header className="flex items-center gap-3">
-								<div className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background shadow-sm">
-									<img
-										src={provider.logo}
-										alt={provider.name}
-										className="size-6 object-contain"
-									/>
-								</div>
-								<h2 className="font-heading text-lg font-semibold text-foreground">
-									{provider.name}
-								</h2>
-							</header>
+              <div className="flex flex-col gap-4 p-4">
+                <header className="flex items-center gap-3">
+  								<div className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background shadow-sm">
+  									<img
+  										src={provider.logo}
+  										alt={provider.name}
+  										className="size-6 object-contain rounded-sm"
+  									/>
+                  </div>
 
-							<p className="flex-1 text-sm leading-relaxed text-muted-foreground">
-								{provider.tracks}
-							</p>
+  								<h2 className="font-heading text-lg font-semibold text-foreground">
+  									{provider.name}
+  								</h2>
+  							</header>
 
-							<footer className="flex items-center gap-1.5 border-t border-border/60 pt-3 text-xs text-muted-foreground/80">
+  							<p className="flex-1 text-sm leading-relaxed text-muted-foreground">
+  								{provider.tracks}
+  							</p>
+							</div>
+
+							<footer className="flex items-center gap-1.5 bg-muted border-t border-border p-4 text-xs text-muted-foreground/80 mt-auto">
 								<KeyRound className="size-3.5 shrink-0" />
 								<span className="truncate font-mono" title={provider.auth}>
 									{provider.auth}
 								</span>
 							</footer>
-						</article>
+						</a>
 					))}
 
 					{/* Add provider */}
@@ -81,11 +90,12 @@ export default function ProvidersPage() {
 						href={`${repo.url}/issues/new`}
 						target="_blank"
 						rel="noreferrer"
-						className="group flex min-h-40 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border/60 bg-transparent p-5 text-center transition-all hover:border-foreground/30 hover:bg-card/40"
+						className="group flex min-h-40 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border/60 bg-transparent p-5 text-center transition-all"
 					>
 						<span className="flex size-10 items-center justify-center rounded-xl border border-border bg-background text-muted-foreground transition-colors group-hover:text-foreground">
 							<Plus className="size-5" />
-						</span>
+            </span>
+
 						<span className="font-heading text-base font-semibold text-muted-foreground transition-colors group-hover:text-foreground">
 							Add a provider
 						</span>
@@ -96,16 +106,26 @@ export default function ProvidersPage() {
 				</section>
 
 				{/* Security note */}
-				<section className="flex items-start gap-3 rounded-2xl border border-border bg-card/30 p-5 text-sm text-muted-foreground">
-					<ShieldCheck className="mt-0.5 size-5 shrink-0 text-foreground/70" />
-					<p className="max-w-3xl leading-relaxed">
-						<span className="font-medium text-foreground">
+				<section className="flex items-start gap-4 rounded-2xl border border-emerald-500/10 bg-emerald-500/10 p-4 text-sm">
+          <ShieldCheck className="mt-0.5 size-5 shrink-0 text-emerald-500" />
+
+          <div className="flex flex-col gap-2 leading-relaxed">
+            <span className="font-medium text-emerald-500">
 							Your credentials never leave your machine.
-						</span>{" "}
-						ai-status ships no API keys — each provider reads tokens straight from
-						the local auth files you already have, and only talks to that
-						provider's own API. Nothing is proxied through us.
-					</p>
+            </span>
+
+            <div className="text-muted-foreground">
+              <p>
+    						{site.name} ships no API keys — each provider reads tokens straight from
+    						the local auth files you already have, and only talks to that
+    						provider's own API. Nothing is proxied through us.
+              </p>
+
+              <p>
+                We do not store your credentials or tokens on our servers, any credentials are stored locally ONLY on your machine.
+              </p>
+            </div>
+          </div>
 				</section>
 			</main>
 

@@ -7,7 +7,7 @@ import { HighlightedCodeBlock } from "@/components/code-highlight";
 import { FeatureVisuals } from "@/components/features-visuals";
 import { WaybarReplica } from "@/components/waybar-replica";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, ShieldCheck } from "lucide-react";
 
 import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
 import { repo } from "@/lib/env";
@@ -28,12 +28,15 @@ export default async function Homepage() {
 
     if (res.ok) {
       const data = await res.json();
+
       if (data.tag_name) {
         latestVersion = data.tag_name;
 
         const parts = data.tag_name.split(".");
+
         if (parts.length > 0) {
           const last = parseInt(parts[parts.length - 1]);
+
           if (!isNaN(last) && last > 0) {
             parts[parts.length - 1] = (last - 1).toString();
             oldVersion = parts.join(".");
@@ -51,7 +54,7 @@ export default async function Homepage() {
     <div className="mx-auto flex max-w-7xl flex-col gap-8 sm:gap-16 p-6 sm:py-16">
       <Header />
 
-      <main className="grid items-start gap-10 mt-8 lg:mt-16 lg:grid-cols-2 lg:gap-16">
+      <main className="grid items-start gap-10 mt-8 lg:mt-0 lg:grid-cols-2 lg:gap-16">
         <div className="flex min-w-0 flex-col gap-16 md:gap-32 lg:gap-48 lg:pb-32 relative z-10">
           <Hero />
 
@@ -65,11 +68,13 @@ export default async function Homepage() {
                 bar shows the usage percentage of the active provider.
               </p>
             </div>
+
             <HighlightedCodeBlock
               code={WAYBAR_CUSTOM_MODULE}
               lang="json"
               label="~/.config/waybar/config.jsonc"
             />
+
             <p className="text-sm text-muted-foreground">
               To also show the active provider's logo — and get the same
               breakdown when you hover it — add the image module. The one-command
@@ -77,7 +82,11 @@ export default async function Homepage() {
               <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
                 --icon-mode logo
               </code>{" "}
-              sets this up for you. To do it by hand: the{" "}
+              sets this up for you.
+            </p>
+
+            <p className="text-sm text-muted-foreground">
+              To do it by hand: the{" "}
               <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
                 exec
               </code>{" "}
@@ -97,11 +106,13 @@ export default async function Homepage() {
               </code>
               ):
             </p>
+
             <HighlightedCodeBlock
               code={WAYBAR_LOGO_MODULE}
               lang="json"
               label="~/.config/waybar/config.jsonc"
             />
+
             <p className="text-sm text-muted-foreground">
               Then, include both{" "}
               <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
@@ -117,6 +128,7 @@ export default async function Homepage() {
               </code>
               ):
             </p>
+
             <CodeBlock
               code={WAYBAR_LAYOUT}
               label="~/.config/waybar/config.jsonc"
@@ -274,7 +286,7 @@ export default async function Homepage() {
                 target="_blank"
                 rel="noreferrer"
                 href={`${repo.url}/issues/new`}
-                className="group flex items-center gap-2 rounded-full border border-dashed border-border bg-card px-4 py-2 transition-all text-muted-foreground/50"
+                className="group flex items-center gap-2 rounded-2xl border border-dashed border-border bg-card px-4 py-2 transition-all text-muted-foreground/50"
               >
                 <span className="flex size-5 items-center justify-center rounded-sm transition-colors group-hover:text-foreground">
                   +
@@ -292,6 +304,14 @@ export default async function Homepage() {
             >
               View supported providers <ArrowRight className="size-3.5" />
             </Link>
+
+            <div className="flex items-start gap-3 rounded-2xl border border-emerald-500/10 bg-emerald-500/10 p-4 text-sm text-emerald-500">
+              <ShieldCheck className="mt-0.5 size-5 shrink-0" />
+
+    					<p className="max-w-3xl leading-relaxed font-medium">
+    						Your credentials never leave your machine.
+    					</p>
+            </div>
           </section>
         </div>
 

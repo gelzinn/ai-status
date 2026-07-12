@@ -93,7 +93,7 @@ export function CodeBlock({
 
 		checkScroll();
 		el.addEventListener("scroll", checkScroll, { passive: true });
-		
+
 		const observer = new ResizeObserver(() => checkScroll());
 		observer.observe(el);
 		if (el.firstElementChild) {
@@ -115,19 +115,20 @@ export function CodeBlock({
 		<div
 			className={`overflow-hidden rounded-2xl border border-border bg-card ${className ?? ""}`}
 		>
-			<div className="flex items-center justify-between border-b border-border py-2 pr-2 pl-4">
+			<div className="flex items-center justify-between bg-muted border-b border-border py-2 pr-2 pl-4">
 				<div className="font-mono text-xs text-muted-foreground">{label}</div>
 				<div className="flex items-center gap-2">
 					{actions}
 					<CopyButton copied={copied} onCopy={copy} subject="code" />
 				</div>
-			</div>
+      </div>
+
 			{html ? (
 				<div
 					ref={preRef as any}
 					data-scroll={scrollState}
-					className="scroll-fade-x overflow-x-auto font-mono text-[13px] leading-relaxed [&>pre]:bg-transparent! [&>pre]:p-4! [&>pre]:m-0! [&>pre]:font-mono! [&>pre]:overflow-visible! [&>pre]:w-max! [&>pre]:min-w-full! [&_code]:font-mono!"
 					dangerouslySetInnerHTML={{ __html: html }}
+					className="scroll-fade-x overflow-x-auto font-mono text-[13px] leading-relaxed [&>pre]:bg-transparent! [&>pre]:p-4! [&>pre]:m-0! [&>pre]:font-mono! [&>pre]:overflow-visible! [&>pre]:w-max! [&>pre]:min-w-full! [&_code]:font-mono!"
 				/>
 			) : (
 				<pre

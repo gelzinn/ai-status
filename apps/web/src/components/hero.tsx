@@ -1,7 +1,8 @@
 import { HighlightedCodeBlock } from "@/components/code-highlight";
-import { ArrowRightIcon } from "lucide-react";
+import { ArrowRight, ArrowRightIcon } from "lucide-react";
 import { site } from "@/lib/env";
 import { InstallTabs } from "@/components/install-tabs";
+import Link from "next/link";
 
 export function Hero() {
 	const installCmd = `curl -fsSL ${site.installUrl} | bash`;
@@ -12,7 +13,8 @@ export function Hero() {
 			</h1>
 			<p className="max-w-xl text-lg text-muted-foreground motion-safe:animate-fade-up [animation-delay:100ms]">
 				Track API usage limits across Claude, Copilot, Codex, Z.AI, Kiro, Antigravity, and OpenCode in real time.
-			</p>
+      </p>
+
 			<InstallTabs
 				linux={
 					<HighlightedCodeBlock
@@ -38,7 +40,14 @@ export function Hero() {
 						className="w-full"
 					/>
 				}
-			/>
+      />
+
+      <Link
+        href="/llms.txt"
+        className="inline-flex items-center gap-1 text-sm font-medium text-foreground hover:text-muted-foreground transition-colors w-fit mt-1"
+      >
+        Copy-paste install guide for LLMs <ArrowRight className="size-3.5" />
+      </Link>
 		</section>
 	);
 }

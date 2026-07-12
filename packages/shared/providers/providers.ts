@@ -3,7 +3,7 @@ import data from './providers.json';
 export const PROVIDERS = Object.fromEntries(
 	Object.entries(data).map(([key, value]) => [
 		key.toUpperCase(),
-		value,
+		{ ...value, slug: key },
 	])
 );
 
