@@ -42,6 +42,16 @@ The installer walks you through a short setup — choose how the module looks (p
 
 **If you let the installer configure Waybar, you're all set** — jump to [how it works](#how-it-works). The steps below are only needed if you opted out of automatic setup.
 
+### macOS (SwiftBar)
+
+On macOS the module runs as a [SwiftBar](https://swiftbar.app) plugin instead of a Waybar module:
+
+```bash
+curl -fsSL https://ai-status.gelzin.com/install/macos | bash
+```
+
+It installs the same provider core and drops an `ai-status` plugin into your SwiftBar plugin folder. The menu bar shows the selected provider's usage; the dropdown lists every provider with progress bars and reset timers — **click a provider** (or one of its limits) to select it, and use **Refresh** / **Settings** at the bottom. By default the plugin *streams*, animating the Claude spark in the menu bar while it refreshes; for a simpler, non-animated plugin run `curl -fsSL https://ai-status.gelzin.com/install/macos | bash -s -- --mode periodic`. Requires [SwiftBar](https://swiftbar.app) (`brew install --cask swiftbar`) and `python3`. Re-run to update.
+
 ### Manual Waybar setup
 
 Add the module definition to `~/.config/waybar/config.jsonc`:

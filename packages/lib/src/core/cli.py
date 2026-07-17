@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import subprocess
 from . import daemon
 from . import state
@@ -96,6 +97,199 @@ def cycle_metric():
 
     state.save_selected(selected)
 
+
+# ── macOS / SwiftBar ──────────────────────────────────────────────────────
+# macOS has no Waybar daemon streaming JSON. SwiftBar runs a plugin script on
+# an interval (or as a long-lived streamable process) and renders its stdout.
+# The plugin reads the shared cache and renders; a refresh is a detached child
+# so the short-lived plugin invocation never blocks on the network.
+
+SWIFTBAR_STALE_SECS = 300  # background-refresh cadence, matching the daemon
+
+
+def _cache_age():
+    try:
+        return time.time() - os.path.getmtime(state.CACHE_FILE)
+    except OSError:
+        return None
+
+
+def _refresh_in_flight():
+    """True while *any* refresh holds the query lock — our own background thread,
+    the ``Refresh`` menu action, or the periodic plugin's spawned child. Lets the
+    stream animate the spark for a manual refresh too, not just its own."""
+    try:
+        return time.time() - os.path.getmtime(state.LOCK_FILE) < 20
+    except OSError:
+        return False
+
+
+def _swiftbar_refresh():
+    """Fetch every enabled provider and save the shared cache (blocking).
+
+    Used both by the background refresh and by the "Refresh" menu action. The
+    query lock keeps two refreshes from running at once — if one already holds
+    it, this call is a no-op and the running one updates the cache."""
+    from . import fetch
+
+    if not state.acquire_lock():
+        return
+    try:
+        data = fetch.fetch_all_data()
+        if data:
+            state.save_cache(data)
+    finally:
+        state.release_lock()
+
+
+def _spawn_background_refresh():
+    """Detach a child running ``swiftbar-refresh`` so the cache refreshes out of
+    band. A thread would die with the plugin process, so this must be its own
+    session. Skips spawning when a refresh is already in flight."""
+    if not state.acquire_lock():
+        return
+    state.release_lock()  # only probed for one in flight; the child re-acquires
+    try:
+        subprocess.Popen(
+            [sys.executable, os.path.realpath(sys.argv[0]), "swiftbar-refresh"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception:
+        pass
+
+
+def _swiftbar_select(args):
+    """Set the active provider/metric from a menu click (replaces Waybar scroll).
+
+    ``args`` = [dir_name, idx, metric_key?]. A missing metric falls back to the
+    provider's first metric."""
+    # SwiftBar may or may not strip surrounding quotes from param values; strip
+    # defensively so ``param4="rolling"`` never arrives as the literal `"rolling"`
+    # (which would fail every comparison and make clicks a silent no-op).
+    args = [a[1:-1] if len(a) >= 2 and a[0] == '"' and a[-1] == '"' else a for a in args]
+    if not args:
+        return
+    dir_name = args[0]
+    try:
+        idx = int(args[1]) if len(args) > 1 else 0
+    except ValueError:
+        idx = 0
+    metric = args[2] if len(args) > 2 else None
+    selected = state.load_selected() or {}
+    selected["provider"] = dir_name
+    selected["idx"] = idx
+    selected["metric"] = metric or _first_metric_for(state.load_cache(), dir_name, idx)
+    state.save_selected(selected)
+
+
+def swiftbar_render():
+    """Print the SwiftBar menu from the cache, kicking a background refresh when
+    the cache is missing or stale."""
+    from . import swiftbar as sb
+
+    age = _cache_age()
+    if age is None or age >= SWIFTBAR_STALE_SECS:
+        _spawn_background_refresh()
+    print(sb.render_from_state())
+
+
+def _swiftbar_sig():
+    """Cheap change signature (cache + selection mtimes) so the idle stream only
+    re-emits when something actually changed."""
+    def mt(path):
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return 0
+    return (mt(state.CACHE_FILE), mt(state.SELECTED_FILE))
+
+
+def swiftbar_stream():
+    """Long-lived SwiftBar *streamable* plugin.
+
+    Renders from the shared cache (the Tier-1 model) and animates the Claude
+    spark in the menu bar while a refresh is in flight — the menu-bar analogue
+    of the shimmer the Linux tooltip shows. SwiftBar keeps this process alive,
+    so the refresh runs in a background thread and the loop streams one full
+    menu per frame, each terminated by SwiftBar's ``~~~`` separator.
+    """
+    import signal
+    import threading
+    from . import swiftbar as sb
+
+    state.register_pid()  # lets `ai-status refresh` (SIGUSR1) poke us
+    refreshing = threading.Event()
+
+    def do_refresh():
+        refreshing.set()
+        try:
+            _swiftbar_refresh()
+        finally:
+            refreshing.clear()
+
+    def kick(*_):
+        if not refreshing.is_set():
+            threading.Thread(target=do_refresh, daemon=True).start()
+
+    try:
+        signal.signal(signal.SIGUSR1, kick)
+    except (ValueError, OSError):
+        pass
+
+    FRAME_DELAY = 0.12   # spark animation cadence
+    IDLE_POLL = 0.4      # responsiveness to menu-click selection changes
+    HEARTBEAT = 30.0     # re-emit at least this often when idle
+    last_auto = 0.0
+    last_sig = None
+    last_emit = 0.0
+    frame_idx = 0
+
+    age = _cache_age()
+    if age is None or age >= SWIFTBAR_STALE_SECS:
+        kick()
+
+    while True:
+        try:
+            now = time.time()
+            age = _cache_age()
+            if (not refreshing.is_set()
+                    and (age is None or age >= SWIFTBAR_STALE_SECS)
+                    and now - last_auto >= SWIFTBAR_STALE_SECS):
+                last_auto = now
+                kick()
+
+            cache = state.load_cache()
+            selected = state.load_selected()
+
+            if refreshing.is_set() or _refresh_in_flight():
+                spinner = sb.SPINNERS[frame_idx % len(sb.SPINNERS)]
+                menu = sb.render_menu(
+                    cache, selected,
+                    spinner=spinner,
+                    title_image=sb.spark_frame(frame_idx),
+                )
+                sys.stdout.write(menu + "\n~~~\n")
+                sys.stdout.flush()
+                frame_idx += 1
+                last_sig = None  # force one fresh emit when the animation ends
+                time.sleep(FRAME_DELAY)
+            else:
+                frame_idx = 0
+                sig = _swiftbar_sig()
+                if sig != last_sig or now - last_emit >= HEARTBEAT:
+                    sys.stdout.write(sb.render_menu(cache, selected) + "\n~~~\n")
+                    sys.stdout.flush()
+                    last_sig = sig
+                    last_emit = now
+                time.sleep(IDLE_POLL)
+        except (BrokenPipeError, KeyboardInterrupt):
+            break
+        except Exception:
+            time.sleep(1)
+
+
 def print_logo():
     """Output for the waybar image module: line 1 is the logo PNG path, line 2
     is the tooltip (the same rich breakdown as the text module).
@@ -178,10 +372,22 @@ def main():
         scroll_down()
     elif len(sys.argv) > 1 and sys.argv[1] == "cycle-metric":
         cycle_metric()
+    elif len(sys.argv) > 1 and sys.argv[1] == "swiftbar":
+        swiftbar_render()
+    elif len(sys.argv) > 1 and sys.argv[1] == "swiftbar-stream":
+        swiftbar_stream()
+    elif len(sys.argv) > 1 and sys.argv[1] == "swiftbar-refresh":
+        _swiftbar_refresh()
+    elif len(sys.argv) > 1 and sys.argv[1] == "swiftbar-select":
+        _swiftbar_select(sys.argv[2:])
     elif len(sys.argv) > 1 and sys.argv[1] == "logo":
         print_logo()
     elif len(sys.argv) > 1 and sys.argv[1] == "revert":
         revert_waybar()
     else:
-        print("Usage: ai-status [daemon|refresh|config|scroll-up|scroll-down|cycle-metric|logo|revert]")
+        print(
+            "Usage: ai-status [daemon|refresh|config|scroll-up|scroll-down|"
+            "cycle-metric|logo|revert|swiftbar|swiftbar-stream|swiftbar-refresh|"
+            "swiftbar-select]"
+        )
         sys.exit(1)

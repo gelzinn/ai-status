@@ -7,6 +7,7 @@ import { GithubIcon } from "@/components/github-icon";
 
 export function Cta() {
 	const installCmd = `curl -fsSL ${site.installUrl} | bash`;
+	const installCmdMac = `curl -fsSL ${site.installUrlMac} | bash`;
 	return (
 		<section className="relative mt-24 overflow-hidden rounded-3xl border border-border bg-card/40 p-6 sm:text-center sm:px-16 sm:py-20">
 			{/* Grid pattern */}
@@ -49,7 +50,7 @@ export function Cta() {
 						}
 						mac={
 							<HighlightedCodeBlock
-								code="# macOS support is coming soon! Stay tuned."
+								code={installCmdMac}
 								lang="bash"
 								label="bash"
 								className="w-full m-0!"
