@@ -6,6 +6,7 @@ import Link from "next/link";
 
 export function Hero() {
 	const installCmd = `curl -fsSL ${site.installUrl} | bash`;
+	const installCmdMac = `curl -fsSL ${site.installUrlMac} | bash`;
 	return (
 		<section className="flex flex-col gap-8">
 			<h1 className="font-heading max-w-2xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl motion-safe:animate-fade-up">
@@ -26,7 +27,7 @@ export function Hero() {
 				}
 				mac={
 					<HighlightedCodeBlock
-						code="# macOS support is coming soon! Stay tuned."
+						code={installCmdMac}
 						lang="bash"
 						label="bash"
 						className="w-full"

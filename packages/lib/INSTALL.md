@@ -34,6 +34,28 @@ Arrow keys toggle Yes/No, Enter confirms. On first run the wizard asks:
 5. Show percentage? (e.g. "4%")
 6. Add modules to Waybar config automatically?
 
+## macOS (SwiftBar)
+
+macOS has no Waybar; the module runs as a [SwiftBar](https://swiftbar.app) plugin instead. One command installs it:
+
+```bash
+curl -fsSL https://ai-status.gelzin.com/install/macos | bash
+```
+
+This extracts the shared core, symlinks `~/.local/bin/ai-status`, seeds the first fetch, and drops an `ai-status` plugin into your SwiftBar plugin folder (auto-detected from SwiftBar's preferences, or `~/Library/Application Support/SwiftBar/Plugins` by default).
+
+- The **menu bar** shows the selected provider and its percentage.
+- The **dropdown** lists every provider with a progress bar and reset timer. Click a provider — or one of its limits — to make it the active one (this replaces Waybar's scroll). **Refresh** and **Settings** sit at the bottom.
+- By default the plugin runs in **stream** mode: it animates the Claude spark in the menu bar while a refresh is in flight (the menu-bar analogue of the Waybar loading shimmer). Pass `--mode periodic` for a simpler plugin that just re-renders on an interval:
+
+  ```bash
+  curl -fsSL https://ai-status.gelzin.com/install/macos | bash -s -- --mode periodic
+  ```
+
+Requirements: [SwiftBar](https://swiftbar.app) (`brew install --cask swiftbar`) and `python3` (bundled with the Xcode Command Line Tools). Re-run the install command to update; it writes a single `ai-status.*.py` plugin and refreshes SwiftBar.
+
+The spark animation frames are vendored from the MIT-licensed [`m1ckc3s/claude-status-bar`](https://github.com/m1ckc3s/claude-status-bar).
+
 ## Manual Waybar config
 
 If you skipped automatic Waybar setup, add these blocks to `~/.config/waybar/config.jsonc`:
