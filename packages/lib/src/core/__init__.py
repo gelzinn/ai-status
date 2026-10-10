@@ -1,6 +1,7 @@
 import os
+from .paths import LIB_DIR
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = str(LIB_DIR)
 VERSION_FILE = os.path.join(ROOT, "VERSION")
 
 if os.path.exists(VERSION_FILE):

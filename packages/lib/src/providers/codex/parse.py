@@ -1,5 +1,5 @@
 import json
-from core import reset_credits
+from core.reset_credits import from_codex
 
 
 def _window_type(seconds):
@@ -42,8 +42,11 @@ def parse(raw_output):
             "reset_in_seconds": int(reset) if reset else None,
         })
 
-    return {
+    result = {
         "provider": f"Codex ({plan.capitalize()})",
         "metrics": metrics,
-        "reset_credits": reset_credits.from_codex(data),
     }
+    credits = from_codex(data)
+    if credits is not None:
+        result["reset_credits"] = credits
+    return result

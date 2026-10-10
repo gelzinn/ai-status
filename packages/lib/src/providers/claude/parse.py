@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timezone
-from core import reset_credits
+from core.reset_credits import from_claude
 
 GROUP_TYPES = {
     "session": "rolling",
@@ -53,10 +53,12 @@ def _scope_label(limit):
 def _metrics_from_limits(limits):
     metrics = []
     for limit in limits:
+        if not isinstance(limit, dict):
+            continue
         pct = limit.get("percent")
         if pct is None:
             continue
-        mtype = GROUP_TYPES.get(limit.get("group"), "generic")
+        mtype = "weekly" if limit.get("kind") == "weekly_scoped" else GROUP_TYPES.get(limit.get("group"), "generic")
         reset_secs = _seconds_until(limit.get("resets_at"))
         metric = {
             "type": mtype,
@@ -66,7 +68,7 @@ def _metrics_from_limits(limits):
         label = _scope_label(limit)
         if label:
             reset_text = _format_reset(reset_secs)
-            metric["detail"] = f"{label} · {reset_text}" if reset_text else label
+            metric["detail"] = f"{label} · {reset_text or 'no reset available'}"
         metrics.append(metric)
     return metrics
 
@@ -123,8 +125,18 @@ def parse(raw_output):
         }
 
     limits = usage.get("limits")
-    metrics = _metrics_from_limits(limits) if isinstance(limits, list) else []
-    if not metrics:
-        metrics = _metrics_from_windows(usage)
+    limits = limits if isinstance(limits, list) else []
+    metrics = _metrics_from_windows(usage)
+    if metrics:
+        # The newer limits array contains extra model windows, not replacements
+        # for the five-hour/weekly windows returned alongside it.
+        metrics.extend(_metrics_from_limits([limit for limit in limits
+            if isinstance(limit, dict) and limit.get("kind") == "weekly_scoped" and _scope_label(limit)]))
+    else:
+        metrics = _metrics_from_limits(limits)
 
-    return {"provider": provider, "metrics": metrics, "reset_credits": reset_credits.from_claude(usage)}
+    result = {"provider": provider, "metrics": metrics}
+    credits = from_claude(usage)
+    if credits is not None:
+        result["reset_credits"] = credits
+    return result

@@ -1,5 +1,8 @@
 # Installing AI Status
 
+For the native Windows 10/11 tray app and bundled installer, follow the
+[Windows guide](WINDOWS.md). The Bash/Waybar instructions below are for Linux.
+
 ## One-command install (recommended for LLMs)
 
 Copy and run this single command. It detects your active bar and configures Waybar or Omarchy Quickshell with sensible defaults (provider logo, name, model, and percentage shown):
@@ -53,6 +56,12 @@ omarchy plugin remove io.github.gelzinn.ai-status
 ```
 
 The AI Status installer offers this same integration with `--bar quickshell --configure-bar true`. It keeps the existing lean CLI installation and uses Omarchy's Git-managed add/update commands for the plugin, preserving its placement. If a plugin folder is not Git-managed, it reports the conflict and leaves that folder untouched. A local development install clones the checkout's committed HEAD; uncommitted QML edits must be tested in a user-owned plugin copy instead.
+
+The script downloads the latest published stable release, even when `main`
+has newer commits. Add `--version v0.9.0` to select a specific compatible
+release. Packages are verified with SHA-256 and validated before activation;
+updates preserve existing preferences unless you pass flags to change them.
+See [Updating AI Status](UPDATES.md) for details and rollback.
 
 ## Interactive install
 
@@ -164,6 +173,8 @@ The config TUI lets you enable/disable providers, reorder with Shift+J/K, toggle
 | `--configure-waybar` | `true`, `false`; legacy flag selecting Waybar |
 | `--no-interactive` | skip wizard |
 | `--skip-check` | skip dependency check |
+| `--version` | install a published `vX.Y.Z` version with the remote installer |
+| `--rollback` | restore the previous local installation, without a download |
 
 ## Daemon interfaces
 

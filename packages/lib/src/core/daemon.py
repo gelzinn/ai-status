@@ -10,6 +10,7 @@ from . import render
 from . import logos
 from . import config as cfgmod
 from . import quickshell
+from . import paths
 
 should_update = True
 is_updating = False
@@ -49,9 +50,8 @@ def update_task(output_format="waybar"):
                     _pending.discard(dir_name)
 
                 data = fetch.fetch_all_data(on_result=on_result, include_errors=output_format == "quickshell")
-                if data or output_format == "quickshell":
-                    latest_data = data
-                    state.save_cache(data)
+                latest_data = data
+                state.save_cache(data)
             finally:
                 state.release_lock()
         else:
@@ -114,6 +114,7 @@ def _run(output_format="waybar"):
     last_update_check = 0
     last_config_mtime = 0
     last_selected_mtime = 0
+    last_refresh = paths.read_json(state.REFRESH_FILE)
     should_update = True
     selected = state.load_selected()
 
@@ -124,6 +125,11 @@ def _run(output_format="waybar"):
     while True:
         try:
             now = time.time()
+            if paths.IS_WINDOWS:
+                refresh = paths.read_json(state.REFRESH_FILE)
+                if refresh != last_refresh:
+                    last_refresh = refresh
+                    should_update = True
             
             if now - last_update_check >= 3600:
                 fetch.check_for_updates()
@@ -211,7 +217,7 @@ def _terminate(signum, frame):
 def run(output_format="waybar"):
     state.register_pid()
     previous = signal.signal(signal.SIGTERM, _terminate)
-    previous_refresh = signal.signal(signal.SIGUSR1, handle_signal)
+    previous_refresh = signal.signal(signal.SIGUSR1, handle_signal) if not paths.IS_WINDOWS else None
     try:
         _run(output_format)
     except KeyboardInterrupt:
@@ -219,4 +225,5 @@ def run(output_format="waybar"):
     finally:
         state.unregister_pid()
         signal.signal(signal.SIGTERM, previous)
-        signal.signal(signal.SIGUSR1, previous_refresh)
+        if not paths.IS_WINDOWS:
+            signal.signal(signal.SIGUSR1, previous_refresh)

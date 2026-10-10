@@ -3,7 +3,7 @@ import math
 from html import escape
 from . import fetch
 from . import state
-from . import reset_credits
+from .reset_credits import display_lines as reset_credit_lines
 
 TYPE_NAMES = {
     "rolling": "Rolling Usage",
@@ -34,6 +34,8 @@ def metric_key(metric):
     Fable weekly limit) the label prefix in ``detail`` disambiguates them so
     each can be selected independently."""
     t = metric.get("type", "generic")
+    if metric.get("name"):
+        return f"{t}:{metric['name']}"
     detail = metric.get("detail") or ""
     if " · " in detail:
         label = detail.split(" · ", 1)[0].strip()
@@ -189,20 +191,12 @@ def format_reset_time(seconds, mtype):
     return f"Resets in {minutes}m"
 
 
-def _reset_credit_lines(provider_data):
-    credits = reset_credits.presentation(provider_data.get("reset_credits"))
-    if not credits:
-        return []
-    return ["    " + _dim(escape(text), DIM_RESET) for text in
-            ["Reset credits: " + credits["summary"]] + credits["details"]] + [""]
-
-
 def format_provider_block(
     provider_data, selected_dir=None, selected_idx=None, selected_metric=None
 ):
     provider = provider_data.get("provider", "AI Provider")
     metrics = provider_data.get("metrics", [])
-    if not metrics and not _reset_credit_lines(provider_data):
+    if not metrics:
         return ""
 
     is_selected = (
@@ -245,7 +239,8 @@ def format_provider_block(
         if detail:
             lines.append("    " + _dim(detail, recede if recede else DIM_RESET))
         lines.append("")
-    lines.extend(_reset_credit_lines(provider_data))
+    for line in reset_credit_lines(provider_data.get("reset_credits")):
+        lines.append("    " + _dim(escape(line), DIM_INACTIVE))
     return "\n".join(lines)
 
 
@@ -254,7 +249,7 @@ def format_loading_provider_block(
 ):
     provider = provider_data.get("provider", "AI Provider")
     metrics = provider_data.get("metrics", [])
-    if not metrics and not _reset_credit_lines(provider_data):
+    if not metrics:
         return ""
 
     # Identical layout to format_provider_block (prefix arrow, active bullet,
@@ -297,7 +292,8 @@ def format_loading_provider_block(
         if detail:
             lines.append("    " + _dim(detail, recede if recede else DIM_RESET))
         lines.append("")
-    lines.extend(_reset_credit_lines(provider_data))
+    for line in reset_credit_lines(provider_data.get("reset_credits")):
+        lines.append("    " + _dim(escape(line), DIM_INACTIVE))
     return "\n".join(lines)
 
 

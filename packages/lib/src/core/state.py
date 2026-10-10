@@ -1,14 +1,18 @@
 import os
 import json
 import time
-import fcntl
-import tempfile
+import uuid
+from . import paths
 
-CACHE_FILE = os.path.expanduser("~/.cache/ai-status.json")
-SELECTED_FILE = os.path.expanduser("~/.config/ai-status/selected.json")
+if not paths.IS_WINDOWS:
+    import fcntl
 
-LOCK_FILE = "/tmp/ai-status-query.lock"
-PID_FILE = "/tmp/ai-status.pids"
+CACHE_FILE = str(paths.CACHE_DIR / "usage.json") if paths.IS_WINDOWS else os.path.expanduser("~/.cache/ai-status.json")
+SELECTED_FILE = str(paths.CONFIG_DIR / "selected.json")
+
+LOCK_FILE = str(paths.RUNTIME_DIR / "ai-status-query.lock")
+PID_FILE = str(paths.RUNTIME_DIR / "ai-status.pids")
+REFRESH_FILE = str(paths.RUNTIME_DIR / "ai-status-refresh.json")
 
 ICON_MODES = ["off", "bot", "logo"]
 
@@ -23,25 +27,16 @@ def get_icon_mode(selected):
 def load_cache():
     if os.path.exists(CACHE_FILE):
         try:
-            with open(CACHE_FILE, "r") as f:
-                return json.load(f)
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, list) else []
         except Exception:
             pass
     return []
 
 def _save_json(path, data):
-    """Atomic publication for frontends reading shared state concurrently."""
-    directory = os.path.dirname(path)
-    os.makedirs(directory, exist_ok=True)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory, delete=False) as f:
-            temporary = f.name
-            json.dump(data, f)
-        os.replace(temporary, path)
-    finally:
-        if temporary and os.path.exists(temporary):
-            os.unlink(temporary)
+    """Publish shared preferences through the portable atomic writer."""
+    paths.atomic_json(path, data)
 
 def save_cache(data):
     try:
@@ -51,11 +46,13 @@ def save_cache(data):
 
 def acquire_lock():
     try:
+        os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
         if os.path.exists(LOCK_FILE):
             mtime = os.path.getmtime(LOCK_FILE)
-            if time.time() - mtime < 15:
+            if time.time() - mtime < 90:
                 return False
-        with open(LOCK_FILE, "w") as f:
+            os.remove(LOCK_FILE)
+        with open(LOCK_FILE, "x") as f:
             f.write(str(os.getpid()))
         return True
     except Exception:
@@ -70,6 +67,9 @@ def release_lock():
 
 def _update_pids(register):
     # A widget disappearing must not remove another frontend's refresh target.
+    if paths.IS_WINDOWS:
+        return
+    os.makedirs(os.path.dirname(PID_FILE), exist_ok=True)
     try:
         with open(PID_FILE, "a+") as f:
             fcntl.flock(f, fcntl.LOCK_EX)
@@ -102,8 +102,9 @@ def unregister_pid():
 def load_selected():
     if os.path.exists(SELECTED_FILE):
         try:
-            with open(SELECTED_FILE, "r") as f:
-                return json.load(f)
+            with open(SELECTED_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else None
         except Exception:
             pass
     return None
@@ -115,6 +116,9 @@ def save_selected(data):
         pass
 
 def trigger_refresh():
+    if paths.IS_WINDOWS:
+        paths.atomic_json(REFRESH_FILE, {"request": uuid.uuid4().hex})
+        return
     if os.path.exists(PID_FILE):
         try:
             with open(PID_FILE, "r") as f:

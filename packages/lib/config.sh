@@ -13,9 +13,12 @@ fi
 
 export REPO_URL
 if [ -z "$REPO_URL" ]; then
-  REPO_URL=$(git -C "$(dirname "$0")" remote get-url origin 2>/dev/null \
-    | sed 's/^git@github\.com:/https:\/\/github.com\//' \
-    | sed 's/\.git$//')
+  # Release packages are not git checkouts, and git is optional for users.
+  # A checkout without an origin must also keep working under set -e.
+  if command -v git >/dev/null 2>&1 && CONFIG_REPO_URL=$(git -C "$(dirname "$0")" remote get-url origin 2>/dev/null); then
+    REPO_URL="${CONFIG_REPO_URL/#git@github.com:/https:\/\/github.com/}"
+    REPO_URL="${REPO_URL%.git}"
+  fi
   : "${REPO_URL:=https://github.com/gelzinn/ai-status}"
 fi
 

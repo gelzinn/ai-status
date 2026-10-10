@@ -5,11 +5,10 @@ import argparse
 import json
 from . import daemon
 from . import state
-from . import tui
 from . import logos
 from . import render
 from . import config as cfgmod
-from . import quickshell
+from . import quickshell, paths, fetch
 
 TERMINALS = ["foot", "alacritty", "kitty", "ghostty", "wezterm", "xterm"]
 
@@ -163,6 +162,49 @@ def revert_waybar():
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+    command = sys.argv[1] if len(sys.argv) > 1 else ""
+    if command == "--query":
+        if len(sys.argv) != 3:
+            raise SystemExit("Usage: ai-status --query PROVIDER")
+        fetch.run_query(sys.argv[2])
+    elif command == "doctor":
+        info = {"version": fetch.get_version_info()["current"],
+                "providers": cfgmod.available_providers(), "config": str(paths.CONFIG_DIR),
+                "cache": str(paths.CACHE_DIR), "desktop": False, "conpty": False}
+        try:
+            from . import tray
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance() or QApplication([])
+            info["desktop"] = not tray.status_icon().isNull()
+            if paths.IS_WINDOWS:
+                from .windows_console import available
+                info["conpty"] = available()
+            if "--smoke" in sys.argv:
+                info.update(tray.smoke_test())
+        except ImportError:
+            pass
+        if "--http-smoke" in sys.argv:
+            from .provider_http import request
+            response = json.loads(request("https://api.github.com/", timeout=10))
+            info["native_https"] = paths.IS_WINDOWS and "current_user_url" in response
+        print(json.dumps(info, ensure_ascii=False))
+    elif command == "status":
+        errors = {}
+        data = fetch.fetch_all_data(on_error=lambda name, message: errors.update({name: message}))
+        state.save_cache(data)
+        print(json.dumps({"providers": data, "errors": errors}, ensure_ascii=False))
+    elif command == "tray" or (paths.IS_WINDOWS and command in ("", "config")):
+        from . import tray
+        tray.run(configure=command == "config")
+
+    else:
+        return _frontend_main()
+
+
+def _frontend_main():
     parser = argparse.ArgumentParser(prog="ai-status")
     parser.add_argument("command", choices=["daemon", "refresh", "config", "save-settings", "scroll-up", "scroll-down", "cycle-metric", "logo", "revert"])
     parser.add_argument("--format", choices=["waybar", "quickshell"], default="waybar")
@@ -185,9 +227,11 @@ def main():
         state.trigger_refresh()
     elif args.command == "daemon":
         if args.format == "waybar":
-            sys.stderr = open('/tmp/ai-status-error.log', 'w')
+            paths.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            sys.stderr = open(paths.LOG_FILE, 'w', encoding='utf-8')
         daemon.run(output_format=args.format)
     elif args.command == "config":
+        from . import tui
         if not sys.stdout.isatty():
             for term in TERMINALS:
                 if subprocess.run(["which", term], capture_output=True).returncode == 0:

@@ -1,13 +1,12 @@
 import os
 import json
+from . import paths
 
-CONFIG_DIR = os.path.expanduser("~/.config/ai-status")
+CONFIG_DIR = str(paths.CONFIG_DIR)
 CONFIG_FILE = os.path.join(CONFIG_DIR, "providers.json")
 
 def providers_dir():
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "providers"
-    )
+    return str(paths.PROVIDERS_DIR)
 
 def available_providers():
     d = providers_dir()
@@ -21,19 +20,17 @@ def available_providers():
 def load_config():
     if os.path.exists(CONFIG_FILE):
         try:
-            with open(CONFIG_FILE) as f:
+            with open(CONFIG_FILE, encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             pass
     return None
 
 def save_config(order):
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(order, f, indent=2)
+    paths.atomic_json(CONFIG_FILE, order)
 
 def enabled_order():
     cfg = load_config()
-    if cfg is not None and isinstance(cfg, list) and len(cfg) > 0:
+    if isinstance(cfg, list):
         return cfg
     return available_providers()

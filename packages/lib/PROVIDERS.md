@@ -1,5 +1,8 @@
 # Providers & Authentication Guide
 
+For Windows credential locations and native CLI compatibility, see the
+[Windows guide](WINDOWS.md#authentication-and-provider-compatibility).
+
 **AI Status never ships or hardcodes API keys.** Every provider script reads credentials from your existing local authentication files -- OpenCode tokens, Copilot OAuth sessions, `.codex/auth.json`, and similar. Below is how each provider authenticates.
 
 ## Provider Overview
@@ -9,16 +12,17 @@
 | Antigravity | Weekly + 5-hour limits per model (Gemini, Claude/GPT) | agy CLI session | agy login state (handled by Antigravity CLI) |
 | Claude | Session (5h) + weekly, including per-model weekly limits | Claude Code OAuth (fallback: OpenCode) | `~/.claude/.credentials.json`, `~/.local/share/opencode/auth.json` |
 | Codex | 5-hour + weekly (a single monthly window on free plans) | Codex auth token | `~/.codex/auth.json` |
-| Copilot | Chat + completions usage | GitHub Copilot OAuth | `~/.config/github-copilot/host.json` |
-| Kiro | Usage percentage + reset timer | Session cookie | Browser/extension session export |
+| Copilot | Chat + completions usage | OpenCode Copilot OAuth | `~/.local/share/opencode/auth.json` |
+| Kiro | Usage percentage + reset timer | Native CLI session | `kiro-cli` login state |
 | OpenCode | Rolling, weekly, monthly usage | OpenCode auth | `~/.local/share/opencode/auth.json` |
-| Z.AI | Rolling, weekly, monthly usage | Bearer token | `~/.config/z.ai/` config files |
+| Z.AI | Rolling, weekly, monthly usage | OpenCode account key | `~/.local/share/opencode/account.json` |
+| Command Code | Monthly usage | Native CLI API key | `~/.commandcode/auth.json` or `COMMANDCODE_API_KEY` |
 
 ## Per-Provider Details
 
 ### Antigravity (Gemini + Claude/GPT)
 
-Antigravity provides usage data for both Gemini models and Claude/GPT models through its `agy` CLI. The [query.sh](src/providers/antigravity/query.sh) uses a Python PTY to interact with the CLI, send `/usage`, and capture the quota output.
+Antigravity provides usage data for both Gemini models and Claude/GPT models through its `agy` CLI. The [query.py](src/providers/antigravity/query.py) uses a Unix PTY or Windows ConPTY to interact with the CLI, send `/usage`, and capture the quota output.
 
 | Detail | |
 |---|---|

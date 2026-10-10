@@ -1,7 +1,8 @@
 
 import { ImageResponse } from "next/og";
 import { Logo } from "@/components/logo";
-import { site, repo } from "@/lib/env";
+import { site } from "@/lib/env";
+import { getLatestVersion } from "@/lib/version";
 import { PROVIDERS } from "@ai-status/shared";
 
 export const runtime = "nodejs";
@@ -24,18 +25,7 @@ const FG = "#fafafa";
 const FG_MUTED = "#a1a1aa";
 
 export default async function OgImage() {
-  let version = "v0.6.1";
-  try {
-    const res = await fetch(repo.apiUrl, { next: { revalidate: 3600 } });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.tag_name) {
-        version = data.tag_name;
-      }
-    }
-  } catch (error) {
-    console.error("Failed to fetch GitHub version for OG Image:", error);
-  }
+  const version = await getLatestVersion();
 
   return new ImageResponse(
     <div

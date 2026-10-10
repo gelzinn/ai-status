@@ -1,56 +1,24 @@
-import { Cta } from "@/components/cta";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
+import { QuickshellConfiguration } from "@/components/quickshell-configuration";
 import { Hero } from "@/components/hero";
-import { CodeBlock } from "@/components/code-block";
-import { HighlightedCodeBlock } from "@/components/code-highlight";
-import { FeatureVisuals } from "@/components/features-visuals";
+import { Features } from "@/components/features";
+import { InstallPlatformProvider, PlatformContent } from "@/components/install-platform";
+import { WaybarConfiguration } from "@/components/waybar-configuration";
+import { WindowsConfiguration } from "@/components/windows-configuration";
 import { WaybarReplica } from "@/components/waybar-replica";
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, Plus, ShieldCheck } from "lucide-react";
 
 import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
-import { site, repo, LIB_NAME } from "@/lib/env";
-import {
-  WAYBAR_CUSTOM_MODULE,
-  WAYBAR_LOGO_MODULE,
-  WAYBAR_LAYOUT,
-} from "@/lib/waybar-config";
+import { site, repo } from "@/lib/env";
+import { getLatestVersion } from "@/lib/version";
 
 export default async function Homepage() {
-  let latestVersion = "v0.6.1";
-  let oldVersion = "v0.6.0";
-
-  try {
-    const res = await fetch(repo.apiUrl, {
-      next: { revalidate: 3600 },
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-
-      if (data.tag_name) {
-        latestVersion = data.tag_name;
-
-        const parts = data.tag_name.split(".");
-
-        if (parts.length > 0) {
-          const last = parseInt(parts[parts.length - 1]);
-
-          if (!isNaN(last) && last > 0) {
-            parts[parts.length - 1] = (last - 1).toString();
-            oldVersion = parts.join(".");
-          } else {
-            oldVersion = data.tag_name + "-old";
-          }
-        }
-      }
-    }
-  } catch (e) {
-    console.error("Failed to fetch github release:", e);
-  }
+  const latestVersion = await getLatestVersion();
 
   return (
+    <InstallPlatformProvider>
     <div className="mx-auto flex max-w-7xl flex-col gap-8 sm:gap-16 p-6 sm:py-16">
       <Header />
 
@@ -58,238 +26,16 @@ export default async function Homepage() {
         <div className="flex min-w-0 flex-col gap-16 md:gap-32 lg:gap-48 lg:pb-32 relative z-10">
           <Hero />
 
-          <section className="flex flex-col gap-8">
-            <div className="flex flex-col gap-3">
-              <h2 className="font-heading text-2xl font-semibold tracking-tight">
-                Omarchy Quickshell
-              </h2>
-              <p className="max-w-xl text-muted-foreground">
-                On the new Omarchy desktop, AI Status is a native bar widget.
-                Click to open a usage panel with all your providers, limits,
-                reset timers, and a refresh button.
-              </p>
-            </div>
-            <HighlightedCodeBlock
-              code={`omarchy plugin add ${repo.url}.git --enable`}
-              lang="bash"
-              label="Install directly with Omarchy"
-            />
-            <p className="text-sm text-muted-foreground">
-              The plugin includes its Python backend and uses your existing
-              provider logins. No separate AI Status install is required.
-              Right-click to open settings inside the panel, scroll to switch provider,
-              and middle-click to cycle through limits.
-            </p>
-            <HighlightedCodeBlock
-              code={`curl -fsSL ${site.installUrl} | bash -s -- --bar quickshell --configure-bar true --no-interactive`}
-              lang="bash"
-              label="Install with the AI Status CLI"
-            />
-            <p className="text-sm text-muted-foreground">
-              The regular installer detects your active bar. You can also select
-              Waybar or Quickshell in the wizard, or pass <code>--bar waybar</code>
-              {" "}or <code>--bar quickshell</code>. It configures only the bar you choose.
-            </p>
-          </section>
+          <div role="region" aria-label="Interactive app preview" className="h-[420px] w-full sm:h-[480px] lg:hidden">
+            <WaybarReplica version={latestVersion} compact />
+          </div>
 
-          <section className="flex flex-col gap-8">
-            <div className="flex flex-col gap-3">
-              <h2 className="font-heading text-2xl font-semibold tracking-tight">
-                Waybar Configuration
-              </h2>
-              <p className="max-w-xl text-muted-foreground">
-                Add the module to your Waybar config to get started. The status
-                bar shows the usage percentage of the active provider.
-              </p>
-            </div>
+          <PlatformContent
+            linux={<><QuickshellConfiguration /><WaybarConfiguration /></>}
+            windows={<WindowsConfiguration />}
+          />
 
-            <HighlightedCodeBlock
-              code={WAYBAR_CUSTOM_MODULE}
-              lang="json"
-              label="~/.config/waybar/config.jsonc"
-            />
-
-            <p className="text-sm text-muted-foreground">
-              To also show the active provider's logo — and get the same
-              breakdown when you hover it — add the image module. The one-command
-              install with{" "}
-              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
-                --icon-mode logo
-              </code>{" "}
-              sets this up for you.
-            </p>
-
-            <p className="text-sm text-muted-foreground">
-              To do it by hand: the{" "}
-              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
-                exec
-              </code>{" "}
-              prints the logo path and its tooltip,{" "}
-              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
-                interval
-              </code>{" "}
-              keeps it refreshed, and you need an SVG rasterizer (imagemagick or
-              librsvg). Then enable logo mode in the config TUI (right-click the
-              module, set{" "}
-              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
-                Provider Icon
-              </code>{" "}
-              to{" "}
-              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
-                Provider Logo
-              </code>
-              ):
-            </p>
-
-            <HighlightedCodeBlock
-              code={WAYBAR_LOGO_MODULE}
-              lang="json"
-              label="~/.config/waybar/config.jsonc"
-            />
-
-            <p className="text-sm text-muted-foreground">
-              Then, include both{" "}
-              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
-                {`"image#${LIB_NAME}"`}
-              </code>{" "}
-              and{" "}
-              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
-                {`"custom/${LIB_NAME}"`}
-              </code>{" "}
-              in your preferred layout section (e.g.{" "}
-              <code className="bg-secondary/50 px-1.5 py-0.5 rounded-md text-foreground font-mono">
-                modules-right
-              </code>
-              ):
-            </p>
-
-            <CodeBlock
-              code={WAYBAR_LAYOUT}
-              label="~/.config/waybar/config.jsonc"
-            >
-              <pre>
-                <code>
-              <span className="text-muted-foreground/40">{"{\n"}</span>
-              <span className="text-muted-foreground/30">{"    // ...\n"}</span>
-              <span className="text-muted-foreground/40">
-                {'    "modules-right": [\n'}
-              </span>
-              {"        "}
-              <span className="text-[#ffcfa3]">{`"image#${LIB_NAME}"`}</span>
-              <span className="text-muted-foreground/40">{",\n"}</span>
-              {"        "}
-              <span className="text-[#ffcfa3]">{`"custom/${LIB_NAME}"`}</span>
-              <span className="text-muted-foreground/40">{",\n"}</span>
-              <span className="text-muted-foreground/40">
-                {'        "network",\n'}
-              </span>
-              <span className="text-muted-foreground/40">
-                {'        "cpu",\n'}
-              </span>
-              <span className="text-muted-foreground/40">
-                {'        "memory",\n'}
-              </span>
-              <span className="text-muted-foreground/40">
-                {'        "clock",\n'}
-              </span>
-              <span className="text-muted-foreground/40">
-                {'        "tray"\n'}
-              </span>
-              <span className="text-muted-foreground/40">{"    ],\n"}</span>
-              <span className="text-muted-foreground/30">{"    // ...\n"}</span>
-              <span className="text-muted-foreground/40">{"}"}</span>
-                </code>
-              </pre>
-            </CodeBlock>
-
-            <Link
-              href="/llms.txt"
-              className="inline-flex items-center gap-1 text-sm font-medium text-foreground hover:text-muted-foreground transition-colors w-fit mt-1"
-            >
-              Copy-paste install guide for LLMs <ArrowRight className="size-3.5" />
-            </Link>
-          </section>
-
-          <section className="flex flex-col gap-8 relative">
-            <div className="flex flex-col gap-8 relative z-10">
-              <div className="flex flex-col gap-3">
-                <h2 className="font-heading text-2xl font-semibold tracking-tight">
-                  Features
-                </h2>
-                <p className="max-w-xl text-muted-foreground">
-                  Everything you need to keep track of your AI usage.
-                </p>
-              </div>
-              <div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 sm:gap-4">
-                  {[
-                    {
-                      title: "Multi-Provider",
-                      description:
-                        `Tracks usage limits across ${SUPPORTED_PROVIDERS.length} AI services simultaneously.`,
-                      visual: FeatureVisuals.MultiProvider,
-                    },
-                    {
-                      title: "Live Updates",
-                      description:
-                        "Auto-refreshes every 5 minutes with animated loading states.",
-                      visual: FeatureVisuals.LiveUpdates,
-                    },
-                    {
-                      title: "Usage Details",
-                      description:
-                        "Provider limits, progress bars, and reset timers in a Waybar tooltip or native Quickshell panel.",
-                      visual: FeatureVisuals.TooltipDetail,
-                    },
-                    {
-                      title: "Configurable",
-                      description:
-                        "Enable, disable, or reorder providers from Quickshell settings or the Waybar TUI (right-click).",
-                      visual: FeatureVisuals.Configurable,
-                    },
-                    {
-                      title: "Self-Updating",
-                      description:
-                        "One command installs and keeps the module up to date automatically.",
-                      visual: () => (
-                        <FeatureVisuals.SelfUpdating
-                          latestVersion={latestVersion}
-                          oldVersion={oldVersion}
-                        />
-                      ),
-                    },
-                    {
-                      title: "Zero Dependencies",
-                      description:
-                        "Written in pure Python and Bash. No heavy runtimes required.",
-                      visual: FeatureVisuals.ZeroDependencies,
-                    },
-                  ].map((feature) => (
-                    <div
-                      key={feature.title}
-                      className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card transition-all"
-                    >
-                      {/* Visual Header */}
-                      <div className="relative flex h-52 w-full items-center justify-center overflow-hidden border-b border-border bg-background/50">
-                        {/* Subtle Grid Background */}
-                        <div className="absolute inset-0 bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] bg-size-[24px_24px] mask-[linear-gradient(to_bottom,white,transparent)] opacity-50" />
-                        <feature.visual />
-                      </div>
-                      {/* Content */}
-                      <div className="flex flex-col gap-2 p-4">
-                        <h3 className="font-heading text-lg font-semibold text-foreground">
-                          {feature.title}
-                        </h3>
-                        <p className="text-sm leading-relaxed text-muted-foreground">
-                          {feature.description}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </section>
+          <Features latestVersion={latestVersion} />
 
           <section className="flex flex-col gap-8 relative z-10">
             <div className="flex flex-col gap-3">
@@ -297,8 +43,7 @@ export default async function Homepage() {
                 Supported Providers
               </h2>
               <p className="max-w-xl text-muted-foreground">
-                Keep track of limits for the most popular AI services used
-                inside companies.
+                See which providers are supported and how to connect each one.
               </p>
             </div>
 
@@ -374,9 +119,8 @@ export default async function Homepage() {
         </aside>
       </main>
 
-      <Cta />
-
       <Footer />
     </div>
+    </InstallPlatformProvider>
   );
 }

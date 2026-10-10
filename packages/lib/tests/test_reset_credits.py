@@ -1,192 +1,141 @@
-import importlib.util
 import json
-import os
-from pathlib import Path
-import subprocess
-import sys
-import tempfile
-import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-SOURCE = Path(__file__).resolve().parents[1] / "src"
-sys.path.insert(0, str(SOURCE))
-from core import quickshell, render, reset_credits
+from test_portability import IsolatedState, load_provider
+from core import fetch, render, reset_credits
+from core.provider_http import QueryError
 
-
-def parser(name):
-    spec = importlib.util.spec_from_file_location(name + "_parse", SOURCE / "providers" / name / "parse.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.parse
-
-
-CLAUDE = {
-    "five_hour": {"utilization": 4, "resets_at": "2099-10-22T13:00:00Z"},
+FUTURE = "2099-10-22T16:00:00Z"
+CLAUDE_USAGE = {
+    "five_hour": {"utilization": 2}, "seven_day": {"utilization": 24},
+    "limits": [{"kind": "weekly_scoped", "percent": 53,
+                "scope": {"model": {"display_name": "Fable"}}}],
     "cedar_ember": {"eligible": True, "grants": [
-        {"id": "do-not-publish", "label": "Launch reset", "resets_left": 1,
-         "ends_at": "2099-10-22T13:00:00Z", "usable_now": True, "paused": False},
-        {"label": "Spent", "resets_left": 0, "usable_now": True},
-        {"label": "Paused", "resets_left": 2, "usable_now": True, "paused": True},
-        {"label": "Not yet usable", "resets_left": 1, "usable_now": False},
+        {"id": "redemption-secret", "label": "Opus launch reset", "resets_left": 2,
+         "ends_at": FUTURE, "usable_now": True, "paused": False},
+        {"resets_left": 1, "usable_now": False},
+        {"resets_left": 1, "usable_now": True, "paused": True},
+        {"resets_left": 0, "usable_now": True},
     ]},
 }
-CODEX = {
-    "plan_type": "plus",
-    "rate_limit": {"primary_window": {"used_percent": 3, "reset_after_seconds": 3600, "limit_window_seconds": 18000}},
-    "rate_limit_reset_credits": {"available_count": 2},
-}
-DETAILS = {"available_count": 99, "credits": [
-    {"id": "do-not-publish", "status": "available", "title": "Full reset", "expires_at": "2099-07-17T00:00:00Z"},
-    {"id": "spent-id", "status": "redeemed", "title": "Spent", "expires_at": "2099-07-01T00:00:00Z"},
-]}
+CODEX_USAGE = {"plan_type": "pro", "rate_limit": {"primary_window": {
+    "used_percent": 23, "limit_window_seconds": 18000, "reset_after_seconds": 3600}},
+    "rate_limit_reset_credits": {"available_count": 2}}
 
 
-class ResetCreditsTests(unittest.TestCase):
-    def test_claude_counts_only_redeemable_grants_and_discards_handles(self):
-        result = parser("claude")(json.dumps({"plan": "max", "usage": CLAUDE}))
-        self.assertEqual(result["metrics"][0]["percentage"], 4)
-        self.assertEqual(result["reset_credits"]["available"], 1)
-        self.assertEqual(result["reset_credits"]["credits"][0]["title"], "Launch reset")
-        self.assertNotIn("do-not-publish", json.dumps(result))
-        self.assertNotIn("Spent", json.dumps(result["reset_credits"]))
+class ResetCreditsTests(IsolatedState):
+    def codex_credentials(self):
+        self.write(self.root / "codex/auth.json", {"tokens": {
+            "access_token": "example", "account_id": "account"}})
 
-    def test_claude_optional_ineligible_or_invalid_blocks_leave_usage_intact(self):
-        for block in (None, {}, {"eligible": False, "grants": CLAUDE["cedar_ember"]["grants"]}, "invalid"):
-            result = parser("claude")(json.dumps(dict(CLAUDE, cedar_ember=block)))
-            self.assertEqual(result["metrics"][0]["percentage"], 4)
-            self.assertIsNone(result["reset_credits"])
-
-    def test_claude_grant_counts_are_summed_without_assuming_one_per_campaign(self):
-        usage = {"cedar_ember": {"eligible": True, "grants": [
-            {"resets_left": 2, "usable_now": True},
-            {"resets_left": 3, "usable_now": True},
-            {"resets_left": True, "usable_now": True},
-            {"resets_left": "9", "usable_now": True},
-            None,
-        ]}}
-        self.assertEqual(reset_credits.from_claude(usage)["available"], 5)
-
-    def test_codex_count_survives_without_expiry_details(self):
-        result = parser("codex")(json.dumps(CODEX))
-        self.assertEqual(result["reset_credits"], {"available": 2, "credits": []})
-        presentation = reset_credits.presentation(result["reset_credits"])
-        self.assertEqual(presentation["summary"], "2 resets available")
-        self.assertEqual(presentation["details"], ["Expiration not reported"])
-
-    def test_codex_filters_redeemed_credits_without_changing_usage_count(self):
-        usage = dict(CODEX, rate_limit_reset_credits=dict(CODEX["rate_limit_reset_credits"], credits=DETAILS["credits"]))
-        result = parser("codex")(json.dumps(usage))
+    def test_claude_opts_into_grants_and_preserves_all_usage_windows(self):
+        self.write(self.root / "claude/.credentials.json", {"claudeAiOauth": {
+            "accessToken": "example", "subscriptionType": "pro"}})
+        module = load_provider("claude")
+        with patch.object(module, "request", return_value=json.dumps(CLAUDE_USAGE)) as api:
+            result = load_provider("claude", "parse").parse(json.dumps(module.query()))
+        self.assertIn("cedar_ember=1", api.call_args.args[0])
+        self.assertTrue(api.call_args.args[1]["User-Agent"].startswith("claude-cli/"))
+        self.assertEqual([metric["type"] for metric in result["metrics"]], ["rolling", "weekly", "weekly"])
+        self.assertEqual(result["metrics"][2]["detail"], "Fable · no reset available")
+        self.assertEqual([render.metric_key(metric) for metric in result["metrics"]],
+                         ["rolling", "weekly", "weekly:Fable"])
         self.assertEqual(result["reset_credits"]["available"], 2)
         self.assertEqual(len(result["reset_credits"]["credits"]), 1)
-        self.assertNotIn("do-not-publish", json.dumps(result))
-        self.assertNotIn("Spent", json.dumps(result["reset_credits"]))
+        self.assertNotIn("redemption-secret", json.dumps(result))
 
-    def test_missing_zero_or_malformed_inventories_do_not_show_an_offer(self):
-        for block in (None, {}, {"available_count": 0}, {"available_count": -1}, {"available_count": True}, {"available_count": "2"}):
-            inventory = reset_credits.from_codex({"rate_limit_reset_credits": block})
-            self.assertIsNone(reset_credits.presentation(inventory))
+    def test_claude_ineligible_or_missing_grants_leave_usage_intact(self):
+        for block in (None, {}, {"eligible": False, "grants": CLAUDE_USAGE["cedar_ember"]["grants"]},
+                      {"eligible": True, "grants": None}, {"eligible": True, "grants": [None, {}, "invalid"]}):
+            with self.subTest(block=block):
+                usage = {"five_hour": {"utilization": 21}, "cedar_ember": block}
+                result = load_provider("claude", "parse").parse(json.dumps(usage))
+                self.assertEqual(result["metrics"][0]["percentage"], 21)
+                self.assertEqual(reset_credits.display_lines(result.get("reset_credits")), [])
 
-    def test_expiry_and_missing_dates_are_explicit_without_negative_countdowns(self):
-        now = datetime(2099, 7, 16, 12, tzinfo=timezone.utc)
-        inventory = reset_credits.from_codex({"rate_limit_reset_credits": {"available_count": 3, "credits": [
-            {"status": "available", "expires_at": "2099-07-17T00:00:00Z"},
-            {"status": "available", "expires_at": "2099-07-01T00:00:00Z"},
-            {"status": "available", "expires_at": "invalid"},
-        ]}})
-        lines = reset_credits.presentation(inventory, now)["details"]
-        self.assertIn("in 12h 0m", lines[0])
-        self.assertIn("Expired", lines[1])
-        self.assertNotIn("in -", lines[1])
-        self.assertIn("Expiration not reported", lines[2])
-
-    def test_shared_renderers_show_reset_credits_without_adding_usage_metrics(self):
-        data = parser("claude")(json.dumps(CLAUDE))
-        data.update(_dir="claude", _idx=0, _cached=True)
-        selected = {"provider": "claude", "idx": 0, "metric": "rolling", "icon_mode": "off"}
-        with patch("core.config.enabled_order", return_value=["claude"]):
-            snapshot = quickshell.build_snapshot([data], selected)
-        provider = snapshot["providers"][0]
-        self.assertEqual(len(provider["metrics"]), 1)
-        self.assertEqual(provider["resetCredits"]["available"], 1)
-        self.assertTrue(provider["cached"])
-        self.assertIn("Launch reset", provider["resetCredits"]["details"][0])
-        for output in (render.build_final_state([data], selected), render.build_loading_state([data], 0, selected)):
-            self.assertEqual(set(output), {"text", "tooltip"})
-            self.assertIn("Reset credits", output["tooltip"])
-            self.assertIn("1 reset available", output["tooltip"])
-
-    def test_provider_labels_are_plain_text_in_qml_and_escaped_for_pango(self):
-        data = parser("codex")(json.dumps(CODEX))
-        data.update(_dir="codex", _idx=0)
-        data["reset_credits"]["credits"] = [{"title": '<b>Max & Plus</b>', "count": 1, "expires_at": None}]
-        with patch("core.config.enabled_order", return_value=["codex"]):
-            snapshot = quickshell.build_snapshot([data])
-        self.assertIn('<b>Max & Plus</b>', snapshot["providers"][0]["resetCredits"]["details"][0])
-        tooltip = render.build_final_state([data])["tooltip"]
-        self.assertIn("&lt;b&gt;Max &amp; Plus&lt;/b&gt;", tooltip)
-
-
-class ResetQueryTests(unittest.TestCase):
-    def run_query(self, name, usage, details=None, fail_details=False):
-        with tempfile.TemporaryDirectory() as directory:
-            home = Path(directory)
-            auth = home / (".claude/.credentials.json" if name == "claude" else ".codex/auth.json")
-            auth.parent.mkdir()
-            auth.write_text(json.dumps({
-                "claudeAiOauth": {"accessToken": "fixture-token", "expiresAt": 4102444800000, "subscriptionType": "max"},
-                "tokens": {"access_token": "fixture-token", "account_id": "fixture-account"},
-            }))
-            binary = home / "bin"
-            binary.mkdir()
-            curl = binary / "curl"
-            curl.write_text('''#!/usr/bin/env python3
-import json, os, sys
-args = sys.argv[1:]
-with open(os.environ['MOCK_CURL_LOG'], 'a') as log:
-    log.write(json.dumps(args) + '\\n')
-if any('rate-limit-reset-credits' in arg for arg in args):
-    if os.environ['MOCK_FAIL_DETAILS'] == '1': sys.exit(22)
-    print(os.environ['MOCK_DETAILS'])
-else:
-    print(os.environ['MOCK_USAGE'])
-''')
-            curl.chmod(0o755)
-            log = home / "requests"
-            env = dict(os.environ, HOME=str(home), PATH=str(binary) + os.pathsep + os.environ["PATH"],
-                       MOCK_CURL_LOG=str(log), MOCK_FAIL_DETAILS="1" if fail_details else "0",
-                       MOCK_USAGE=json.dumps(usage), MOCK_DETAILS=json.dumps(details))
-            result = subprocess.run(["bash", str(SOURCE / "providers" / name / "query.sh")], env=env, capture_output=True, text=True, timeout=5)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            return parser(name)(result.stdout.strip()), [json.loads(line) for line in log.read_text().splitlines()]
-
-    def test_claude_requests_reset_inventory_using_the_accepted_client_surface(self):
-        result, requests = self.run_query("claude", CLAUDE)
-        self.assertEqual(result["reset_credits"]["available"], 1)
-        self.assertIn("https://api.anthropic.com/api/oauth/usage?cedar_ember=1", requests[0])
-        self.assertIn("User-Agent: claude-cli/2.1.281 (external, cli)", requests[0])
-
-    def test_codex_details_enrich_count_from_usage_and_never_redeem(self):
-        result, requests = self.run_query("codex", CODEX, DETAILS)
+    def test_codex_fetches_optional_expiry_with_the_same_account(self):
+        self.codex_credentials()
+        module = load_provider("codex")
+        details = {"available_count": 999, "credits": [
+            {"id": "redemption-secret", "status": "available", "title": "Full reset", "expires_at": FUTURE},
+            {"id": "spent-secret", "status": "redeemed", "expires_at": FUTURE}]}
+        with patch.object(module, "request", side_effect=[json.dumps(CODEX_USAGE), json.dumps(details)]) as api:
+            raw = module.query()
+        self.assertTrue(api.call_args.args[0].endswith("/rate-limit-reset-credits"))
+        self.assertEqual(api.call_args_list[0].args[1], api.call_args_list[1].args[1])
+        self.assertEqual(api.call_args.args[1]["ChatGPT-Account-Id"], "account")
+        self.assertNotIn("secret", raw)
+        result = load_provider("codex", "parse").parse(raw)
+        self.assertEqual(result["metrics"][0]["percentage"], 23)
         self.assertEqual(result["reset_credits"]["available"], 2)
         self.assertEqual(len(result["reset_credits"]["credits"]), 1)
-        self.assertEqual(len(requests), 2)
-        self.assertIn("https://chatgpt.com/backend-api/wham/rate-limit-reset-credits", requests[1])
-        self.assertNotIn("POST", json.dumps(requests))
-        self.assertNotIn("consume", json.dumps(requests))
+        self.assertIn("Expires", "\n".join(reset_credits.display_lines(result["reset_credits"])))
 
-    def test_codex_details_failure_does_not_lose_usage_or_count(self):
-        result, requests = self.run_query("codex", CODEX, fail_details=True)
-        self.assertEqual(result["metrics"][0]["percentage"], 3)
-        self.assertEqual(result["reset_credits"], {"available": 2, "credits": []})
-        self.assertEqual(len(requests), 2)
+    def test_codex_detail_failure_keeps_usage_and_credit_count(self):
+        self.codex_credentials()
+        module = load_provider("codex")
+        for optional in (QueryError("HTTP 403"), QueryError("HTTP 429"), "invalid JSON", "null", '{"credits":null}'):
+            with self.subTest(optional=optional):
+                with patch.object(module, "request", side_effect=[json.dumps(CODEX_USAGE), optional]):
+                    result = load_provider("codex", "parse").parse(module.query())
+                self.assertEqual(result["metrics"][0]["percentage"], 23)
+                self.assertEqual(reset_credits.display_lines(result["reset_credits"]),
+                                 ["Reset credits: 2 available", "Expiry not provided"])
 
-    def test_codex_no_available_credits_does_not_make_an_extra_request(self):
-        for block in (None, {"available_count": 0}):
-            result, requests = self.run_query("codex", dict(CODEX, rate_limit_reset_credits=block))
-            self.assertEqual(result["metrics"][0]["percentage"], 3)
-            self.assertEqual(len(requests), 1)
+    def test_codex_does_not_request_details_without_available_credits(self):
+        self.codex_credentials()
+        module = load_provider("codex")
+        for block in (None, {}, {"available_count": 0, "credits": None}, {"available_count": -1}):
+            with self.subTest(block=block):
+                raw = json.dumps({"plan_type": "pro", "rate_limit_reset_credits": block})
+                with patch.object(module, "request", return_value=raw) as api:
+                    self.assertEqual(module.query(), raw)
+                api.assert_called_once()
+                self.assertEqual(reset_credits.display_lines(reset_credits.from_codex(json.loads(raw))), [])
 
+    def test_expired_credits_disappear_and_unknown_expiry_is_explicit(self):
+        now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+        block = {"available": 2, "credits": [
+            {"count": 1, "title": "Expired reset", "expires_at": "2026-10-09T23:59:59Z"},
+            {"count": 1, "title": "Available reset", "expires_at": None}]}
+        lines = reset_credits.display_lines(block, now)
+        self.assertEqual(lines, ["Reset credits: 1 available", "Available reset", "Expiry not provided"])
+        self.assertEqual(reset_credits.display_lines({"available": 1, "credits": block["credits"][:1]}, now), [])
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_metadata_survives_cache_and_is_escaped_in_waybar_loading_and_ready(self):
+        result = load_provider("claude", "parse").parse(json.dumps(CLAUDE_USAGE))
+        result["reset_credits"]["credits"][0]["title"] = '<b>Reset & credit</b>'
+        directory = str(self.root / "providers/claude")
+        fetch._save_cache(directory, result)
+        self.assertEqual(fetch._load_cache(directory), result)
+        self.assertFalse(fetch._is_error_result(result))
+        for tooltip in (render.format_provider_block(result), render.format_loading_provider_block(result, 0)):
+            self.assertIn("Reset credits: 2 available", tooltip)
+            self.assertIn("&lt;b&gt;Reset &amp; credit&lt;/b&gt;", tooltip)
+            self.assertNotIn("<b>Reset", tooltip)
+
+    def test_malformed_optional_counts_cannot_create_credits(self):
+        for amount in (None, True, -1, 1.5, float("nan"), "invalid"):
+            with self.subTest(amount=amount):
+                self.assertEqual(reset_credits.count(amount), 0)
+        self.assertEqual(reset_credits.display_lines({"available": 1, "credits": [None, "invalid"]}),
+                         ["Reset credits: 1 available", "Expiry not provided"])
+
+    def test_display_details_do_not_exceed_available_count_or_include_expired_credits(self):
+        now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+        block = {"available": 4, "credits": [
+            {"title": "Expired", "count": 1, "expires_at": "2026-10-09T16:00:00Z"},
+            {"title": "Full reset", "count": 2, "expires_at": FUTURE},
+            {"title": "Weekly reset", "count": 9, "expires_at": FUTURE},
+            {"title": "Invalid", "count": 0}]}
+        data = reset_credits.available_credits(block, now)
+        self.assertEqual(data["available"], 3)
+        self.assertEqual([item["title"] for item in data["credits"]], ["Full reset", "Weekly reset"])
+        self.assertEqual([item["count"] for item in data["credits"]], [2, 1])
+        self.assertEqual(data["undetailed"], 0)
+        self.assertEqual(block["credits"][2]["count"], 9)  # Display normalization leaves cached data intact.
+        data = reset_credits.available_credits({"available": 3, "credits": [
+            {"title": "Full reset", "count": 1, "expires_at": FUTURE}]}, now)
+        self.assertEqual(data["available"], 3)
+        self.assertEqual(data["undetailed"], 2)

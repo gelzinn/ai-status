@@ -174,6 +174,7 @@ class SnapshotTests(unittest.TestCase):
         snapshot = quickshell.build_snapshot(data, SELECTED)
         self.assertEqual(snapshot["text"], "Claude unavailable")
 
+    @unittest.skipIf(sys.platform == "win32", "Requires Unix PID signaling and pipe selectors")
     def test_unregister_keeps_other_frontends_refresh_targets(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(state, "PID_FILE", str(Path(directory) / "pids")), patch.object(state.os, "kill"):
             with patch.object(state.os, "getpid", return_value=101):
@@ -191,6 +192,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["text"], "Codex 10%")
         self.assertEqual(SELECTED["provider"], "claude")
 
+    @unittest.skipIf(sys.platform == "win32", "Requires Unix PID signaling and pipe selectors")
     def test_real_daemon_stream_and_termination(self):
         # Run the actual CLI/loop in a subprocess, with fake queries and fully
         # isolated state; catches buffering, serialization, and SIGTERM errors.
@@ -298,6 +300,7 @@ class NativeSettingsTests(unittest.TestCase):
                 self.assertTrue(stderr.getvalue().strip())
         self.refresh.assert_not_called()
 
+    @unittest.skipIf(sys.platform == "win32", "Windows configuration uses the tray dialog")
     def test_waybar_config_retains_terminal_tui(self):
         with patch.object(sys, "argv", ["ai-status", "config"]), patch.object(sys.stdout, "isatty", return_value=True), patch("core.tui.run") as tui:
             cli.main()

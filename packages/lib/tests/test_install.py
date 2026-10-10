@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -11,6 +12,7 @@ LIB = Path(__file__).resolve().parents[1]
 PLUGIN_ID = "io.github.gelzinn.ai-status"
 
 
+@unittest.skipIf(sys.platform == "win32", "Requires Linux shell integration")
 class InstallerTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="ai-status-test-' ")

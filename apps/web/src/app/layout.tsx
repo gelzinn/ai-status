@@ -17,7 +17,7 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: `${site.name} | Waybar & Omarchy Quickshell`,
+  title: `${site.name} | AI Usage Monitor`,
   description,
   icons: {
     icon: "/favicon.svg",
