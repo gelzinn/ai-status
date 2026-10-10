@@ -6,7 +6,6 @@ from core.paths import opencode_file, read_json
 from core.provider_http import output, request, require_token
 
 # This read-only block is gated on the Claude CLI surface and version.
-# Wire reference: https://github.com/akitaonrails/ai-usagebar/blob/main/src/anthropic/fetch.rs
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage?cedar_ember=1"
 USAGE_USER_AGENT = "claude-cli/2.1.281 (external, cli)"
 

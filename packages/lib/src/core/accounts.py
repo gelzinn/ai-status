@@ -189,7 +189,6 @@ def _credential_files(environ, provider, auth_file=None):
         "cursor": [native_config / "Cursor/User/globalStorage/state.vscdb", native_config / "Cursor/auth.json",
                    native_config / "cursor/auth.json", home / ".cursor/auth.json"],
         "grok-bot": [native_config / "Grok Bot/sand-secrets.json", native_config / "Grok Bot/Local State"],
-        "nous": [native_config / "ai-usagebar/credentials.json"],
         "modelstudio": [home / ".bailian/config.json"],
         "devin": [(native_config if paths.IS_WINDOWS else data) / "devin/credentials.toml"],
         "google-cloud": [gcloud / "credentials.db", gcloud / "access_tokens.db", gcloud / "active_config",

@@ -1,8 +1,6 @@
 """Provider-specific, read-only quota and balance integrations.
 
-Wire contracts were researched using public provider documentation and the MIT
-ai-usagebar endpoint reference. This is an independent standard-library adapter;
-no provider response or credential is copied into normalized usage caches.
+No provider response or credential is copied into normalized usage caches.
 """
 import base64
 from contextlib import closing
@@ -415,10 +413,10 @@ def collect(name):
         return json_request('https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus', _bearer(token, {'Connect-Protocol-Version': '1', 'x-cursor-client-type': 'sand', 'x-cursor-client-version': '0.1.0', 'x-sand-box-namespace': 'prod', 'x-ghost-mode': 'true'}), method='POST', data={})
     if name == 'nous':
         token = _access('NOUS_ACCESS_TOKEN')
-        if not token:
-            credentials = _read(lambda: _config_root() / 'ai-usagebar/credentials.json')
+        if not token and os.environ.get('AI_STATUS_AUTH_FILE'):
+            credentials = _read(os.environ['AI_STATUS_AUTH_FILE'])
             token = (credentials.get('nous') or credentials).get('access_token')
-        require_token(token, 'Configure NOUS_ACCESS_TOKEN or an existing Nous OAuth credential file.')
+        require_token(token, 'Configure NOUS_ACCESS_TOKEN or an account auth_file with Nous OAuth credentials.')
         return json_request('https://portal.nousresearch.com/api/oauth/account', _bearer(token))
     if name == 'modelstudio':
         credentials = _read(lambda: Path.home() / '.bailian/config.json')
