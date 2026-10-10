@@ -208,12 +208,12 @@ export function WaybarReplica({ version }: { version: string }) {
         className={cn(
           "relative w-full shrink-0 flex items-center border-border z-20",
           isWindows
-            ? "order-last h-12 justify-end border-t bg-card/90 backdrop-blur-2xl px-3"
+            ? "order-last h-12 justify-between border-t bg-card/90 backdrop-blur-2xl px-3"
             : "h-10 justify-between border-b bg-card backdrop-blur-md px-4",
         )}
       >
         {isWindows ? (
-          <div aria-hidden="true" className="absolute left-1/2 -translate-x-1/2">
+          <div aria-hidden="true" className="flex size-8 items-center justify-center">
             <WindowsIcon alt="" className="size-5" />
           </div>
         ) : (
@@ -227,7 +227,7 @@ export function WaybarReplica({ version }: { version: string }) {
           </div>
         )}
 
-        <div className={cn("flex items-center", isWindows ? "gap-1" : "gap-4")}>
+        <div className={cn("flex items-center", isWindows ? "gap-0" : "gap-4")}>
           {isWindows && (
             <div
               aria-hidden="true"
@@ -299,13 +299,17 @@ export function WaybarReplica({ version }: { version: string }) {
           <div
             aria-hidden="true"
             className={cn(
-              "flex items-center gap-2 text-muted-foreground",
-              isWindows ? "px-2" : "opacity-50",
+              "flex items-center text-muted-foreground",
+              !isWindows && "gap-2 opacity-50",
             )}
           >
-            <Wifi className="size-3.5" />
+            <span className={cn(isWindows && "flex size-8 items-center justify-center")}>
+              <Wifi className="size-3.5" />
+            </span>
             {isWindows ? (
-              <Volume2 className="size-3.5" />
+              <span className="flex size-8 items-center justify-center">
+                <Volume2 className="size-3.5" />
+              </span>
             ) : (
               <Bluetooth className="size-3.5" />
             )}
@@ -313,9 +317,10 @@ export function WaybarReplica({ version }: { version: string }) {
           {isWindows && (
             <span
               aria-hidden="true"
-              className="pl-1 font-sans text-[11px] tabular-nums text-foreground"
+              className="w-[72px] shrink-0 font-sans text-[11px] leading-3.5 tabular-nums text-right text-foreground"
             >
-              11:23
+              <span className="block">11:23</span>
+              <span className="block">10/10/2026</span>
             </span>
           )}
         </div>

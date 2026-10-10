@@ -9,5 +9,5 @@ export function AppleIcon(props: ImgHTMLAttributes<HTMLImageElement>) {
 }
 
 export function WindowsIcon(props: ImgHTMLAttributes<HTMLImageElement>) {
-	return <img src="https://svgl.app/library/windows.svg" alt="Windows" {...props} />;
+	return <img src="/windows-11.svg" alt="Windows" {...props} />;
 }
