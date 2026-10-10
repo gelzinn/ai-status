@@ -21,7 +21,7 @@ def query():
         buckets = paginated("https://api.anthropic.com/v1/organizations/cost_report", headers, params)
     except QueryError as exc:
         if "HTTP 401" in str(exc) or "HTTP 403" in str(exc):
-            raise QueryError("Claude API cost access denied; use a Claude Console Admin API credential (ANTHROPIC_ADMIN_KEY), or an org:admin OAuth token (ANTHROPIC_ADMIN_TOKEN); workspace inference keys cannot read costs.") from None
+            raise QueryError("Anthropic API cost access denied; use a Console Admin API credential (ANTHROPIC_ADMIN_KEY), or an org:admin OAuth token (ANTHROPIC_ADMIN_TOKEN); workspace inference keys cannot read costs.") from None
         raise
     return {"data": buckets, "_ai_status": {"reset_at": iso_time(end), "workspace_id": opts.get("workspace_id"),
             "monthly_budget": opts.get("monthly_budget"), "budget_currency": opts.get("budget_currency", "USD")}}
