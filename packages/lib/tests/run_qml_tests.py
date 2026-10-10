@@ -13,7 +13,7 @@ def main():
         shutil.copytree(tests / "qml", root, dirs_exist_ok=True)
         plugin = root / "plugin"
         plugin.mkdir()
-        for name in ("UsagePage.qml", "SettingsPage.qml", "PanelButton.qml", "qmldir"):
+        for name in ("UsagePage.qml", "SettingsPage.qml", "PanelButton.qml", "PanelIcon.qml", "qmldir"):
             shutil.copy2(tests.parent / "quickshell" / name, plugin / name)
         shutil.copy2(root / "Model.qml", plugin / "Model.qml")
         env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software")

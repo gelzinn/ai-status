@@ -191,14 +191,14 @@ Column {
                 }
                 Button {
                     width: Style.space(30)
-                    text: "↑"
+                    iconName: "arrow-up"
                     enabled: parent.index > 0
                     Accessible.name: "Move " + parent.modelData + " up"
                     onClicked: root.moveProvider(parent.index, -1)
                 }
                 Button {
                     width: Style.space(30)
-                    text: "↓"
+                    iconName: "arrow-down"
                     enabled: parent.index < root.order.length - 1
                     Accessible.name: "Move " + parent.modelData + " down"
                     onClicked: root.moveProvider(parent.index, 1)

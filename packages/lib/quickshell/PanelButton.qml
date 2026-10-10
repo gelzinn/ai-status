@@ -1,9 +1,11 @@
 import QtQuick
 import qs.Commons
+import "." as Plugin
 
 Rectangle {
     id: root
     property string text: ""
+    property string iconName: ""
     property string fontFamily: Style.font.family
     property color foreground: "white"
     property bool alignLeft: false
@@ -11,7 +13,7 @@ Rectangle {
     property bool multiline: false
     signal clicked()
 
-    implicitWidth: label.implicitWidth + Style.space(20)
+    implicitWidth: (iconName ? Style.space(16) : label.implicitWidth) + Style.space(20)
     implicitHeight: multiline ? Math.max(Style.space(30), label.implicitHeight + Style.space(16)) : Style.space(30)
     radius: Style.space(3)
     color: mouse.containsMouse || activeFocus ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.09) : "transparent"
@@ -30,6 +32,7 @@ Rectangle {
 
     Text {
         id: label
+        visible: root.iconName === ""
         anchors.fill: parent
         anchors.leftMargin: Style.space(10)
         anchors.rightMargin: Style.space(10)
@@ -42,6 +45,14 @@ Rectangle {
         verticalAlignment: Text.AlignVCenter
         wrapMode: root.multiline ? Text.WordWrap : Text.NoWrap
         elide: root.multiline ? Text.ElideNone : Text.ElideRight
+    }
+    Plugin.PanelIcon {
+        anchors.centerIn: parent
+        width: Style.space(16)
+        height: Style.space(16)
+        visible: root.iconName !== ""
+        name: root.iconName
+        foreground: root.foreground
     }
     MouseArea {
         id: mouse

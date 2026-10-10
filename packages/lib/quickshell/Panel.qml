@@ -13,6 +13,27 @@ Ui.Panel {
     property bool configurationPage: false
     readonly property string panelFont: bar ? bar.fontFamily : Style.font.family
 
+    component IconButton: Ui.WidgetButton {
+        id: iconButton
+        property string iconName: ""
+        bar: root.bar
+        fixedWidth: Style.space(28)
+        fixedHeight: Style.space(28)
+        labelVisible: false
+        hasVisualContent: true
+        opacity: enabled ? 1 : 0.35
+        Accessible.role: Accessible.Button
+        Accessible.name: tooltipText
+        Accessible.onPressAction: if (enabled) triggerPress(Qt.LeftButton)
+        Plugin.PanelIcon {
+            anchors.centerIn: parent
+            width: Style.space(16)
+            height: Style.space(16)
+            name: iconButton.iconName
+            foreground: iconButton.foreground
+        }
+    }
+
     function configure() {
         if (!Plugin.Model.snapshot.settings || Plugin.Model.settingsSaving) return
         settings.begin()
@@ -99,20 +120,14 @@ Ui.Panel {
                         font.pixelSize: Style.font.caption
                         rightPadding: Style.space(8)
                     }
-                    Ui.WidgetButton {
-                        bar: root.bar
+                    IconButton {
                         visible: !root.configurationPage
-                        fixedWidth: Style.space(28)
-                        fixedHeight: Style.space(28)
-                        text: "↻"
+                        iconName: "refresh-cw"
                         tooltipText: "Refresh usage (R)"
                         onPressed: button => { if (button === Qt.LeftButton) Plugin.Model.action("refresh") }
                     }
-                    Ui.WidgetButton {
-                        bar: root.bar
-                        fixedWidth: Style.space(28)
-                        fixedHeight: Style.space(28)
-                        text: root.configurationPage ? "←" : "⚙"
+                    IconButton {
+                        iconName: root.configurationPage ? "arrow-left" : "settings"
                         tooltipText: root.configurationPage ? "Back to usage (Esc)" : "Configure (C)"
                         enabled: !Plugin.Model.settingsSaving && !!Plugin.Model.snapshot.settings
                         onPressed: button => {
