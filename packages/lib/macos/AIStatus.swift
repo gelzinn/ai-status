@@ -836,7 +836,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                                                        path: mode == "logo" ? snapshot?.logoPath ?? "" : "")
         if let image = source?.copy() as? NSImage {
             image.size = NSSize(width: 16, height: 16)
-            image.isTemplate = mode == "bot"
+            // app.png includes an opaque background; treating its alpha as a
+            // template would replace the artwork with a solid square.
+            image.isTemplate = false
             button.image = image
         } else { button.image = nil }
         button.imagePosition = .imageLeading
@@ -936,6 +938,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             defer { Darwin.close(lock) }
             guard flock(lock, LOCK_EX | LOCK_NB) == 0 else {
                 DistributedNotificationCenter.default().postNotificationName(commandNotification, object: command, userInfo: nil, deliverImmediately: true)
+                if command == "quit" {
+                    // Updating must wait for the old host to release its lock;
+                    // otherwise a newly launched host could exit as a duplicate.
+                    let deadline = ProcessInfo.processInfo.systemUptime + 3
+                    while ProcessInfo.processInfo.systemUptime < deadline {
+                        if flock(lock, LOCK_EX | LOCK_NB) == 0 { return }
+                        usleep(50_000)
+                    }
+                    throw AppError.message("AI Status did not quit. Choose Quit AI Status from its menu and retry.")
+                }
                 return
             }
             if command == "quit" { return }
@@ -951,14 +963,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private static func smoke() throws {
+        var previewDirectory: URL?
+        if let index = CommandLine.arguments.firstIndex(of: "--preview-directory") {
+            guard CommandLine.arguments.indices.contains(index + 1), !CommandLine.arguments[index + 1].hasPrefix("--") else {
+                throw AppError.message("--preview-directory requires a destination folder.")
+            }
+            previewDirectory = URL(fileURLWithPath: CommandLine.arguments[index + 1], isDirectory: true)
+            try FileManager.default.createDirectory(at: previewDirectory!, withIntermediateDirectories: true)
+        }
         let sample = #"""
         {"schemaVersion":1,"text":"Codex 27%","selected":{"provider":"codex","idx":0,"metric":"weekly"},
          "iconMode":"logo","logoPath":"","loading":false,
          "providers":[{"id":"codex","idx":0,"name":"Codex (Pro)","logoPath":"","loading":false,"cached":false,"error":"",
          "metrics":[{"key":"weekly","name":"Weekly Usage","percentage":27,"detail":"Resets in 3d 14h"}],
-         "resetCredits":{"available":1,"undetailed":0,"rows":[{"title":"Weekly reset","count":1,"expires":"Oct 15, 14:00","remaining":"5d left","timezone":"UTC+00:00"}]}}],
-         "settings":{"available":["codex","claude"],"names":{"codex":"Codex","claude":"Claude"},"order":["codex","claude"],
-         "enabled":["codex"],"display":{"show_provider":true,"show_model":true,"show_metric":false,"show_pct":true},"iconMode":"logo"},
+         "resetCredits":{"available":3,"undetailed":0,"rows":[{"title":"5-hour + weekly reset","count":2,"expires":"Oct 15, 14:00","remaining":"5d left","timezone":"UTC+00:00"},
+         {"title":"Weekly reset","count":1,"expires":"Oct 20, 14:00","remaining":"10d left","timezone":"UTC+00:00"}]}},
+         {"id":"claude","idx":0,"name":"Claude (Max)","logoPath":"","loading":false,"cached":false,"error":"",
+         "metrics":[{"key":"rolling","name":"Rolling Usage","percentage":9,"detail":"Resets in 34m"},
+         {"key":"weekly","name":"Weekly Usage","percentage":46,"detail":"Resets in 3d 12h"},
+         {"key":"weekly:Fable","name":"Weekly Usage","percentage":0,"detail":"Fable · Resets in 3d 12h"}],
+         "resetCredits":{"available":1,"undetailed":0,"rows":[{"title":"Usage reset","count":1,"expires":"Oct 15, 14:00","remaining":"5d left","timezone":"UTC+00:00"}]}}],
+         "settings":{"available":["codex","claude","antigravity","commandcode","copilot","kiro","opencode","zai"],
+         "names":{"codex":"Codex","claude":"Claude","antigravity":"Antigravity","commandcode":"Command Code","copilot":"Copilot","kiro":"Kiro","opencode":"OpenCode","zai":"Z.AI"},
+         "order":["codex","claude","antigravity","commandcode","copilot","kiro","opencode","zai"],
+         "enabled":["codex","claude"],"display":{"show_provider":true,"show_model":false,"show_metric":false,"show_pct":true},"iconMode":"logo"},
          "about":{"name":"AI Status","version":"0.10.0","commit":"sample","description":"Monitor AI provider usage limits from your desktop.",
          "author":"gelzin.com","license":"MIT","github":"https://github.com/gelzinn/ai-status","documentation":"https://github.com/gelzinn/ai-status#readme","issues":"https://github.com/gelzinn/ai-status/issues/new"},
          "version":{"current":"0.10.0","latest":null,"has_update":false}}
@@ -970,21 +998,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         let model = Model()
         model.accept(Data(sample.utf8))
-        guard let snapshot = model.snapshot, snapshot.providers.count == 1 else { throw AppError.message("Snapshot decoding failed.") }
+        guard let snapshot = model.snapshot, snapshot.providers.count == 2 else { throw AppError.message("Snapshot decoding failed.") }
         model.showSettings()
-        guard model.settingsValid, model.choices.count == 1 else { throw AppError.message("Settings model failed.") }
+        guard model.settingsValid, model.choices.count == 4 else { throw AppError.message("Settings model failed.") }
         model.draft.display["show_provider"] = false
         model.accept(Data(sample.utf8))
         guard model.draft.display["show_provider"] == false else { throw AppError.message("A refresh replaced the settings draft.") }
-        let malformed = Data("{\"schemaVersion\":2}".utf8)
+        let malformed = Data(sample.replacingOccurrences(of: "\"schemaVersion\":1", with: "\"schemaVersion\":2").utf8)
         model.accept(malformed)
         guard model.snapshot?.schemaVersion == 1 else { throw AppError.message("Invalid snapshot replaced usable data.") }
         model.isPresented = true
-        for page in [Page.usage, .settings, .credits(snapshot.providers[0].id), .about] {
+        let pages: [(String, Page)] = [("usage", .usage), ("settings", .settings),
+                                      ("reset-credits", .credits(snapshot.providers[0].id)), ("about", .about)]
+        for (name, page) in pages {
             model.page = page
-            let host = NSHostingController(rootView: PanelView(model: model))
+            let host = NSHostingController(rootView: PanelView(model: model).environment(\.accessibilityReduceMotion, true))
             host.view.frame = NSRect(x: 0, y: 0, width: 380, height: model.panelHeight)
             host.view.layoutSubtreeIfNeeded()
+            if let directory = previewDirectory {
+                let window = NSWindow(contentRect: host.view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                window.appearance = NSAppearance(named: .darkAqua)
+                window.contentViewController = host
+                window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+                window.orderFront(nil)
+                // Let SwiftUI mount once. Reduced motion keeps usage fills deterministic.
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+                host.view.layoutSubtreeIfNeeded()
+                host.view.displayIfNeeded()
+                guard let bitmap = host.view.bitmapImageRepForCachingDisplay(in: host.view.bounds) else {
+                    throw AppError.message("Unable to render the \(name) preview.")
+                }
+                host.view.cacheDisplay(in: host.view.bounds, to: bitmap)
+                guard let png = bitmap.representation(using: .png, properties: [:]) else {
+                    throw AppError.message("Unable to encode the \(name) preview.")
+                }
+                try png.write(to: directory.appendingPathComponent(name + ".png"), options: .atomic)
+                window.close()
+            }
         }
         print("AI Status macOS smoke OK: usage, settings, reset credits, about, resources, snapshot validation")
     }

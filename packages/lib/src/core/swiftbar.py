@@ -81,7 +81,7 @@ def render_menu(cache, selected, spinner=None, title_image=None):
         title_params.append(f"image={_image(snapshot['logoPath'])}")
     elif snapshot["iconMode"] == "bot":
         path = macos.paths.LIB_DIR / "assets" / "app.png"
-        title_params.append(f"templateImage={_image(str(path))}")
+        title_params.append(f"image={_image(str(path))}")
     out = [_line(title or "AI Status", *title_params), "---",
            _line(f"AI Status · v{snapshot['about']['version']}", "size=11", f"color={DIM}"), "---"]
     if not snapshot["providers"]:

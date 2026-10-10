@@ -148,6 +148,10 @@ class MacOSFrontendTests(unittest.TestCase):
 
         output = io.StringIO()
         with contextlib.ExitStack() as stack:
+            # Exercise the native renderer without changing this test runner's
+            # process group or requiring POSIX-only APIs on Windows.
+            stack.enter_context(patch.object(daemon.os, "getpgrp", return_value=-1, create=True))
+            stack.enter_context(patch.object(daemon.os, "setsid", create=True))
             stack.enter_context(patch.object(state, "register_pid"))
             stack.enter_context(patch.object(state, "unregister_pid"))
             stack.enter_context(patch.object(state, "load_cache", return_value=DATA))

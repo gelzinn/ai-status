@@ -43,6 +43,7 @@ class MacOSInstallerTests(unittest.TestCase):
             "GIT_COMMITTER_NAME": "Installer Test", "GIT_COMMITTER_EMAIL": "test@example.com",
             "TEST_REAL_GIT": REAL_GIT, "TEST_ASSETS": str(self.root / "assets"),
             "TEST_LOG": str(self.root / "tools.jsonl"),
+            "TEST_ACTIVE_VERSION": str(self.installed / "packages/lib/VERSION"),
             "TEST_RESPONSE": json.dumps({"tag_name": "v0.10.0", "draft": False, "prerelease": False}),
         }
         self.repo = self.root / "repo"
@@ -83,7 +84,11 @@ output.chmod(0o755)
             self.write_tool(name, """
 import json, os, pathlib, sys
 with open(os.environ['TEST_LOG'], 'a') as log:
-    log.write(json.dumps([pathlib.Path(sys.argv[0]).name, *sys.argv[1:]]) + '\\n')
+    name = pathlib.Path(sys.argv[0]).name
+    log.write(json.dumps([name, *sys.argv[1:]]) + '\\n')
+    if name == 'open' or (name == 'launchctl' and 'bootstrap' in sys.argv):
+        version = pathlib.Path(os.environ['TEST_ACTIVE_VERSION'])
+        log.write(json.dumps(['started-version', version.read_text().strip() if version.exists() else 'missing']) + '\\n')
 """)
         self.write_tool("git", """
 import os, subprocess, sys
@@ -235,6 +240,27 @@ sys.exit(0 if exists else 22)
         self.env["TEST_SWIFTC_FAIL"] = "1"
         self.assert_preserved(self.run_installer())
         self.assertFalse(self.agent.exists())
+
+    def test_failed_running_app_quit_preserves_active_version_and_does_not_start_replacement(self):
+        self.assert_success(self.run_installer("--version", "0.9.0"), "0.9.0")
+        executable = self.bundle / "Contents/MacOS/AIStatus"
+        executable.write_text('#!/bin/bash\nif [ "$1" = --quit ]; then exit 1; fi\nexit 0\n')
+        executable.chmod(0o755)
+        original_agent = self.agent.read_bytes()
+        original_runtime = (self.bundle / "Contents/Resources/runtime.json").read_bytes()
+        result = self.run_installer(start=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.installed / "packages/lib/VERSION").read_text().strip(), "0.9.0")
+        self.assertEqual((self.installed / "packages/lib/marker").read_text(), "0.9.0")
+        self.assertEqual((self.home / "Applications/AI Status.app").resolve(), self.bundle.resolve())
+        self.assertEqual(self.agent.read_bytes(), original_agent)
+        self.assertEqual((self.bundle / "Contents/Resources/runtime.json").read_bytes(), original_runtime)
+        self.assertFalse((self.installed.parent / ".ai-status-update.lock").exists())
+        self.assertFalse(list(self.installed.parent.glob(".ai-status-stage.*")))
+        # Recovery may reload the previous login agent after bootout; every
+        # launch must still see the original library, never the replacement.
+        self.assertTrue(self.tool_calls("started-version"))
+        self.assertTrue(all(call == ["started-version", "0.9.0"] for call in self.tool_calls("started-version")))
 
     def test_failed_release_lookup_preserves_the_existing_install(self):
         self.seed_existing_install()

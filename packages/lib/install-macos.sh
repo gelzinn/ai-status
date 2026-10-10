@@ -280,8 +280,8 @@ fi
 if [ "$NO_START" = false ]; then
     if launchctl bootout "gui/$(id -u)/com.gelzin.ai-status" >/dev/null 2>&1; then OLD_AGENT_STOPPED=true; fi
     if [ -x "$INSTALL_DIR/AI Status.app/Contents/MacOS/AIStatus" ]; then
-        "$INSTALL_DIR/AI Status.app/Contents/MacOS/AIStatus" --quit || true
         OLD_APP_STOPPED=true
+        "$INSTALL_DIR/AI Status.app/Contents/MacOS/AIStatus" --quit
     fi
 fi
 if [ -d "$INSTALL_DIR" ]; then
