@@ -32,13 +32,18 @@ settings/cache live in your user profile.
   Alt+Up/Down. **Save** applies changes and keeps settings open; the back arrow,
   Escape or **Cancel** returns to usage and discards any remaining unsaved edits.
   Starting at sign-in is optional and disabled by default.
+- **About AI Status** in Settings shows the project logo, description, author,
+  version, build commit, MIT license, quick guide and links to GitHub,
+  documentation and bug reports. Back returns to your settings draft.
 - **Refresh** updates immediately; background updates run every five minutes.
+  Only its icon rotates while the update is running.
   A failed provider shows a diagnostic. If recent usage is cached, it is
   explicitly labeled as cached. Its reason is available on hover and in
   **Connection details**, along with authentication failures for hidden providers.
 - Claude and Codex show a **Reset credits** link beneath their usage metrics.
   Open it to see that provider's reset types, quantities, local expiry dates and
-  remaining time in a table. The back arrow or Escape returns to usage without
+  remaining time in a rounded table. The provider logo/name is a plain heading;
+  the back arrow before the panel title or Escape returns to usage without
   changing your tray selection. Expired, paused or spent credits are excluded.
   If details are unavailable, the known credit count remains visible and missing
   information is labeled. Use the provider's own app to redeem a reset.

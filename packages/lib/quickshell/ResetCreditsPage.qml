@@ -9,9 +9,7 @@ Column {
     property color foreground: "white"
     property string fontFamily: Style.font.family
     readonly property var inventory: provider && provider.resetCredits ? provider.resetCredits : ({available: 0, rows: [], undetailed: 0})
-    signal backRequested()
     spacing: Style.space(18)
-    function focusBack() { back.forceActiveFocus() }
     onInventoryChanged: StableList.sync(rows, inventory.rows, entry => entry.title + ":" + entry.expires + ":" + entry.count)
     Component.onCompleted: StableList.sync(rows, inventory.rows, entry => entry.title + ":" + entry.expires + ":" + entry.count)
     ListModel { id: rows; dynamicRoles: true }
@@ -27,41 +25,25 @@ Column {
         font.pixelSize: Style.font.caption
     }
     Item {
+        objectName: "reset-provider-heading"
         width: parent.width
-        height: back.height
-        Plugin.PanelButton {
-            id: back
-            objectName: "reset-back"
-            width: parent.width
-            Accessible.name: "Back to usage from " + (root.provider ? root.provider.name : "provider") + " resets"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            onClicked: root.backRequested()
-        }
-        Plugin.PanelIcon {
-            anchors.left: parent.left
-            anchors.leftMargin: Style.space(4)
-            anchors.verticalCenter: parent.verticalCenter
-            width: Style.space(16)
-            height: width
-            name: "arrow-left"
-            foreground: root.foreground
-        }
+        height: Math.max(Style.space(24), providerLabel.implicitHeight)
         Image {
+            objectName: "reset-provider-logo"
             anchors.left: parent.left
-            anchors.leftMargin: Style.space(28)
             anchors.verticalCenter: parent.verticalCenter
             width: Style.space(16)
             height: width
-            source: root.provider && root.provider.logoPath ? "file://" + root.provider.logoPath : ""
+            source: root.provider ? root.provider.logoPath ? "file://" + root.provider.logoPath : Qt.resolvedUrl("../assets/providers/" + root.provider.id + ".png") : ""
             fillMode: Image.PreserveAspectFit
             asynchronous: true
         }
         Label {
-            x: Style.space(52)
-            width: Math.max(0, parent.width - x - Style.space(8))
+            id: providerLabel
+            x: Style.space(24)
+            width: Math.max(0, parent.width - x)
             anchors.verticalCenter: parent.verticalCenter
-            text: root.provider ? root.provider.name : "Back to usage"
+            text: root.provider ? root.provider.name : ""
         }
     }
     Secondary { width: parent.width; text: "Cached data"; visible: !!root.provider && root.provider.cached }
@@ -77,11 +59,13 @@ Column {
         }
     }
     Rectangle {
+        id: resetTable
         objectName: "reset-table"
         width: parent.width
         implicitHeight: table.implicitHeight + 2
         color: "transparent"
         border.width: 1
+        radius: Style.space(3)
         border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15)
         visible: root.inventory.available > 0
         Column {
@@ -93,6 +77,13 @@ Column {
                 width: parent.width
                 height: Style.space(42)
                 color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.04)
+                radius: Math.max(0, resetTable.radius - 1)
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    width: parent.width
+                    height: parent.height / 2
+                    color: parent.color
+                }
                 Label {
                     objectName: "reset-available"
                     anchors.fill: parent

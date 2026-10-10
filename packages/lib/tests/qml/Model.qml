@@ -17,6 +17,7 @@ Item {
         chosen = null
         settingsError = ""
         snapshot = {
+            about: {name: "AI Status", version: "0.9.0", commit: "12345678", license: "MIT", author: "gelzin.com", github: "https://github.com/gelzinn/ai-status", documentation: "https://github.com/gelzinn/ai-status#readme", issues: "https://github.com/gelzinn/ai-status/issues/new"},
             loading: false,
             selected: {provider: "claude", idx: 0, metric: "rolling"},
             providers: [
@@ -31,6 +32,7 @@ Item {
                 ]}
             ],
             settings: {
+                names: {claude: "Claude", codex: "Codex", kiro: "Kiro"},
                 order: ["claude", "codex", "kiro"], enabled: ["claude", "codex"],
                 display: {show_provider: true, show_model: true, show_metric: false, show_pct: true},
                 iconMode: "logo"

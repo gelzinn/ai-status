@@ -12,14 +12,16 @@ Column {
     property var display: ({})
     property string iconMode: "bot"
     property var selected: ({})
-    property bool selectionOpen: false
+    property Item popupParent: parent
+    readonly property bool selectionOpen: providerSelector.popupOpen
     property bool saved: false
+    signal aboutRequested()
     readonly property var choices: {
         const items = []
         for (const name of enabledProviders) {
             const entries = Plugin.Model.snapshot.providers.filter(p => p.id === name)
             if (entries.length === 0)
-                items.push({provider: name, idx: 0, metric: "rolling", label: name, logoSource: root.providerLogo(name)})
+                items.push({provider: name, idx: 0, metric: "rolling", label: root.providerName(name), logoSource: root.providerLogo(name)})
             for (const entry of entries) {
                 for (const metric of entry.metrics) {
                     const detail = metric.key.indexOf(":") === -1 ? "" : " (" + metric.key.split(":").slice(1).join(":") + ")"
@@ -41,6 +43,7 @@ Column {
     onDisplayChanged: saved = false
     onIconModeChanged: saved = false
     onSelectedChanged: saved = false
+    onVisibleChanged: if (!visible) closeSelectors()
 
     Connections {
         target: Plugin.Model
@@ -51,6 +54,15 @@ Column {
         return entry && entry.logoPath ? "file://" + entry.logoPath : Qt.resolvedUrl("../assets/providers/" + name + ".png")
     }
 
+    function providerName(name) {
+        return (Plugin.Model.snapshot.settings.names || {})[name] || name
+    }
+
+    function closeSelectors() {
+        providerSelector.dismiss()
+        iconSelector.dismiss()
+    }
+
     function begin() {
         const settings = Plugin.Model.snapshot.settings || {}
         order = (settings.order || []).slice()
@@ -58,7 +70,7 @@ Column {
         display = Object.assign({}, settings.display || {})
         iconMode = settings.iconMode || "bot"
         selected = Object.assign({}, Plugin.Model.snapshot.selected)
-        selectionOpen = false
+        closeSelectors()
         saved = false
         Plugin.Model.settingsError = ""
     }
@@ -66,6 +78,7 @@ Column {
     function focusFirstControl() {
         providerSelector.forceActiveFocus(Qt.TabFocusReason)
     }
+    function focusAboutControl() { aboutButton.forceActiveFocus() }
 
     function toggleProvider(name) {
         enabledProviders = enabledProviders.indexOf(name) === -1 ? enabledProviders.concat([name]) : enabledProviders.filter(item => item !== name)
@@ -113,35 +126,22 @@ Column {
         width: parent.width
         spacing: Style.space(8)
         Label { text: "Active provider & limit"; font.bold: true }
-        Button {
+        Plugin.PanelSelect {
             id: providerSelector
             objectName: "active-provider"
             width: parent.width
-            text: root.selectedLabel + "  ▾"
+            text: root.selectedLabel
             logoSource: root.selectedChoice ? root.selectedChoice.logoSource : ""
             multiline: true
-            alignLeft: true
-            outlined: true
-            onClicked: root.selectionOpen = !root.selectionOpen
-        }
-        Column {
-            visible: root.selectionOpen
-            width: parent.width
-            Repeater {
-                model: root.choices
-                delegate: Button {
-                    required property var modelData
-                    objectName: "active-provider-option-" + modelData.provider + "-" + modelData.idx + "-" + modelData.metric
-                    width: parent.width
-                    text: modelData.label
-                    logoSource: modelData.logoSource
-                    multiline: true
-                    alignLeft: true
-                    onClicked: {
-                        root.selected = {provider: modelData.provider, idx: modelData.idx, metric: modelData.metric}
-                        root.selectionOpen = false
-                    }
-                }
+            popupParent: root.popupParent
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            choices: root.choices.map(item => Object.assign({}, item, {objectName: "active-provider-option-" + item.provider + "-" + item.idx + "-" + item.metric}))
+            currentIndex: root.choices.indexOf(root.selectedChoice)
+            onPopupOpenChanged: if (popupOpen) iconSelector.dismiss()
+            onActivated: index => {
+                const choice = root.choices[index]
+                root.selected = {provider: choice.provider, idx: choice.idx, metric: choice.metric}
             }
         }
     }
@@ -171,15 +171,18 @@ Column {
                 }
             }
         }
-        Button {
+        Plugin.PanelSelect {
+            id: iconSelector
+            objectName: "icon-mode"
             width: parent.width
-            alignLeft: true
-            text: "Icon: " + ({off: "None", bot: "Bot", logo: "Provider logo"}[root.iconMode]) + "  ›"
-            outlined: true
-            onClicked: {
-                const modes = ["off", "bot", "logo"]
-                root.iconMode = modes[(modes.indexOf(root.iconMode) + 1) % modes.length]
-            }
+            text: "Icon: " + ({off: "None", bot: "Bot", logo: "Provider logo"}[root.iconMode])
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            popupParent: root.popupParent
+            choices: [{value: "off", label: "None"}, {value: "bot", label: "Bot"}, {value: "logo", label: "Provider logo"}]
+            currentIndex: ["off", "bot", "logo"].indexOf(root.iconMode)
+            onPopupOpenChanged: if (popupOpen) providerSelector.dismiss()
+            onActivated: index => root.iconMode = choices[index].value
         }
     }
     Column {
@@ -201,7 +204,9 @@ Column {
                 Button {
                     objectName: "provider-" + parent.modelData
                     width: Math.max(0, parent.width - Style.space(68))
-                    text: (root.enabledProviders.indexOf(parent.modelData) !== -1 ? "[x]  " : "[ ]  ") + parent.modelData
+                    prefixText: root.enabledProviders.indexOf(parent.modelData) !== -1 ? "[x]" : "[ ]"
+                    text: root.providerName(parent.modelData)
+                    logoSource: root.providerLogo(parent.modelData, Plugin.Model.snapshot.providers.find(item => item.id === parent.modelData))
                     alignLeft: true
                     Accessible.role: Accessible.CheckBox
                     Accessible.checked: root.enabledProviders.indexOf(parent.modelData) !== -1
@@ -211,14 +216,14 @@ Column {
                     width: Style.space(30)
                     iconName: "arrow-up"
                     enabled: parent.index > 0
-                    Accessible.name: "Move " + parent.modelData + " up"
+                    Accessible.name: "Move " + root.providerName(parent.modelData) + " up"
                     onClicked: root.moveProvider(parent.index, -1)
                 }
                 Button {
                     width: Style.space(30)
                     iconName: "arrow-down"
                     enabled: parent.index < root.order.length - 1
-                    Accessible.name: "Move " + parent.modelData + " down"
+                    Accessible.name: "Move " + root.providerName(parent.modelData) + " down"
                     onClicked: root.moveProvider(parent.index, 1)
                 }
             }
@@ -229,5 +234,15 @@ Column {
         text: Plugin.Model.settingsError || (!root.valid ? "Enable a provider and at least one bar text field, then choose a limit." : "")
         color: Commons.Color.urgent
         font.pixelSize: Style.font.caption
+    }
+    Button {
+        id: aboutButton
+        objectName: "settings-about"
+        width: parent.width
+        text: "About AI Status"
+        alignLeft: true
+        trailingIconName: "arrow-right"
+        outlined: true
+        onClicked: root.aboutRequested()
     }
 }

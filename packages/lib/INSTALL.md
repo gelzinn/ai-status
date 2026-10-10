@@ -41,6 +41,10 @@ The widget runs inside the existing shell process, using a single Python daemon 
 
 Click a provider heading or usage metric to select it immediately. Scroll the bar to switch between providers with valid data; middle-click switches metrics. Escape on the usage page closes the panel; `r` refreshes, `c` opens settings, and Up/Down scroll. In settings, Tab focuses the form controls; Space or Enter activates the focused control. Preferences are saved only when you press **Save**.
 
+Both settings selectors open floating lists without expanding the form. Provider names match the landing page, and their logos appear in the active limit and its options and beside every provider checkbox. Both selectors use the same right-aligned chevron. The header divider reaches the panel borders, and only the Refresh icon rotates during updates.
+
+The bar has no hover tutorial. Open **About AI Status** in Settings for the project logo, description, author, version, commit, MIT license, quick guide and links to GitHub, documentation and bug reports. Back returns to your settings draft. Reset details also use the header's back arrow; their provider logo/name is a plain heading above a rounded table.
+
 The header uses monochrome Lucide vector icons for refresh, configuration, and back, matching the landing page's icon family and following the shell's foreground color. Claude and Codex show **Reset credits: N available** when usable manual resets exist. Clicking it opens the same details layout as Windows: provider/back navigation, explanation, and a table with reset type, credit count, local expiry date, remaining time, and UTC offset. Expired credits are removed, details are bounded by the authoritative count, and missing expiry details are indicated explicitly. Back or Escape restores the usage page, scroll position, and focused button without changing the bar selection. The same inventory appears in the Waybar tooltip; see [PROVIDERS.md](PROVIDERS.md) for endpoint behavior.
 
 ```bash

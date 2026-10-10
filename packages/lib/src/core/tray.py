@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
-from . import __version__, config, fetch, paths, render, reset_credits, state
+from . import __version__, about, config, fetch, paths, render, reset_credits, state
 
 RELEASE_URL = "https://github.com/gelzinn/ai-status/releases/latest"
 ASSETS = paths.LIB_DIR / "assets"
@@ -313,17 +313,16 @@ class ResetCreditsView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 18, 16, 18)
         layout.setSpacing(18)
-        self.back = UsageButton()
-        row = QHBoxLayout(self.back)
-        row.setContentsMargins(4, 6, 4, 6)
+        self.heading = QWidget()
+        row = QHBoxLayout(self.heading)
+        row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
-        row.addWidget(ArrowIcon(back=True))
         self.logo = plain_label("")
         self.logo.setFixedSize(16, 16)
         row.addWidget(self.logo)
         self.provider_label = plain_label("", "#eeeeee")
         row.addWidget(self.provider_label, 1)
-        layout.addWidget(self.back)
+        layout.addWidget(self.heading)
         self.cached_label = plain_label("Cached data", "#666666")
         layout.addWidget(self.cached_label)
         intro = QVBoxLayout()
@@ -380,7 +379,7 @@ class ResetCreditsView(QWidget):
     def update_provider(self, name, entry, label):
         self.provider_label.setText(label)
         self.logo.setPixmap(provider_icon(name).pixmap(16, 16))
-        self.back.setAccessibleName(f"Back to usage from {label} resets")
+        self.heading.setAccessibleName(label)
         self.explanation.setText(
             "Restore your 5-hour or weekly limit,\nor both, depending on the reset type."
             if name == "codex" else
@@ -577,6 +576,35 @@ class ControlButton(QAbstractButton):
         self.setToolTip(label)
         self.setAccessibleName(label)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.loading = False
+        self.rotation = 0.0
+        self.spin = QVariantAnimation(self)
+        self.spin.setStartValue(0.0)
+        self.spin.setEndValue(360.0)
+        self.spin.setDuration(1000)
+        self.spin.setLoopCount(-1)
+        self.spin.valueChanged.connect(self.rotate_icon)
+
+    def rotate_icon(self, angle):
+        self.rotation = angle
+        self.update()
+
+    def set_loading(self, loading):
+        self.loading = loading
+        if loading and self.isVisible():
+            self.spin.start()
+        else:
+            self.spin.stop()
+            self.rotate_icon(0.0)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.set_loading(self.loading)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.spin.stop()
+        self.rotate_icon(0.0)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -585,6 +613,9 @@ class ControlButton(QAbstractButton):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor("#1c1c1c"))
             painter.drawRoundedRect(QRectF(self.rect()), 6, 6)
+        painter.translate(self.width() / 2, self.height() / 2)
+        painter.rotate(self.rotation)
+        painter.translate(-self.width() / 2, -self.height() / 2)
         draw_control_icon(painter, QRectF(self.rect()), self.icon_name, "#aaaaaa" if self.isEnabled() else "#444444")
 
 
@@ -615,6 +646,7 @@ class UsageWorker(QObject):
 class ProviderSettings(QWidget):
     saved = Signal()
     cancelled = Signal()
+    about_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -673,7 +705,6 @@ class ProviderSettings(QWidget):
         hint.setWordWrap(True)
         layout.addWidget(hint)
         self.providers = ProviderList()
-        self.providers.setToolTip("Drag to reorder, or use the arrows or Alt+Up/Down.")
         enabled = config.enabled_order()
         available = config.available_providers()
         for name in dict.fromkeys(enabled + available):
@@ -691,6 +722,10 @@ class ProviderSettings(QWidget):
         self.startup.setVisible(paths.IS_WINDOWS)
         self.startup.setChecked(startup_enabled())
         layout.addWidget(self.startup)
+        layout.addSpacing(14)
+        self.about_button = QPushButton("About AI Status")
+        self.about_button.clicked.connect(self.about_requested)
+        layout.addWidget(self.about_button)
         self.message = plain_label("")
         self.message.setWordWrap(True)
         self.message.hide()
@@ -783,6 +818,47 @@ class ProviderSettings(QWidget):
         self.saved.emit()
 
 
+class AboutView(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        info = about.project_info()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 18, 16, 18)
+        layout.setSpacing(12)
+        logo = QLabel()
+        logo.setPixmap(status_icon().pixmap(40, 40))
+        layout.addWidget(logo)
+        title = plain_label(info["name"], "#eeeeee")
+        title.setStyleSheet("color: #eeeeee; font-size: 16px; font-weight: 500;")
+        layout.addWidget(title)
+        for text in (info["description"],
+                     f"Version: v{info['version']}\nCommit: {info['commit']}\nLicense: {info['license']}\nAuthor: {info['author']}"):
+            label = plain_label(text)
+            label.setWordWrap(True)
+            layout.addWidget(label)
+        for text, key in (("GitHub", "github"), ("Documentation", "documentation"), ("Report a bug", "issues")):
+            button = QPushButton(text)
+            row = QHBoxLayout(button)
+            row.setContentsMargins(8, 0, 8, 0)
+            row.addStretch()
+            row.addWidget(ArrowIcon())
+            button.setObjectName("about-" + key)
+            button.setStyleSheet("border: 1px solid #303030; border-radius: 6px; padding: 6px 8px;")
+            button.clicked.connect(lambda checked=False, url=info[key]: QDesktopServices.openUrl(QUrl(url)))
+            layout.addWidget(button)
+        layout.addSpacing(6)
+        layout.addWidget(plain_label("Quick guide", "#eeeeee"))
+        for text in (
+            "Tray: click to show usage; right-click for settings and other actions.",
+            "Usage: click a limit to show it in the tray. Refresh checks now; Reset credits shows the available resets.",
+            "Settings: pick a limit, text and icon. Enable providers and reorder them with arrows or drag and drop. Save applies changes and keeps settings open.",
+            "Keyboard: R refreshes, C opens settings, Esc goes back. Tab moves between controls; Alt+Up/Down reorders providers.",
+        ):
+            label = plain_label(text)
+            label.setWordWrap(True)
+            layout.addWidget(label)
+
+
 class Dashboard(QWidget):
     def __init__(self, app):
         super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
@@ -806,6 +882,7 @@ class Dashboard(QWidget):
         self.provider_buttons = {}
         self.reset_provider = None
         self.settings_view = None
+        self.settings_scroll_position = 0
         self.structure = None
         self.queued = False
         self.quitting = False
@@ -828,7 +905,7 @@ class Dashboard(QWidget):
         header_layout.setContentsMargins(16, 0, 12, 0)
         header_layout.setSpacing(4)
         self.back_button = ControlButton("arrow-left", "Back to usage (Esc)")
-        self.back_button.clicked.connect(self.show_usage)
+        self.back_button.clicked.connect(self.go_back)
         self.back_button.hide()
         header_layout.addWidget(self.back_button)
         self.brand = plain_label("AI Status")
@@ -850,7 +927,6 @@ class Dashboard(QWidget):
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.credits_view = ResetCreditsView()
-        self.credits_view.back.clicked.connect(self.show_usage)
         self.credits_scroll = QScrollArea()
         self.credits_scroll.setWidgetResizable(True)
         self.credits_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -863,6 +939,12 @@ class Dashboard(QWidget):
         self.settings_scroll.setWidgetResizable(True)
         self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.pages.addWidget(self.settings_scroll)
+        self.about_scroll = QScrollArea()
+        self.about_scroll.setWidgetResizable(True)
+        self.about_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.about_view = AboutView(self)
+        self.about_scroll.setWidget(self.about_view)
+        self.pages.addWidget(self.about_scroll)
         self.settings_footer = QWidget()
         self.settings_footer_layout = QHBoxLayout(self.settings_footer)
         self.settings_footer_layout.setContentsMargins(16, 8, 16, 12)
@@ -932,8 +1014,8 @@ class Dashboard(QWidget):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
-            self.show_usage() if self.reset_provider is not None or self.configuring() else self.hide()
-        elif self.configuring():
+            self.go_back() if self.reset_provider is not None or self.configuring() or self.viewing_about() else self.hide()
+        elif self.configuring() or self.viewing_about():
             super().keyPressEvent(event)
         elif event.key() == Qt.Key.Key_R:
             self.refresh()
@@ -945,7 +1027,7 @@ class Dashboard(QWidget):
             super().keyPressEvent(event)
 
     def wheelEvent(self, event):
-        if self.reset_provider is not None or self.configuring():
+        if self.reset_provider is not None or self.configuring() or self.viewing_about():
             super().wheelEvent(event)
             return
         self.cycle_metric(1 if event.angleDelta().y() < 0 else -1)
@@ -962,9 +1044,9 @@ class Dashboard(QWidget):
         self.credits_view.update_provider(key[0], entry, self.entry_name(key[0], entry))
         self.pages.setCurrentWidget(self.credits_scroll)
         self.credits_scroll.verticalScrollBar().setValue(0)
-        self.fit_content()
-        self.credits_view.back.setFocus()
         self.update_header()
+        self.fit_content()
+        self.back_button.setFocus()
 
     def show_usage(self):
         was_configuring = self.configuring()
@@ -982,12 +1064,37 @@ class Dashboard(QWidget):
     def configuring(self):
         return self.pages.currentWidget() is self.settings_scroll
 
+    def viewing_about(self):
+        return self.pages.currentWidget() is self.about_scroll
+
+    def show_about(self):
+        self.settings_scroll_position = self.settings_scroll.verticalScrollBar().value()
+        self.pages.setCurrentWidget(self.about_scroll)
+        self.about_scroll.verticalScrollBar().setValue(0)
+        self.update_header()
+        self.fit_content()
+        self.back_button.setFocus()
+
+    def go_back(self):
+        if self.viewing_about():
+            self.pages.setCurrentWidget(self.settings_scroll)
+            self.update_header()
+            self.fit_content()
+            self.settings_scroll.verticalScrollBar().setValue(self.settings_scroll_position)
+            self.settings_view.about_button.setFocus()
+        else:
+            self.show_usage()
+
     def update_header(self):
         configuring = self.configuring()
-        self.brand.setText("Settings" if configuring else "AI Status")
-        self.back_button.setVisible(configuring)
-        self.refresh_button.setVisible(not configuring)
-        self.settings_button.setVisible(not configuring and self.reset_provider is None)
+        about_page = self.viewing_about()
+        self.brand.setText("About" if about_page else "Settings" if configuring else "AI Status")
+        self.back_button.setVisible(configuring or about_page or self.reset_provider is not None)
+        back_label = "Back to settings (Esc)" if about_page else "Back to usage (Esc)"
+        self.back_button.setToolTip(back_label)
+        self.back_button.setAccessibleName(back_label)
+        self.refresh_button.setVisible(not configuring and not about_page)
+        self.settings_button.setVisible(not configuring and not about_page and self.reset_provider is None)
         self.settings_footer.setVisible(configuring)
 
     def animate(self):
@@ -1009,6 +1116,8 @@ class Dashboard(QWidget):
             self.app.quit()
 
     def configure(self):
+        if self.viewing_about():
+            self.go_back()
         if not self.configuring():
             previous = self.settings_scroll.takeWidget()
             if previous:
@@ -1018,6 +1127,7 @@ class Dashboard(QWidget):
             self.settings_view = ProviderSettings(self)
             self.settings_view.saved.connect(self.settings_saved)
             self.settings_view.cancelled.connect(self.show_usage)
+            self.settings_view.about_requested.connect(self.show_about)
             self.settings_scroll.setWidget(self.settings_view)
             self.settings_footer_layout.addWidget(self.settings_view.buttons)
             self.settings_view.buttons.show()
@@ -1099,6 +1209,7 @@ class Dashboard(QWidget):
         self.errors = {}
         self.refresh_action.setEnabled(False)
         self.refresh_button.setEnabled(False)
+        self.refresh_button.set_loading(True)
         self.status.setText("Updating…")
         self.draw()
         check_updates = time.monotonic() - self.last_update_check >= 3600
@@ -1129,6 +1240,7 @@ class Dashboard(QWidget):
         self.pending.clear()
         self.refresh_action.setEnabled(True)
         self.refresh_button.setEnabled(True)
+        self.refresh_button.set_loading(False)
         self.worker.deleteLater()
         self.status.setText("Last checked " + time.strftime("%H:%M:%S") + " · updates every 5 minutes")
         if fetch.get_version_info()["has_update"]:
