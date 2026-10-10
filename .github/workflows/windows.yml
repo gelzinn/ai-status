@@ -55,6 +55,7 @@ jobs:
           $version = (Get-Content packages/lib/VERSION -Raw).Trim()
           $installer = Join-Path $PWD "dist/ai-status-$version-windows-x64-setup.exe"
           $identity = (Get-Item $installer).VersionInfo
+          $identity | Select-Object OriginalFilename, ProductName, CompanyName, FileDescription, ProductVersion | ConvertTo-Json -Compress | Write-Host
           if ($identity.OriginalFilename -ne "ai-status-$version-windows-x64-setup.exe" -or
               $identity.ProductName -ne "AI Status" -or $identity.CompanyName -ne "gelzinn") {
             throw "Installer product identity does not match its versioned filename"
