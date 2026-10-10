@@ -4,7 +4,13 @@ Push-Location $repoRoot
 try {
     python packages/lib/windows/assets.py
     if ($LASTEXITCODE -ne 0) { throw "Application icon build failed" }
-    python -m PyInstaller --noconfirm --clean packages/lib/windows/ai-status.spec
+    $previousCompression = $env:PYINSTALLER_ZLIB_COMPRESSION_LEVEL
+    try {
+        $env:PYINSTALLER_ZLIB_COMPRESSION_LEVEL = "9"
+        python -m PyInstaller --noconfirm --clean packages/lib/windows/ai-status.spec
+    } finally {
+        $env:PYINSTALLER_ZLIB_COMPRESSION_LEVEL = $previousCompression
+    }
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
     python packages/lib/windows/prune.py dist/ai-status
     if ($LASTEXITCODE -ne 0) { throw "Runtime consolidation failed" }

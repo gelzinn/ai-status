@@ -19,6 +19,7 @@ analysis = Analysis(
     excludes=["tkinter", "curses", "pytest", "ssl", "_ssl", "_hashlib", "PySide6.QtNetwork", "PySide6.QtQml",
               "PySide6.QtQuick", "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets", "PySide6.QtSvg"],
     noarchive=False,
+    optimize=2,
 )
 # This is a raster QWidget app, using qwindows and Windows' native ConPTY.
 # Drop optional OpenGL, alternate platform/image/TLS plugins and translations.
@@ -47,7 +48,7 @@ def needed(entry):
 analysis.binaries = [entry for entry in analysis.binaries if needed(entry)]
 analysis.datas = [entry for entry in analysis.datas if needed(entry)]
 archive = PYZ(analysis.pure)
-console = EXE(archive, analysis.scripts, [], exclude_binaries=True,
+console = EXE(archive, analysis.scripts, [("O", None, "OPTION"), ("O", None, "OPTION")], exclude_binaries=True,
               name="ai-status-cli", console=True, upx=False, icon=icon)
 bundle = COLLECT(console, analysis.binaries, analysis.datas,
                  name="ai-status", upx=False)

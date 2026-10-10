@@ -5,9 +5,9 @@ import os
 root = Path("dist")
 version = Path("packages/lib/VERSION").read_text().strip()
 sizes = [
-    ("Installed folder", sum(path.stat().st_size for path in (root / "ai-status").rglob("*") if path.is_file()), 56),
-    ("Portable ZIP", (root / f"ai-status-{version}-windows-x64.zip").stat().st_size, 25),
-    ("Installer EXE", (root / f"ai-status-{version}-windows-x64-setup.exe").stat().st_size, 19),
+    ("Installed folder", sum(path.stat().st_size for path in (root / "ai-status").rglob("*") if path.is_file()), 54),
+    ("Portable ZIP", (root / f"ai-status-{version}-windows-x64.zip").stat().st_size, 22),
+    ("Installer EXE", (root / f"ai-status-{version}-windows-x64-setup.exe").stat().st_size, 17),
 ]
 report = "| Windows package | Size | Budget |\n| --- | ---: | ---: |\n"
 for name, count, budget in sizes:

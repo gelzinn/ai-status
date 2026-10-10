@@ -150,11 +150,13 @@ Python/OpenSSL and Qt TLS libraries are omitted from the Windows bundle. The
 Universal CRT comes from Windows 10/11; duplicate MSVC 14 DLLs are consolidated
 to the newest backwards-compatible version. Qt remains dynamically linked and
 replaceable. The installer uses solid LZMA2 with a 64 MiB dictionary; the portable
-ZIP retains Deflate for Windows Explorer compatibility.
+ZIP retains Deflate for Windows Explorer compatibility. Frozen Python bytecode
+uses optimization level 2 and maximum zlib compression, omitting development
+docstrings/assertions; runtime input validation uses explicit exceptions.
 
 CI renders the packaged widgets/logos, runs real ConPTY input/output checks,
 tests native HTTP against localhost (including invalid TLS certificates), and
 verifies public HTTPS from the frozen executable. It also tests the native
 launcher, silent install/uninstall in a Unicode path, and enforces size budgets
-of 56 MiB installed, 25 MiB for the portable ZIP, and 19 MiB for the installer.
+of 54 MiB installed, 22 MiB for the portable ZIP, and 17 MiB for the installer.
 The build summary lists the largest remaining runtime files.

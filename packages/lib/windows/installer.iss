@@ -20,6 +20,7 @@ OutputBaseFilename=ai-status-{#AppVersion}-windows-x64-setup
 Compression=lzma2/ultra64
 LZMAUseSeparateProcess=yes
 LZMANumBlockThreads=1
+LZMANumFastBytes=273
 SolidCompression=yes
 CloseApplications=yes
 RestartApplications=no
