@@ -49,7 +49,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Packaged CLI smoke test failed" }
           $version = (Get-Content packages/lib/VERSION -Raw).Trim()
           $installer = Join-Path $PWD "dist/ai-status-$version-windows-x64-setup.exe"
-          $installed = Join-Path $env:RUNNER_TEMP "AI Status installed"
+          $installed = Join-Path $env:RUNNER_TEMP "AI Status instalado — teste"
           $result = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$installed`"") -Wait -PassThru
           if ($result.ExitCode -ne 0) { throw "Silent installation failed" }
           python packages/lib/tests/packaged_smoke.py "$installed/ai-status-cli.exe"

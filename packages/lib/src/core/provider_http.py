@@ -7,21 +7,35 @@ import subprocess
 import urllib.error
 import urllib.request
 
+from . import paths
+
 
 class QueryError(Exception):
     """An actionable, credential-free message safe to show in the dashboard."""
 
 
-def request(url, headers=None, timeout=8):
+def request_bytes(url, headers=None, timeout=8):
     headers = {"User-Agent": "ai-status", **(headers or {})}
+    if paths.IS_WINDOWS:
+        from . import windows_http
+        try:
+            return windows_http.request(url, headers, timeout)
+        except windows_http.HTTPError as exc:
+            raise QueryError(f"Usage request returned HTTP {exc.code}; check your session.") from None
+        except (OSError, ValueError):
+            raise QueryError("Usage API unreachable; check your connection.") from None
     req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
-            return response.read().decode("utf-8")
+            return response.read()
     except urllib.error.HTTPError as exc:
         raise QueryError(f"Usage request returned HTTP {exc.code}; check your session.") from None
     except (urllib.error.URLError, OSError):
         raise QueryError("Usage API unreachable; check your connection.") from None
+
+
+def request(url, headers=None, timeout=8):
+    return request_bytes(url, headers, timeout).decode("utf-8")
 
 
 def output(query):

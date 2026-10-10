@@ -6,6 +6,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Application icon build failed" }
     python -m PyInstaller --noconfirm --clean packages/lib/windows/ai-status.spec
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
+    python packages/lib/windows/prune.py dist/ai-status
+    if ($LASTEXITCODE -ne 0) { throw "Runtime consolidation failed" }
+    python packages/lib/windows/launcher.py
+    if ($LASTEXITCODE -ne 0) { throw "GUI launcher build failed" }
     python packages/lib/windows/licenses.py dist/ai-status/THIRD_PARTY_LICENSES.txt
     if ($LASTEXITCODE -ne 0) { throw "License collection failed" }
     $version = (Get-Content packages/lib/VERSION -Raw).Trim()

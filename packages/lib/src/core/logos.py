@@ -23,10 +23,10 @@ import json
 import shutil
 import signal
 import subprocess
-import urllib.request
 
 from . import state
 from . import paths
+from .provider_http import request_bytes
 
 # waybar ``"signal": N`` on the image module -> we send SIGRTMIN+N to reload it.
 LOGO_SIGNAL = 11
@@ -118,9 +118,9 @@ def provider_png(provider):
 
     if not os.path.exists(src_path):
         try:
-            req = urllib.request.Request(logo_url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=5) as response, open(src_path, "wb") as out:
-                out.write(response.read())
+            data = request_bytes(logo_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+            with open(src_path, "wb") as out:
+                out.write(data)
         except Exception:
             return None
 

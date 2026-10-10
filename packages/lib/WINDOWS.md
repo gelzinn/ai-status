@@ -105,7 +105,10 @@ trying to render Waybar's Pango markup or Linux icon fonts.
 
 ## Develop and build
 
-Use x64 Python 3.12 and Inno Setup 6 on a Windows build machine. From the repo:
+Use x64 Python 3.12, Inno Setup 6, and Visual Studio Build Tools with the x64
+C++ compiler and Windows SDK on a Windows build machine. Git for Windows
+supplies the OpenSSL **test tool** used to generate an untrusted localhost
+certificate; OpenSSL is not shipped with the app. From the repo:
 
 ```powershell
 python -m venv .venv
@@ -118,8 +121,10 @@ Remove-Item Env:QT_QPA_PLATFORM
 .\packages\lib\windows\build.ps1
 ```
 
-The build produces a windowed app plus a console helper in `dist/ai-status`,
-an installer and a portable ZIP. The helper runs bundled collectors in isolated
+The build produces a small native windowed launcher and a console helper sharing
+one Python/Qt runtime in `dist/ai-status`, an installer and a portable ZIP. The
+launcher carries the app icon, preserves arguments/exit status, and starts the
+helper without a console window. The helper runs bundled collectors in isolated
 subprocesses with explicit timeouts; running `.py` files through Windows file
 associations is never required. Qt/Python remain external dynamic libraries in
 the folder. Dependency license texts accompany the package.
@@ -134,6 +139,22 @@ before announcing full provider compatibility.
 
 The package ships only raster widgets and the required Windows/offscreen Qt
 platform plugins. OpenGL software emulation, QML/Quick, QtNetwork/QtSvg, unused
-image/TLS plugins and translations are excluded. Python's SSL support remains
-for provider HTTPS requests. CI renders the packaged widgets/logos, runs real
-ConPTY input/output checks and enforces installed/download size budgets.
+image/TLS plugins, translations, legacy Bash collectors and bytecode caches are
+excluded. Windows HTTPS uses WinHTTP and the system certificate store, including
+normal certificate/hostname checks, timeouts, proxy settings and decompression.
+Authentication headers are retained on same-origin redirects and removed when
+the origin changes. HTTPS redirects to HTTP are rejected. Linux uses the
+standard-library HTTP client as before.
+
+Python/OpenSSL and Qt TLS libraries are omitted from the Windows bundle. The
+Universal CRT comes from Windows 10/11; duplicate MSVC 14 DLLs are consolidated
+to the newest backwards-compatible version. Qt remains dynamically linked and
+replaceable. The installer uses solid LZMA2 with a 64 MiB dictionary; the portable
+ZIP retains Deflate for Windows Explorer compatibility.
+
+CI renders the packaged widgets/logos, runs real ConPTY input/output checks,
+tests native HTTP against localhost (including invalid TLS certificates), and
+verifies public HTTPS from the frozen executable. It also tests the native
+launcher, silent install/uninstall in a Unicode path, and enforces size budgets
+of 56 MiB installed, 25 MiB for the portable ZIP, and 19 MiB for the installer.
+The build summary lists the largest remaining runtime files.

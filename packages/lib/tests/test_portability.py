@@ -241,7 +241,7 @@ class CollectorTests(IsolatedState):
 
     def test_http_errors_do_not_expose_tokens(self):
         from urllib.error import HTTPError
-        with patch("urllib.request.urlopen", side_effect=HTTPError("https://example.invalid?secret=example", 401, "token example", {}, None)):
+        with patch("core.paths.IS_WINDOWS", False), patch("urllib.request.urlopen", side_effect=HTTPError("https://example.invalid?secret=example", 401, "token example", {}, None)):
             with self.assertRaises(QueryError) as result:
                 request("https://example.invalid", {"Authorization": "Bearer example"})
         self.assertNotIn("example", str(result.exception))

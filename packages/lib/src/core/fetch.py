@@ -5,12 +5,12 @@ import subprocess
 import tempfile
 import sys
 import time
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from . import __version__
 from . import config as cfgmod
 from . import paths
+from .provider_http import request
 
 CACHE_DIR = str(paths.CACHE_DIR / "providers") if paths.IS_WINDOWS else os.path.join(tempfile.gettempdir(), "ai-status-cache")
 CACHE_TTL = 3600
@@ -157,17 +157,16 @@ _latest_version = None
 def check_for_updates():
     global _latest_version
     try:
-        req = urllib.request.Request(
+        data = json.loads(request(
             "https://api.github.com/repos/gelzinn/ai-status/releases/latest",
             headers={
                 "Accept": "application/vnd.github.v3+json",
                 "User-Agent": "ai-status",
             },
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read())
-            tag = data.get("tag_name", "")
-            _latest_version = tag.lstrip("v")
+            timeout=5,
+        ))
+        tag = data.get("tag_name", "")
+        _latest_version = tag.lstrip("v")
     except Exception:
         pass
 

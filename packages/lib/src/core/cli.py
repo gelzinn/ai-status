@@ -185,6 +185,10 @@ def main():
                 info.update(tray.smoke_test())
         except ImportError:
             pass
+        if "--http-smoke" in sys.argv:
+            from .provider_http import request
+            response = json.loads(request("https://api.github.com/", timeout=10))
+            info["native_https"] = paths.IS_WINDOWS and "current_user_url" in response
         print(json.dumps(info, ensure_ascii=False))
     elif command == "status":
         import json
