@@ -1,5 +1,6 @@
 """Desktop adapter. The Waybar daemon and CLI do not import Qt."""
 import logging
+import math
 from functools import lru_cache
 from pathlib import Path
 import subprocess
@@ -8,16 +9,16 @@ import threading
 import time
 import uuid
 
-from PySide6.QtCore import QEasingCurve, QObject, QPoint, QPointF, QRectF, QLockFile, QTimer, Qt, QUrl, Signal, QSize, QVariantAnimation
+from PySide6.QtCore import QEasingCurve, QEvent, QModelIndex, QObject, QPoint, QPointF, QRectF, QLockFile, QTimer, Qt, QUrl, Signal, QSize, QVariantAnimation
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
-    QAbstractButton, QApplication, QCheckBox, QDialog, QDialogButtonBox, QHBoxLayout,
-    QLabel, QListWidget, QListWidgetItem, QMenu, QMessageBox,
+    QAbstractButton, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout,
+    QLabel, QListWidget, QListWidgetItem, QMenu,
     QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QStyledItemDelegate, QStyle,
     QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
-from . import __version__, config, fetch, paths, render, reset_credits, state
+from . import __version__, about, config, fetch, paths, render, reset_credits, state
 
 RELEASE_URL = "https://github.com/gelzinn/ai-status/releases/latest"
 ASSETS = paths.LIB_DIR / "assets"
@@ -48,8 +49,7 @@ QScrollBar::handle:vertical { background: #303030; border-radius: 2px; min-heigh
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 QPushButton { padding: 6px 8px; }
-QPushButton#actions { background: #1c1c1c; padding: 0; border-radius: 6px; text-align: center; }
-QPushButton#actions:hover { background: #252525; }
+QAbstractButton#control { padding: 0; border-radius: 6px; }
 QMenu { background: #111111; border: 1px solid #262626; border-radius: 10px; padding: 6px; }
 QMenu::item { color: #888888; padding: 8px 12px; margin: 1px 0; border-radius: 6px; }
 QMenu::item:selected { background: #1c1c1c; color: #eeeeee; }
@@ -313,17 +313,16 @@ class ResetCreditsView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 18, 16, 18)
         layout.setSpacing(18)
-        self.back = UsageButton()
-        row = QHBoxLayout(self.back)
-        row.setContentsMargins(4, 6, 4, 6)
+        self.heading = QWidget()
+        row = QHBoxLayout(self.heading)
+        row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
-        row.addWidget(ArrowIcon(back=True))
         self.logo = plain_label("")
         self.logo.setFixedSize(16, 16)
         row.addWidget(self.logo)
         self.provider_label = plain_label("", "#eeeeee")
         row.addWidget(self.provider_label, 1)
-        layout.addWidget(self.back)
+        layout.addWidget(self.heading)
         self.cached_label = plain_label("Cached data", "#666666")
         layout.addWidget(self.cached_label)
         intro = QVBoxLayout()
@@ -380,7 +379,7 @@ class ResetCreditsView(QWidget):
     def update_provider(self, name, entry, label):
         self.provider_label.setText(label)
         self.logo.setPixmap(provider_icon(name).pixmap(16, 16))
-        self.back.setAccessibleName(f"Back to usage from {label} resets")
+        self.heading.setAccessibleName(label)
         self.explanation.setText(
             "Restore your 5-hour or weekly limit,\nor both, depending on the reset type."
             if name == "codex" else
@@ -451,6 +450,174 @@ class ProviderDelegate(QStyledItemDelegate):
         # platform's blue rectangle drawn separately around the text.
         option.state &= ~QStyle.StateFlag.State_HasFocus
 
+    def paint(self, painter, option, index):
+        label_option = type(option)(option)
+        label_option.rect.adjust(0, 0, -60, 0)
+        super().paint(painter, label_option, index)
+        for offset, icon, enabled in ((56, "arrow-up", index.row() > 0),
+                                      (28, "arrow-down", index.row() < index.model().rowCount() - 1)):
+            rect = QRectF(option.rect.right() - offset, option.rect.top(), 28, option.rect.height())
+            draw_control_icon(painter, rect, icon, "#aaaaaa" if enabled else "#444444")
+
+    def editorEvent(self, event, model, option, index):
+        if event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
+            if event.button() == Qt.MouseButton.LeftButton and event.position().x() >= option.rect.right() - 56:
+                if event.type() == QEvent.Type.MouseButtonRelease:
+                    direction = -1 if event.position().x() < option.rect.right() - 28 else 1
+                    self.parent().move_provider(index.row(), direction)
+                return True
+        return super().editorEvent(event, model, option, index)
+
+
+class ProviderList(QListWidget):
+    """Native internal drag/drop and per-row arrows share the same draft order."""
+    def __init__(self):
+        super().__init__()
+        self.setItemDelegate(ProviderDelegate(self))
+        self.setIconSize(QSize(16, 16))
+        self.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setDropIndicatorShown(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setAccessibleName("Providers; drag to reorder or use Alt+Up and Alt+Down")
+
+    def move_provider(self, row, direction):
+        other = row + direction
+        if row < 0 or other < 0 or other >= self.count():
+            return
+        item = self.item(row)
+        self.model().moveRow(QModelIndex(), row, QModelIndex(), other + (1 if direction > 0 else 0))
+        self.setCurrentItem(item)
+
+    def keyPressEvent(self, event):
+        if event.modifiers() & Qt.KeyboardModifier.AltModifier and event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down):
+            self.move_provider(self.currentRow(), -1 if event.key() == Qt.Key.Key_Up else 1)
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+
+@lru_cache(maxsize=1)
+def settings_icon_path():
+    """The shell's Lucide settings outline, with SVG circular arcs mapped to Qt."""
+    path = QPainterPath(QPointF(9.671, 4.136))
+    for dx, dy, sweep in ((4.659, 0, True), (3.319, 1.915, False),
+                          (2.33, 4.033, True), (0, 3.831, False),
+                          (-2.33, 4.033, True), (-3.319, 1.915, False),
+                          (-4.659, 0, True), (-3.32, -1.915, False),
+                          (-2.33, -4.033, True), (0, -3.831, False),
+                          (2.33, -4.033, True), (3.319, -1.915, False)):
+        start = path.currentPosition()
+        distance = math.hypot(dx, dy)
+        radius = max(2.34, distance / 2)
+        offset = math.sqrt(max(0, radius * radius - distance * distance / 4)) / distance
+        sign = 1 if sweep else -1
+        center = start + QPointF(dx / 2 - sign * dy * offset, dy / 2 + sign * dx * offset)
+        angle = math.degrees(math.atan2(center.y() - start.y(), start.x() - center.x()))
+        end_angle = math.degrees(math.atan2(center.y() - start.y() - dy, start.x() + dx - center.x()))
+        span = (end_angle - angle) % 360
+        if sweep:
+            span -= 360
+        path.arcTo(QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2), angle, span)
+    path.closeSubpath()
+    path.addEllipse(QRectF(9, 9, 6, 6))
+    return path
+
+
+def draw_control_icon(painter, rect, name, color="#aaaaaa"):
+    """Monochrome Lucide vectors; see quickshell/LUCIDE-LICENSE."""
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.translate(rect.center().x() - 8, rect.center().y() - 8)
+    painter.scale(16 / 24, 16 / 24)
+    pen = QPen(QColor(color), 2)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    path = QPainterPath()
+    if name == "refresh-cw":
+        path.moveTo(3, 12)
+        path.arcTo(QRectF(3, 3, 18, 18), 180, -135)
+        path.lineTo(21, 8)
+        path.moveTo(21, 3)
+        path.lineTo(21, 8)
+        path.lineTo(16, 8)
+        path.moveTo(21, 12)
+        path.arcTo(QRectF(3, 3, 18, 18), 0, -135)
+        path.lineTo(3, 16)
+        path.moveTo(8, 16)
+        path.lineTo(3, 16)
+        path.lineTo(3, 21)
+    elif name == "settings":
+        path = settings_icon_path()
+    else:
+        points = {
+            "arrow-left": ((12, 19), (5, 12), (12, 5), (19, 12), (5, 12)),
+            "arrow-up": ((5, 12), (12, 5), (19, 12), (12, 19), (12, 5)),
+            "arrow-down": ((19, 12), (12, 19), (5, 12), (12, 5), (12, 19)),
+        }[name]
+        path.moveTo(*points[0])
+        path.lineTo(*points[1])
+        path.lineTo(*points[2])
+        path.moveTo(*points[3])
+        path.lineTo(*points[4])
+    painter.drawPath(path)
+    painter.restore()
+
+
+class ControlButton(QAbstractButton):
+    def __init__(self, name, label):
+        super().__init__()
+        self.icon_name = name
+        self.setObjectName("control")
+        self.setFixedSize(28, 28)
+        self.setToolTip(label)
+        self.setAccessibleName(label)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.loading = False
+        self.rotation = 0.0
+        self.spin = QVariantAnimation(self)
+        self.spin.setStartValue(0.0)
+        self.spin.setEndValue(360.0)
+        self.spin.setDuration(1000)
+        self.spin.setLoopCount(-1)
+        self.spin.valueChanged.connect(self.rotate_icon)
+
+    def rotate_icon(self, angle):
+        self.rotation = angle
+        self.update()
+
+    def set_loading(self, loading):
+        self.loading = loading
+        if loading and self.isVisible():
+            self.spin.start()
+        else:
+            self.spin.stop()
+            self.rotate_icon(0.0)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.set_loading(self.loading)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.spin.stop()
+        self.rotate_icon(0.0)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self.underMouse() or self.hasFocus():
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#1c1c1c"))
+            painter.drawRoundedRect(QRectF(self.rect()), 6, 6)
+        painter.translate(self.width() / 2, self.height() / 2)
+        painter.rotate(self.rotation)
+        painter.translate(-self.width() / 2, -self.height() / 2)
+        draw_control_icon(painter, QRectF(self.rect()), self.icon_name, "#aaaaaa" if self.isEnabled() else "#444444")
+
 
 class UsageWorker(QObject):
     result = Signal(str, object)
@@ -476,22 +643,27 @@ class UsageWorker(QObject):
             self.finished.emit(data)
 
 
-class ProviderSettings(QDialog):
+class ProviderSettings(QWidget):
+    saved = Signal()
+    cancelled = Signal()
+    about_requested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("AI Status settings")
-        self.setWindowIcon(status_icon())
+        self.dashboard = parent
         self.setFont(panel_font())
         palette = self.palette()
         palette.setColor(QPalette.ColorRole.Highlight, QColor("#252525"))
         palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#eeeeee"))
         self.setPalette(palette)
         self.setStyleSheet(PANEL_STYLE + """
-            QListWidget { background: #161616; border: 1px solid #262626; border-radius: 8px; padding: 8px; }
-            QListWidget::item { padding: 7px; }
+            QListWidget { background: transparent; border: none; }
+            QListWidget::item { padding: 8px 4px; }
             QListWidget::item:selected { background: #252525; color: #eeeeee; }
-            QCheckBox { padding: 8px 0; }
+            QCheckBox { padding: 5px 0; }
             QPushButton { border: 1px solid #303030; border-radius: 6px; }
+            QComboBox { border: 1px solid #303030; border-radius: 6px; padding: 6px 8px; }
+            QComboBox QAbstractItemView { background: #111111; selection-background-color: #252525; }
             QListWidget::indicator, QCheckBox::indicator {
                 width: 16px; height: 16px; border: 1px solid #888888;
                 border-radius: 4px; background: #161616;
@@ -501,13 +673,38 @@ class ProviderSettings(QDialog):
                 image: url(CHECKMARK);
             }
         """.replace("CHECKMARK", '"' + (ASSETS / "checkmark.png").as_posix() + '"'))
-        self.resize(380, 420)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Enable providers and drag to reorder:"))
-        self.providers = QListWidget()
-        self.providers.setItemDelegate(ProviderDelegate(self.providers))
-        self.providers.setIconSize(QSize(20, 20))
-        self.providers.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        layout.setContentsMargins(16, 18, 16, 18)
+        layout.setSpacing(8)
+        layout.addWidget(plain_label("Active provider & limit", "#eeeeee"))
+        self.active = QComboBox()
+        self.active.setIconSize(QSize(16, 16))
+        self.active.setAccessibleName("Active provider and limit")
+        layout.addWidget(self.active)
+        layout.addSpacing(14)
+        layout.addWidget(plain_label("Bar display", "#eeeeee"))
+        selected = state.load_selected() or {}
+        self.display = {}
+        for key, label, default in (("show_provider", "Provider name", True),
+                                    ("show_model", "Model / plan", True),
+                                    ("show_metric", "Limit name", False),
+                                    ("show_pct", "Percentage", True)):
+            checkbox = QCheckBox(label)
+            checkbox.setChecked(selected.get(key, default))
+            self.display[key] = checkbox
+            layout.addWidget(checkbox)
+        self.icon_mode = QComboBox()
+        self.icon_mode.setAccessibleName("Bar icon")
+        for value, label in (("off", "None"), ("bot", "Bot"), ("logo", "Provider logo")):
+            self.icon_mode.addItem("Icon: " + label, value)
+        self.icon_mode.setCurrentIndex(self.icon_mode.findData(state.get_icon_mode(selected)))
+        layout.addWidget(self.icon_mode)
+        layout.addSpacing(14)
+        layout.addWidget(plain_label("Providers", "#eeeeee"))
+        hint = plain_label("Enable providers and set their order.", "#666666")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self.providers = ProviderList()
         enabled = config.enabled_order()
         available = config.available_providers()
         for name in dict.fromkeys(enabled + available):
@@ -517,28 +714,149 @@ class ProviderSettings(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, name)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if name in enabled else Qt.CheckState.Unchecked)
+            item.setSizeHint(QSize(0, 36))
             self.providers.addItem(item)
+        self.providers.setFixedHeight(self.providers.count() * 36 + 4)
         layout.addWidget(self.providers)
         self.startup = QCheckBox("Start when I sign in to Windows")
         self.startup.setVisible(paths.IS_WINDOWS)
         self.startup.setChecked(startup_enabled())
         layout.addWidget(self.startup)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.save)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        layout.addSpacing(14)
+        self.about_button = QPushButton("About AI Status")
+        self.about_button.clicked.connect(self.about_requested)
+        layout.addWidget(self.about_button)
+        self.message = plain_label("")
+        self.message.setWordWrap(True)
+        self.message.hide()
+        self.buttons = QWidget(self)
+        self.buttons.hide()
+        footer = QHBoxLayout(self.buttons)
+        footer.setContentsMargins(0, 0, 0, 0)
+        footer.setSpacing(8)
+        footer.addWidget(self.message, 1)
+        footer.addStretch()
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.cancelled)
+        footer.addWidget(self.cancel_button)
+        self.save_button = QPushButton("Save")
+        self.save_button.setStyleSheet("border: 1px solid #303030; border-radius: 6px; padding: 6px 8px;")
+        self.save_button.clicked.connect(self.save)
+        footer.addWidget(self.save_button)
+        self.providers.itemChanged.connect(self.update_choices)
+        self.providers.model().rowsMoved.connect(self.update_choices)
+        self.providers.model().rowsInserted.connect(self.update_choices)
+        self.providers.model().rowsRemoved.connect(self.update_choices)
+        self.update_choices()
+        for checkbox in self.display.values():
+            checkbox.toggled.connect(self.clear_message)
+        self.icon_mode.currentIndexChanged.connect(self.clear_message)
+        self.active.currentIndexChanged.connect(self.clear_message)
+        self.startup.toggled.connect(self.clear_message)
+
+    def clear_message(self):
+        self.message.hide()
+
+    def update_choices(self):
+        choice = self.active.currentData()
+        if choice is None:
+            selected = state.load_selected() or {}
+            choice = [selected.get("provider"), selected.get("idx", 0), selected.get("metric")]
+        self.active.blockSignals(True)
+        self.active.clear()
+        data = getattr(self.dashboard, "data", {})
+        for i in range(self.providers.count()):
+            item = self.providers.item(i)
+            if item.checkState() != Qt.CheckState.Checked:
+                continue
+            name = item.data(Qt.ItemDataRole.UserRole)
+            entries = data.get(name) or [{"provider": provider_name(name), "metrics": []}]
+            for entry in entries:
+                metrics = entry.get("metrics") or [{"type": "rolling"}]
+                for metric in metrics:
+                    key = render.metric_key(metric)
+                    title = metric.get("name") or render.TYPE_NAMES.get(metric.get("type"), "Usage")
+                    detail = " (" + key.split(":", 1)[1] + ")" if ":" in key else ""
+                    self.active.addItem(provider_icon(name), f"{Dashboard.entry_name(name, entry)} · {title}{detail}",
+                                        [name, entry.get("_idx", 0), key])
+        index = self.active.findData(choice)
+        self.active.setCurrentIndex(index if index >= 0 else 0)
+        self.active.setEnabled(self.active.count() > 0)
+        self.active.blockSignals(False)
+        self.clear_message()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.cancelled.emit()
+        else:
+            super().keyPressEvent(event)
 
     def save(self):
         order = [self.providers.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.providers.count())
                  if self.providers.item(i).checkState() == Qt.CheckState.Checked]
+        display = {key: checkbox.isChecked() for key, checkbox in self.display.items()}
+        if not any(display.values()):
+            self.message.setText("Show at least one text field in the bar.")
+            self.message.show()
+            return
+        selected = dict(state.load_selected() or {})
+        choice = self.active.currentData()
+        if choice:
+            selected.update(zip(("provider", "idx", "metric"), choice))
+        selected.update(display, icon_mode=self.icon_mode.currentData())
         try:
             if paths.IS_WINDOWS:
                 set_startup(self.startup.isChecked())
             config.save_config(order)
+            state._save_json(state.SELECTED_FILE, selected)
         except OSError:
-            QMessageBox.warning(self, "Settings", "Unable to save settings. Check access to your user configuration directory.")
+            self.message.setText("Unable to save settings. Check access to your user configuration directory.")
+            self.message.show()
             return
-        self.accept()
+        self.message.setText("Saved")
+        self.message.show()
+        self.saved.emit()
+
+
+class AboutView(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        info = about.project_info()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 18, 16, 18)
+        layout.setSpacing(12)
+        logo = QLabel()
+        logo.setPixmap(status_icon().pixmap(40, 40))
+        layout.addWidget(logo)
+        title = plain_label(info["name"], "#eeeeee")
+        title.setStyleSheet("color: #eeeeee; font-size: 16px; font-weight: 500;")
+        layout.addWidget(title)
+        for text in (info["description"],
+                     f"Version: v{info['version']}\nCommit: {info['commit']}\nLicense: {info['license']}\nAuthor: {info['author']}"):
+            label = plain_label(text)
+            label.setWordWrap(True)
+            layout.addWidget(label)
+        for text, key in (("GitHub", "github"), ("Documentation", "documentation"), ("Report a bug", "issues")):
+            button = QPushButton(text)
+            row = QHBoxLayout(button)
+            row.setContentsMargins(8, 0, 8, 0)
+            row.addStretch()
+            row.addWidget(ArrowIcon())
+            button.setObjectName("about-" + key)
+            button.setStyleSheet("border: 1px solid #303030; border-radius: 6px; padding: 6px 8px;")
+            button.clicked.connect(lambda checked=False, url=info[key]: QDesktopServices.openUrl(QUrl(url)))
+            layout.addWidget(button)
+        layout.addSpacing(6)
+        layout.addWidget(plain_label("Quick guide", "#eeeeee"))
+        for text in (
+            "Tray: click to show usage; right-click for settings and other actions.",
+            "Usage: click a limit to show it in the tray. Refresh checks now; Reset credits shows the available resets.",
+            "Settings: pick a limit, text and icon. Enable providers and reorder them with arrows or drag and drop. Save applies changes and keeps settings open.",
+            "Keyboard: R refreshes, C opens settings, Esc goes back. Tab moves between controls; Alt+Up/Down reorders providers.",
+        ):
+            label = plain_label(text)
+            label.setWordWrap(True)
+            layout.addWidget(label)
 
 
 class Dashboard(QWidget):
@@ -563,6 +881,8 @@ class Dashboard(QWidget):
         self.metric_buttons = []
         self.provider_buttons = {}
         self.reset_provider = None
+        self.settings_view = None
+        self.settings_scroll_position = 0
         self.structure = None
         self.queued = False
         self.quitting = False
@@ -583,25 +903,30 @@ class Dashboard(QWidget):
         header.setFixedHeight(49)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(16, 0, 12, 0)
-        brand = plain_label("AI Status")
-        brand.setObjectName("brand")
-        header_layout.addWidget(brand)
+        header_layout.setSpacing(4)
+        self.back_button = ControlButton("arrow-left", "Back to usage (Esc)")
+        self.back_button.clicked.connect(self.go_back)
+        self.back_button.hide()
+        header_layout.addWidget(self.back_button)
+        self.brand = plain_label("AI Status")
+        self.brand.setObjectName("brand")
+        header_layout.addWidget(self.brand)
         header_layout.addStretch()
         self.version = plain_label(f"v{__version__}")
         header_layout.addWidget(self.version)
-        self.menu_button = QPushButton("⋯")
-        self.menu_button.setObjectName("actions")
-        self.menu_button.setAccessibleName("AI Status actions")
-        self.menu_button.setFixedSize(28, 28)
-        header_layout.addWidget(self.menu_button)
+        header_layout.addSpacing(8)
+        self.refresh_button = ControlButton("refresh-cw", "Refresh usage (R)")
+        self.refresh_button.clicked.connect(self.refresh)
+        header_layout.addWidget(self.refresh_button)
+        self.settings_button = ControlButton("settings", "Configure (C)")
+        self.settings_button.clicked.connect(self.configure)
+        header_layout.addWidget(self.settings_button)
         self.panel_layout.addWidget(header)
-        # Refresh is a context-menu action, not a permanent toolbar in the usage panel.
         self.status = QLabel("Updates every 5 minutes")
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.credits_view = ResetCreditsView()
-        self.credits_view.back.clicked.connect(self.show_usage)
         self.credits_scroll = QScrollArea()
         self.credits_scroll.setWidgetResizable(True)
         self.credits_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -610,6 +935,21 @@ class Dashboard(QWidget):
         self.pages.addWidget(self.scroll)
         self.pages.addWidget(self.credits_scroll)
         self.panel_layout.addWidget(self.pages)
+        self.settings_scroll = QScrollArea()
+        self.settings_scroll.setWidgetResizable(True)
+        self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.pages.addWidget(self.settings_scroll)
+        self.about_scroll = QScrollArea()
+        self.about_scroll.setWidgetResizable(True)
+        self.about_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.about_view = AboutView(self)
+        self.about_scroll.setWidget(self.about_view)
+        self.pages.addWidget(self.about_scroll)
+        self.settings_footer = QWidget()
+        self.settings_footer_layout = QHBoxLayout(self.settings_footer)
+        self.settings_footer_layout.setContentsMargins(16, 8, 16, 12)
+        self.settings_footer.hide()
+        self.panel_layout.addWidget(self.settings_footer)
         self.tray = QSystemTrayIcon(status_icon(), self)
         menu = QMenu(self)
         menu.setFont(panel_font())
@@ -628,7 +968,6 @@ class Dashboard(QWidget):
             if label == "Refresh":
                 self.refresh_action = action
         self.menu = menu
-        self.menu_button.clicked.connect(self.show_actions)
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self.activate)
         self.tray.show()
@@ -648,22 +987,6 @@ class Dashboard(QWidget):
     def activate(self, reason):
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
             self.hide() if self.isVisible() else self.show_dashboard()
-
-    def actions_position(self):
-        self.menu.ensurePolished()
-        size = self.menu.sizeHint()
-        anchor = self.menu_button.mapToGlobal(QPoint(self.menu_button.width(), self.menu_button.height() + 8))
-        screen = self.app.screenAt(anchor) or self.screen()
-        area = screen.availableGeometry().adjusted(8, 8, -8, -8)
-        x = max(area.left(), min(anchor.x() - size.width(), area.right() - size.width() + 1))
-        y = anchor.y()
-        if y + size.height() > area.bottom() + 1:
-            y = self.menu_button.mapToGlobal(QPoint(0, -8)).y() - size.height()
-        y = max(area.top(), min(y, area.bottom() - size.height() + 1))
-        return QPoint(x, y)
-
-    def show_actions(self):
-        self.menu.exec(self.actions_position())
 
     def show_dashboard(self):
         screen = self.app.screenAt(self.tray.geometry().center()) or self.app.primaryScreen()
@@ -686,19 +1009,25 @@ class Dashboard(QWidget):
     def changeEvent(self, event):
         super().changeEvent(event)
         if event.type() == event.Type.ActivationChange and not self.isActiveWindow():
-            if not self.menu.isVisible() and not self.findChildren(QDialog):
+            if not QApplication.activePopupWidget() and not self.menu.isVisible() and not self.findChildren(QDialog):
                 self.hide()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
-            self.show_usage() if self.reset_provider is not None else self.hide()
+            self.go_back() if self.reset_provider is not None or self.configuring() or self.viewing_about() else self.hide()
+        elif self.configuring() or self.viewing_about():
+            super().keyPressEvent(event)
+        elif event.key() == Qt.Key.Key_R:
+            self.refresh()
+        elif event.key() == Qt.Key.Key_C:
+            self.configure()
         elif self.reset_provider is None and event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
             self.cycle_metric(1 if event.key() == Qt.Key.Key_Down else -1)
         else:
             super().keyPressEvent(event)
 
     def wheelEvent(self, event):
-        if self.reset_provider is not None:
+        if self.reset_provider is not None or self.configuring() or self.viewing_about():
             super().wheelEvent(event)
             return
         self.cycle_metric(1 if event.angleDelta().y() < 0 else -1)
@@ -715,17 +1044,58 @@ class Dashboard(QWidget):
         self.credits_view.update_provider(key[0], entry, self.entry_name(key[0], entry))
         self.pages.setCurrentWidget(self.credits_scroll)
         self.credits_scroll.verticalScrollBar().setValue(0)
+        self.update_header()
         self.fit_content()
-        self.credits_view.back.setFocus()
+        self.back_button.setFocus()
 
     def show_usage(self):
+        was_configuring = self.configuring()
         key = self.reset_provider
         self.reset_provider = None
         self.pages.setCurrentWidget(self.scroll)
+        self.update_header()
         self.fit_content()
         heading = self.provider_buttons.get(key)
         if heading:
             (heading.credits if not heading.credits.isHidden() else heading).setFocus()
+        elif was_configuring:
+            self.settings_button.setFocus()
+
+    def configuring(self):
+        return self.pages.currentWidget() is self.settings_scroll
+
+    def viewing_about(self):
+        return self.pages.currentWidget() is self.about_scroll
+
+    def show_about(self):
+        self.settings_scroll_position = self.settings_scroll.verticalScrollBar().value()
+        self.pages.setCurrentWidget(self.about_scroll)
+        self.about_scroll.verticalScrollBar().setValue(0)
+        self.update_header()
+        self.fit_content()
+        self.back_button.setFocus()
+
+    def go_back(self):
+        if self.viewing_about():
+            self.pages.setCurrentWidget(self.settings_scroll)
+            self.update_header()
+            self.fit_content()
+            self.settings_scroll.verticalScrollBar().setValue(self.settings_scroll_position)
+            self.settings_view.about_button.setFocus()
+        else:
+            self.show_usage()
+
+    def update_header(self):
+        configuring = self.configuring()
+        about_page = self.viewing_about()
+        self.brand.setText("About" if about_page else "Settings" if configuring else "AI Status")
+        self.back_button.setVisible(configuring or about_page or self.reset_provider is not None)
+        back_label = "Back to settings (Esc)" if about_page else "Back to usage (Esc)"
+        self.back_button.setToolTip(back_label)
+        self.back_button.setAccessibleName(back_label)
+        self.refresh_button.setVisible(not configuring and not about_page)
+        self.settings_button.setVisible(not configuring and not about_page and self.reset_provider is None)
+        self.settings_footer.setVisible(configuring)
 
     def animate(self):
         self.animation_frame += 1
@@ -746,12 +1116,35 @@ class Dashboard(QWidget):
             self.app.quit()
 
     def configure(self):
-        settings = ProviderSettings(self)
-        if settings.exec() == QDialog.DialogCode.Accepted:
-            self.last_config = config.load_config()
-            self.draw()
-            self.refresh()
-        settings.deleteLater()
+        if self.viewing_about():
+            self.go_back()
+        if not self.configuring():
+            previous = self.settings_scroll.takeWidget()
+            if previous:
+                previous.deleteLater()
+            while self.settings_footer_layout.count():
+                self.settings_footer_layout.takeAt(0).widget().deleteLater()
+            self.settings_view = ProviderSettings(self)
+            self.settings_view.saved.connect(self.settings_saved)
+            self.settings_view.cancelled.connect(self.show_usage)
+            self.settings_view.about_requested.connect(self.show_about)
+            self.settings_scroll.setWidget(self.settings_view)
+            self.settings_footer_layout.addWidget(self.settings_view.buttons)
+            self.settings_view.buttons.show()
+            self.reset_provider = None
+            self.pages.setCurrentWidget(self.settings_scroll)
+            self.settings_scroll.verticalScrollBar().setValue(0)
+            self.update_header()
+            self.fit_content()
+        if not self.isVisible():
+            self.show_dashboard()
+        self.settings_view.active.setFocus()
+
+    def settings_saved(self):
+        self.last_config = config.load_config()
+        self.selected = state.load_selected() or {}
+        self.draw()
+        self.refresh()
 
     def show_diagnostics(self):
         dialog = QDialog(self)
@@ -815,6 +1208,8 @@ class Dashboard(QWidget):
         self.pending = set(config.enabled_order())
         self.errors = {}
         self.refresh_action.setEnabled(False)
+        self.refresh_button.setEnabled(False)
+        self.refresh_button.set_loading(True)
         self.status.setText("Updating…")
         self.draw()
         check_updates = time.monotonic() - self.last_update_check >= 3600
@@ -844,6 +1239,8 @@ class Dashboard(QWidget):
         self.busy = False
         self.pending.clear()
         self.refresh_action.setEnabled(True)
+        self.refresh_button.setEnabled(True)
+        self.refresh_button.set_loading(False)
         self.worker.deleteLater()
         self.status.setText("Last checked " + time.strftime("%H:%M:%S") + " · updates every 5 minutes")
         if fetch.get_version_info()["has_update"]:
@@ -1052,13 +1449,13 @@ class Dashboard(QWidget):
             self.empty_message.setText("Checking your connected providers…" if self.busy else
                 "No usage available. Connect a provider and refresh." if config.enabled_order() else
                 "No providers enabled. Choose them in Settings.")
-        self.menu_button.setToolTip(self.status.text())
         self.update_tooltip()
         if self.reset_provider is not None:
             entry = self.reset_entry(self.reset_provider)
             if entry is None:
                 self.reset_provider = None
                 self.pages.setCurrentWidget(self.scroll)
+                self.update_header()
             else:
                 name = self.reset_provider[0]
                 self.credits_view.update_provider(name, entry, self.entry_name(name, entry))
@@ -1069,7 +1466,7 @@ class Dashboard(QWidget):
         content.layout().activate()
         height = content.heightForWidth(self.width() - 2) if content.hasHeightForWidth() else content.sizeHint().height()
         height = max(height, content.minimumSizeHint().height())
-        natural_height = height + 57
+        natural_height = height + 57 + (self.settings_footer.sizeHint().height() if self.configuring() else 0)
         screen = self.screen().availableGeometry()
         bottom = self.geometry().bottom()
         self.resize(self.width(), min(max(180, natural_height), 720, max(180, screen.height() - 32)))

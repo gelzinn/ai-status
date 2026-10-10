@@ -7,6 +7,7 @@ Rectangle {
     property var focusTarget
     property real contentWidth
     property real contentHeight
+    property real padding: 16
     default property alias contentData: holder.data
     width: contentWidth
     height: contentHeight
@@ -16,5 +17,5 @@ Rectangle {
     function fittedContentWidth(value) { return value }
     function fittedContentHeight(value, cap) { return Math.min(value + 32, cap) }
     onOpenChanged: if (open && focusTarget) focusTarget.forceActiveFocus()
-    Item { id: holder; anchors.fill: parent; anchors.margins: 16 }
+    Item { id: holder; anchors.fill: parent; anchors.margins: padding }
 }

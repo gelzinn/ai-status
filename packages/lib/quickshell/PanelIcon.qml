@@ -12,7 +12,8 @@ Item {
         "arrow-left": "M12 19l-7-7 7-7 M19 12H5",
         "arrow-right": "M5 12h14 M12 5l7 7-7 7",
         "arrow-up": "M12 19V5 M5 12l7-7 7 7",
-        "arrow-down": "M12 5v14 M19 12l-7 7-7-7"
+        "arrow-down": "M12 5v14 M19 12l-7 7-7-7",
+        "chevron-down": "M6 9l6 6 6-6"
     })
     implicitWidth: 16
     implicitHeight: 16

@@ -10,7 +10,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import config, fetch, render, state, reset_credits
+from . import about, config, fetch, paths, render, state, reset_credits
 
 
 class _PlainText(HTMLParser):
@@ -80,8 +80,10 @@ class LogoCache:
 def settings_snapshot(selected):
     available = config.available_providers()
     enabled = [name for name in config.enabled_order() if name in available]
+    providers = paths.read_json(paths.LIB_DIR.parent / "shared/providers/providers.json")
     return {
         "available": available,
+        "names": {name: providers.get(name, {}).get("name", name) for name in available},
         "order": enabled + [name for name in available if name not in enabled],
         "enabled": enabled,
         "display": {key: selected.get(key, default) for key, default in (
@@ -206,6 +208,7 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
         logo_path = logo_paths.get(current["id"], logo_path)
     return {
         "schemaVersion": 1,
+        "about": about.project_info(),
         "version": fetch.get_version_info(),
         "text": text,
         "selected": selected,

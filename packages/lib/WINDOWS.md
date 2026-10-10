@@ -22,17 +22,28 @@ settings/cache live in your user profile.
   selection, matching the landing-page preview. The tray logo and short usage
   tooltip follow that selection. Up/Down cycles metrics; Escape closes the panel.
 - The panel only lists providers with usable metrics. Failed/unconnected providers
-  do not occupy rows. The square **⋯** menu and tray context menu contain
-  **Refresh**, **Settings**, **Connection details**, update/log actions and **Exit**.
-- **Settings** enables/disables providers and lets you drag to reorder them.
+  do not occupy rows. The header has **Refresh** and **Settings** icons, matching
+  Quickshell. The tray context menu also contains **Connection details**,
+  update/log actions and **Exit**. R refreshes usage and C opens settings.
+- **Settings** opens inside the panel, with the back arrow before the title.
+  Choose the active provider/limit, with provider logos in the selector and its
+  options, set display fields and the bar icon, enable/disable
+  providers, and reorder them with drag and drop, the per-row arrows, or
+  Alt+Up/Down. **Save** applies changes and keeps settings open; the back arrow,
+  Escape or **Cancel** returns to usage and discards any remaining unsaved edits.
   Starting at sign-in is optional and disabled by default.
+- **About AI Status** in Settings shows the project logo, description, author,
+  version, build commit, MIT license, quick guide and links to GitHub,
+  documentation and bug reports. Back returns to your settings draft.
 - **Refresh** updates immediately; background updates run every five minutes.
+  Only its icon rotates while the update is running.
   A failed provider shows a diagnostic. If recent usage is cached, it is
   explicitly labeled as cached. Its reason is available on hover and in
   **Connection details**, along with authentication failures for hidden providers.
 - Claude and Codex show a **Reset credits** link beneath their usage metrics.
   Open it to see that provider's reset types, quantities, local expiry dates and
-  remaining time in a table. The back arrow or Escape returns to usage without
+  remaining time in a rounded table. The provider logo/name is a plain heading;
+  the back arrow before the panel title or Escape returns to usage without
   changing your tray selection. Expired, paused or spent credits are excluded.
   If details are unavailable, the known credit count remains visible and missing
   information is labeled. Use the provider's own app to redeem a reset.

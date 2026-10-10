@@ -8,6 +8,7 @@ from test_portability import IsolatedState
 from core import config, paths, state
 
 try:
+    from PySide6.QtCore import QModelIndex
     from PySide6.QtGui import QWheelEvent
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QLabel
@@ -60,8 +61,9 @@ class DesktopTests(IsolatedState):
         self.assertEqual(len(self.dashboard.metric_values), 0)
         self.assertIn("No usage", self.dashboard.tray.toolTip())
 
-    def test_compact_panel_has_square_actions_and_project_identity(self):
-        self.assertEqual(self.dashboard.menu_button.width(), self.dashboard.menu_button.height())
+    def test_compact_panel_has_refresh_settings_and_project_identity(self):
+        for button in (self.dashboard.refresh_button, self.dashboard.settings_button):
+            self.assertEqual(button.width(), button.height())
         self.assertFalse(self.dashboard.windowIcon().isNull())
         self.dashboard.on_result("codex", [{"provider": "Codex (Pro)",
             "metrics": [{"type": "weekly", "percentage": 23}]}])
@@ -72,6 +74,189 @@ class DesktopTests(IsolatedState):
         self.assertIn("]", labels)
         self.assertIn("•", labels)
         self.assertIn("→", labels)
+
+    def test_header_refresh_action_and_loading_state(self):
+        with patch.object(state, "acquire_lock", return_value=True), patch.object(tray.threading, "Thread"):
+            self.dashboard.refresh_button.click()
+        self.assertTrue(self.dashboard.busy)
+        self.assertFalse(self.dashboard.refresh_button.isEnabled())
+        self.assertFalse(self.dashboard.refresh_action.isEnabled())
+        self.assertTrue(self.dashboard.refresh_button.loading)
+        with patch.object(tray.fetch, "get_version_info", return_value={"has_update": False}):
+            self.dashboard.on_finished([])
+        self.assertTrue(self.dashboard.refresh_button.isEnabled())
+        self.assertFalse(self.dashboard.refresh_button.loading)
+        self.assertEqual(self.dashboard.refresh_button.rotation, 0)
+
+    def test_refresh_rotates_only_icon_and_pauses_when_hidden(self):
+        button = tray.ControlButton("refresh-cw", "Refresh")
+        self.addCleanup(button.deleteLater)
+        button.show()
+        button.setEnabled(False)
+        button.set_loading(True)
+        self.app.processEvents()
+        button.spin.pause()
+        button.spin.setCurrentTime(0)
+        original = button.grab().toImage()
+        button.spin.setCurrentTime(250)
+        rotated = button.grab().toImage()
+        self.assertNotEqual(original, rotated)
+        self.assertEqual(button.rotation, 90)
+        self.assertEqual(button.size(), tray.QSize(28, 28))
+        self.assertEqual(original.pixel(2, 2), rotated.pixel(2, 2))
+        button.hide()
+        self.assertEqual(button.rotation, 0)
+        self.assertEqual(button.spin.state(), tray.QVariantAnimation.State.Stopped)
+        button.show()
+        self.assertEqual(button.spin.state(), tray.QVariantAnimation.State.Running)
+        button.set_loading(False)
+        self.assertEqual(button.rotation, 0)
+        self.assertEqual(button.spin.state(), tray.QVariantAnimation.State.Stopped)
+
+    def test_about_returns_to_settings_without_discarding_draft_and_opens_project_links(self):
+        with patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.configure()
+            self.app.processEvents()
+            settings = self.dashboard.settings_view
+            settings.icon_mode.setCurrentIndex(settings.icon_mode.findData("off"))
+            settings.providers.move_provider(0, 1)
+            order = [settings.providers.item(i).text() for i in range(settings.providers.count())]
+            scroll = self.dashboard.settings_scroll.verticalScrollBar()
+            scroll.setValue(scroll.maximum())
+            position = scroll.value()
+            settings.about_button.click()
+            self.assertTrue(self.dashboard.viewing_about())
+            self.assertEqual(self.dashboard.brand.text(), "About")
+            self.assertTrue(self.dashboard.settings_footer.isHidden())
+            labels = [label.text() for label in self.dashboard.about_view.findChildren(QLabel)]
+            self.assertTrue(any("License: MIT" in text and "Author: gelzin.com" in text for text in labels))
+            with patch.object(tray.QDesktopServices, "openUrl") as browser:
+                self.dashboard.about_view.findChild(tray.QPushButton, "about-issues").click()
+                self.assertEqual(browser.call_args.args[0].toString(), tray.about.GITHUB + "/issues/new")
+            QTest.keyClick(self.dashboard, tray.Qt.Key.Key_Escape)
+            self.assertTrue(self.dashboard.configuring())
+            self.assertIs(self.dashboard.settings_view, settings)
+            self.assertEqual(settings.icon_mode.currentData(), "off")
+            self.assertEqual([settings.providers.item(i).text() for i in range(settings.providers.count())], order)
+            self.assertEqual(scroll.value(), position)
+            self.assertIs(self.dashboard.focusWidget(), settings.about_button)
+
+    def test_settings_save_stays_in_panel_and_back_is_before_title(self):
+        # Offscreen backends do not consistently activate Tool windows on Windows.
+        active_window = patch.object(self.dashboard, "isActiveWindow", return_value=True)
+        active_window.start()
+        self.addCleanup(active_window.stop)
+        self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
+            {"type": "rolling", "percentage": 2}, {"type": "weekly", "percentage": 23}]}])
+        self.dashboard.on_result("copilot", [{"provider": "Copilot", "metrics": [
+            {"type": "monthly", "percentage": 7}]}])
+        self.dashboard.show()
+        self.app.processEvents()
+        QTest.mouseClick(self.dashboard.settings_button, tray.Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        settings = self.dashboard.settings_view
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.settings_scroll)
+        self.assertEqual(self.dashboard.brand.text(), "Settings")
+        self.assertLess(self.dashboard.back_button.geometry().right(), self.dashboard.brand.geometry().left())
+        self.assertTrue(self.dashboard.refresh_button.isHidden())
+        self.assertTrue(self.dashboard.settings_button.isHidden())
+        settings.active.setCurrentIndex(settings.active.findData(["codex", 0, "weekly"]))
+        for i in range(settings.active.count()):
+            self.assertTrue(tray.icon_has_pixels(settings.active.itemIcon(i)))
+        self.assertEqual(settings.active.currentData()[0], "codex")
+        self.assertEqual(settings.active.itemIcon(settings.active.currentIndex()).cacheKey(), tray.provider_icon("codex").cacheKey())
+        settings.display["show_provider"].setChecked(False)
+        settings.icon_mode.setCurrentIndex(settings.icon_mode.findData("logo"))
+        with patch.object(self.dashboard, "refresh") as refresh:
+            QTest.mouseClick(settings.save_button, tray.Qt.MouseButton.LeftButton)
+        refresh.assert_called_once()
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.settings_scroll)
+        self.assertEqual(settings.message.text(), "Saved")
+        selected = state.load_selected()
+        self.assertEqual(selected["metric"], "weekly")
+        self.assertEqual(selected["icon_mode"], "logo")
+        self.assertFalse(selected["show_provider"])
+        self.assertTrue(self.dashboard.isVisible())
+        self.dashboard.back_button.click()
+        self.app.processEvents()
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
+        self.assertEqual(self.dashboard.brand.text(), "AI Status")
+        self.assertIs(self.dashboard.focusWidget(), self.dashboard.settings_button)
+
+    def test_provider_selector_popup_does_not_dismiss_settings(self):
+        self.dashboard.configure()
+        self.app.processEvents()
+        popup = self.dashboard.settings_view.active.view()
+        with patch.object(self.dashboard, "isActiveWindow", return_value=False), patch.object(QApplication, "activePopupWidget", return_value=popup):
+            QApplication.sendEvent(self.dashboard, tray.QEvent(tray.QEvent.Type.ActivationChange))
+        self.assertTrue(self.dashboard.isVisible())
+        self.assertTrue(self.dashboard.configuring())
+
+    def test_settings_escape_and_cancel_discard_only_unsaved_changes(self):
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        settings.display["show_metric"].setChecked(True)
+        with patch.object(self.dashboard, "refresh"):
+            settings.save()
+        saved = state.load_selected()
+        settings.display["show_metric"].setChecked(False)
+        QTest.keyClick(settings.active, tray.Qt.Key.Key_Escape)
+        self.assertFalse(self.dashboard.configuring())
+        self.assertEqual(state.load_selected(), saved)
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        self.assertTrue(settings.display["show_metric"].isChecked())
+        settings.providers.item(0).setCheckState(tray.Qt.CheckState.Unchecked)
+        settings.cancel_button.click()
+        self.assertFalse(self.dashboard.configuring())
+        self.assertEqual(config.enabled_order(), ["codex", "copilot"])
+
+    def test_settings_failure_keeps_draft_open_and_does_not_refresh(self):
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        settings.display["show_metric"].setChecked(True)
+        with patch.object(config, "save_config", side_effect=OSError("read only")), patch.object(self.dashboard, "refresh") as refresh:
+            settings.save()
+        refresh.assert_not_called()
+        self.assertTrue(self.dashboard.configuring())
+        self.assertTrue(settings.display["show_metric"].isChecked())
+        self.assertIn("Unable to save", settings.message.text())
+        self.assertFalse((state.load_selected() or {}).get("show_metric", False))
+
+    def test_provider_arrows_keyboard_and_native_move_preserve_checks_and_save_order(self):
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        providers = settings.providers
+        self.app.processEvents()
+        first, second = providers.item(0), providers.item(1)
+        # Exercise the delegate's actual per-row down arrow.
+        rect = providers.visualItemRect(first)
+        QTest.mouseClick(providers.viewport(), tray.Qt.MouseButton.LeftButton,
+                         pos=tray.QPoint(rect.right() - 14, rect.center().y()))
+        self.assertIs(providers.item(0), second)
+        self.assertIs(providers.item(1), first)
+        self.assertEqual(first.checkState(), tray.Qt.CheckState.Checked)
+        QTest.keyClick(providers, tray.Qt.Key.Key_Up, tray.Qt.KeyboardModifier.AltModifier)
+        self.assertIs(providers.item(0), first)
+        # Qt's internal drop path moves rows in this same native model.
+        self.assertTrue(providers.model().moveRow(QModelIndex(), 1, QModelIndex(), 0))
+        self.assertIs(providers.item(0), second)
+        self.assertEqual(providers.dragDropMode(), tray.QListWidget.DragDropMode.InternalMove)
+        self.assertEqual(second.checkState(), tray.Qt.CheckState.Checked)
+        with patch.object(self.dashboard, "refresh"):
+            settings.save()
+        self.assertEqual(config.enabled_order(), ["copilot", "codex"])
+        self.assertTrue(self.dashboard.configuring())
+
+    def test_settings_disabling_active_provider_selects_enabled_limit(self):
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        self.assertEqual(settings.active.currentData()[0], "codex")
+        settings.providers.item(0).setCheckState(tray.Qt.CheckState.Unchecked)
+        self.assertEqual(settings.active.currentData()[0], "copilot")
+        with patch.object(self.dashboard, "refresh"):
+            settings.save()
+        self.assertEqual(state.load_selected()["provider"], "copilot")
 
     def test_all_bundled_provider_logos_have_visible_pixels(self):
         for name in config.available_providers():
@@ -183,7 +368,9 @@ class DesktopTests(IsolatedState):
         self.assertEqual(self.dashboard.credits_view.available.text(), "Available 0")
         self.assertTrue(self.dashboard.credits_view.table.isHidden())
         self.assertFalse(self.dashboard.credits_view.empty.isHidden())
-        self.dashboard.credits_view.back.click()
+        self.assertFalse(self.dashboard.back_button.isHidden())
+        self.assertEqual(self.dashboard.credits_view.heading.findChildren(tray.QAbstractButton), [])
+        self.dashboard.back_button.click()
         self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
         self.assertTrue(heading.credits.isHidden())
         self.assertEqual(self.dashboard.tray.toolTip(), "Codex (Pro) 23%")
@@ -222,7 +409,7 @@ class DesktopTests(IsolatedState):
         self.app.processEvents()
         view = self.dashboard.credits_view
         self.assertEqual(self.dashboard.geometry().bottom(), bottom)
-        self.assertTrue(view.back.hasFocus())
+        self.assertIs(self.dashboard.focusWidget(), self.dashboard.back_button)
         self.assertFalse(view.notice.isHidden())
         self.assertEqual(view.rows[0][0].text(), "Not provided")
         self.dashboard.pending = {"codex"}
@@ -234,11 +421,11 @@ class DesktopTests(IsolatedState):
         self.app.processEvents()
         self.assertIs(self.dashboard.provider_buttons[("codex", 0)], heading)
         self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.credits_scroll)
-        self.assertTrue(view.back.hasFocus())
+        self.assertIs(self.dashboard.focusWidget(), self.dashboard.back_button)
         self.assertTrue(view.notice.isHidden())
         self.assertEqual(len(view.rows), 2)
         self.assertEqual(self.dashboard.geometry().bottom(), bottom)
-        view.back.click()
+        self.dashboard.back_button.click()
         self.app.processEvents()
         self.assertTrue(heading.credits.hasFocus())
         self.assertEqual(self.dashboard.geometry().bottom(), bottom)
@@ -255,9 +442,9 @@ class DesktopTests(IsolatedState):
         QTest.keyClick(link, tray.Qt.Key.Key_Return)
         self.assertEqual(self.dashboard.reset_provider, ("codex", 0))
         selected = state.load_selected()
-        QTest.keyClick(self.dashboard.credits_view.back, tray.Qt.Key.Key_Down)
+        QTest.keyClick(self.dashboard.back_button, tray.Qt.Key.Key_Down)
         self.assertEqual(state.load_selected(), selected)
-        QTest.keyClick(self.dashboard.credits_view.back, tray.Qt.Key.Key_Escape)
+        QTest.keyClick(self.dashboard.back_button, tray.Qt.Key.Key_Escape)
         self.assertIsNone(self.dashboard.reset_provider)
         self.assertTrue(self.dashboard.isVisible())
         self.assertTrue(link.hasFocus())

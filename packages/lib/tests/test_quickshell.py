@@ -73,7 +73,17 @@ class SnapshotTests(unittest.TestCase):
         settings = snapshot["settings"]
         self.assertEqual(settings["order"], ["claude", "codex", "kiro"])
         self.assertEqual(settings["enabled"], ["claude", "codex"])
+        self.assertEqual(settings["names"], {"claude": "Claude", "codex": "Codex", "kiro": "Kiro"})
         self.assertEqual(settings["display"], dict(show_provider=True, show_model=True, show_metric=False, show_pct=True))
+
+    def test_provider_names_match_shared_catalog_and_about_is_in_snapshot(self):
+        snapshot = quickshell.build_snapshot(DATA, SELECTED)
+        names = snapshot["settings"]["names"]
+        self.assertEqual(names["antigravity"], "Antigravity")
+        self.assertEqual(names["commandcode"], "Command Code")
+        self.assertEqual(names["opencode"], "OpenCode")
+        self.assertEqual(snapshot["about"]["name"], "AI Status")
+        self.assertEqual(snapshot["about"]["author"], "gelzin.com")
 
     def test_non_finite_percentage_is_valid_json(self):
         data = [{"_dir": "claude", "metrics": [{"type": "rolling", "percentage": float("nan")}]}]

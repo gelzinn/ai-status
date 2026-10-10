@@ -107,6 +107,81 @@ Item {
             mouseClick(findChild(settings, "active-provider"))
             verify(settings.selectionOpen)
         }
+        function test_provider_selector_logos_render_in_trigger_and_every_option() {
+            settings.iconMode = "off"
+            const trigger = findChild(settings, "active-provider")
+            const triggerLogo = findChild(trigger, "provider-logo")
+            tryCompare(triggerLogo, "status", Image.Ready)
+            verify(trigger.logoSource.toString().endsWith("/claude.png"))
+            mouseClick(trigger)
+            verify(settings.selectionOpen)
+            wait(20)
+            for (const choice of settings.choices) {
+                const option = findChild(trigger.popupItem, "active-provider-option-" + choice.provider + "-" + choice.idx + "-" + choice.metric)
+                verify(option.visible)
+                tryCompare(findChild(option, "provider-logo"), "status", Image.Ready)
+                verify(option.logoSource.toString().endsWith("/" + choice.provider + ".png"))
+            }
+            mouseClick(findChild(trigger.popupItem, "active-provider-option-codex-0-weekly"))
+            compare(settings.selected.provider, "codex")
+            compare(settings.selected.metric, "weekly")
+            verify(trigger.logoSource.toString().endsWith("/codex.png"))
+            tryCompare(triggerLogo, "status", Image.Ready)
+            // Enabling a provider before its first query still uses its bundled logo.
+            settings.toggleProvider("kiro")
+            settings.selected = {provider: "kiro", idx: 0, metric: "rolling"}
+            verify(trigger.logoSource.toString().endsWith("/kiro.png"))
+            tryCompare(triggerLogo, "status", Image.Ready)
+        }
+        function test_both_selectors_overlay_without_resizing_and_support_keyboard() {
+            const provider = findChild(settings, "active-provider")
+            const icon = findChild(settings, "icon-mode")
+            wait(20)
+            const height = settings.implicitHeight
+            for (const trigger of [provider, icon]) {
+                compare(trigger.trailingIconName, "chevron-down")
+                const chevron = findChild(trigger, "trailing-icon")
+                compare(chevron.x + chevron.width, trigger.width - 8)
+                mouseClick(trigger)
+                wait(20)
+                verify(trigger.popupOpen)
+                compare(settings.implicitHeight, height)
+                const menu = findChild(trigger.popupItem, trigger.objectName + "-menu")
+                const triggerBottom = trigger.mapToItem(trigger.popupItem, 0, trigger.height).y
+                verify(Math.abs(menu.y - triggerBottom - 4) < 1 || Math.abs(menu.y + menu.height + 4 - triggerBottom + trigger.height) < 1)
+                keyClick(Qt.Key_End)
+                keyClick(Qt.Key_Return)
+                verify(!trigger.popupOpen)
+                verify(trigger.activeFocus)
+            }
+            compare(settings.selected.provider, "codex")
+            compare(settings.selected.metric, "weekly")
+            compare(settings.iconMode, "logo")
+            mouseClick(icon)
+            wait(20)
+            keyClick(Qt.Key_Home)
+            keyClick(Qt.Key_Return)
+            compare(settings.iconMode, "off")
+            mouseClick(provider)
+            wait(20)
+            keyClick(Qt.Key_Escape)
+            verify(!provider.popupOpen)
+            verify(settings.visible)
+            mouseClick(icon)
+            wait(20)
+            mouseClick(icon.popupItem, 370, 780)
+            verify(!icon.popupOpen)
+            compare(settings.implicitHeight, height)
+        }
+        function test_provider_rows_show_official_names_and_logos_independent_of_bar_icon() {
+            settings.iconMode = "off"
+            for (const name of settings.order) {
+                const row = findChild(settings, "provider-" + name)
+                compare(row.text, Plugin.Model.snapshot.settings.names[name])
+                verify(row.logoSource.toString().endsWith("/" + name + ".png"))
+                tryCompare(findChild(row, "provider-logo"), "status", Image.Ready)
+            }
+        }
         function test_usage_layout_has_content_and_stable_metric_alignment() {
             verify(usage.implicitHeight > 300)
             const rightEdges = []

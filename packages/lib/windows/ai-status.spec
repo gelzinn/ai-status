@@ -1,15 +1,21 @@
 """Build one shared runtime. A native GUI launcher is added by build.ps1."""
 from pathlib import Path
+import subprocess
 from PyInstaller.utils.hooks import collect_data_files
 
 lib = Path(SPECPATH).parent
 icon = str(lib.parents[1] / "build/windows-app.ico")
+commit_file = lib.parents[1] / "build/BUILD_COMMIT"
+commit_file.parent.mkdir(parents=True, exist_ok=True)
+commit_file.write_text(subprocess.check_output(
+    ["git", "rev-parse", "HEAD"], cwd=lib.parents[1], text=True).strip())
 analysis = Analysis(
     [str(lib / "src/windows.py")],
     pathex=[str(lib / "src")],
     binaries=[],
     datas=[(str(lib / "src/providers"), "lib/src/providers"),
            (str(lib / "VERSION"), "lib"),
+           (str(commit_file), "lib"),
            (str(lib / "assets"), "lib/assets"),
            (str(lib.parent / "shared/providers/providers.json"), "lib/assets"),
            (str(lib.parents[1] / "LICENSE"), "."),

@@ -15,6 +15,7 @@ DLLs is retained in the shared runtime directory.
 | Shiboken6 | LGPLv3 | https://code.qt.io/cgit/pyside/pyside-setup.git/ |
 | PyInstaller bootloader | GPL with distribution exception | https://github.com/pyinstaller/pyinstaller |
 | Geist Mono | SIL Open Font License 1.1 | https://github.com/vercel/geist-font |
+| Lucide control icons | ISC; MIT for Feather-derived arrows | https://github.com/lucide-icons/lucide |
 
 Full dependency license texts are shipped in `THIRD_PARTY_LICENSES.txt`. Qt
 remains dynamically linked so users can replace its libraries. This project is

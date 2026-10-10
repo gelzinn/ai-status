@@ -11,6 +11,8 @@ Ui.Panel {
     property var anchorItem: null
     property var hostWidget: null
     property bool configurationPage: false
+    property bool aboutPage: false
+    property real settingsScrollPosition: 0
     property var resetProvider: null
     property real usageScrollPosition: 0
     readonly property var resetEntry: resetProvider ? Plugin.Model.snapshot.providers.find(entry => entry.id === resetProvider.id && entry.idx === resetProvider.idx) || null : null
@@ -19,6 +21,7 @@ Ui.Panel {
     component IconButton: Ui.WidgetButton {
         id: iconButton
         property string iconName: ""
+        property bool spinning: false
         bar: root.bar
         fixedWidth: Style.space(28)
         fixedHeight: Style.space(28)
@@ -29,17 +32,29 @@ Ui.Panel {
         Accessible.name: tooltipText
         Accessible.onPressAction: if (enabled) triggerPress(Qt.LeftButton)
         Plugin.PanelIcon {
+            id: controlIcon
+            objectName: iconButton.objectName + "-icon"
             anchors.centerIn: parent
             width: Style.space(16)
             height: Style.space(16)
             name: iconButton.iconName
             foreground: iconButton.foreground
+            NumberAnimation on rotation {
+                id: spin
+                from: 0
+                to: 360
+                duration: 1000
+                loops: Animation.Infinite
+                running: iconButton.spinning && iconButton.visible
+                onRunningChanged: if (!running) controlIcon.rotation = 0
+            }
         }
     }
 
     function configure() {
         if (!Plugin.Model.snapshot.settings || Plugin.Model.settingsSaving) return
         settings.begin()
+        aboutPage = false
         resetProvider = null
         configurationPage = true
         open()
@@ -48,6 +63,7 @@ Ui.Panel {
     function showUsage() {
         if (Plugin.Model.settingsSaving) return
         configurationPage = false
+        aboutPage = false
         const previous = resetProvider
         resetProvider = null
         if (previous) Qt.callLater(() => {
@@ -58,13 +74,31 @@ Ui.Panel {
         })
     }
 
+    function showAbout() {
+        settings.closeSelectors()
+        settingsScrollPosition = scroller.contentY
+        aboutPage = true
+        scroller.contentY = 0
+        backButton.forceActiveFocus()
+    }
+
+    function goBack() {
+        if (aboutPage) {
+            aboutPage = false
+            Qt.callLater(() => {
+                scroller.contentY = Math.min(settingsScrollPosition, Math.max(0, scroller.contentHeight - scroller.height))
+                settings.focusAboutControl()
+            })
+        } else showUsage()
+    }
+
     function showResetCredits(provider, idx) {
         const entry = Plugin.Model.snapshot.providers.find(item => item.id === provider && item.idx === idx)
         if (!entry || !entry.resetCredits || entry.resetCredits.available === 0) return
         usageScrollPosition = scroller.contentY
         resetProvider = {id: provider, idx: idx}
         scroller.contentY = 0
-        Qt.callLater(credits.focusBack)
+        Qt.callLater(() => backButton.forceActiveFocus())
     }
 
     function switchPanel(direction) {
@@ -77,15 +111,11 @@ Ui.Panel {
     onResetEntryChanged: if (resetProvider && !resetEntry) Qt.callLater(() => {
         if (resetProvider && !resetEntry) showUsage()
     })
-    onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; resetProvider = null }
-
-    Connections {
-        target: Plugin.Model
-        function onSettingsSaved() { root.configurationPage = false }
-    }
+    onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; aboutPage = false; resetProvider = null }
 
     Ui.KeyboardPanel {
         id: panel
+        objectName: "panel-surface"
         anchorItem: root.anchorItem
         owner: root.hostWidget || root
         bar: root.bar
@@ -98,12 +128,13 @@ Ui.Panel {
             id: keyCatcher
             anchors.fill: parent
             onCloseRequested: {
-                if (root.configurationPage || root.resetProvider) root.showUsage()
+                if (root.configurationPage || root.resetProvider) root.goBack()
                 else root.close()
             }
             onTabRequested: direction => {
-                if (root.configurationPage) settings.focusFirstControl()
-                else if (root.resetProvider) credits.focusBack()
+                if (root.aboutPage) backButton.forceActiveFocus()
+                else if (root.configurationPage) settings.focusFirstControl()
+                else if (root.resetProvider) backButton.forceActiveFocus()
                 else root.switchPanel(direction)
             }
             onMoveRequested: (dx, dy) => {
@@ -118,12 +149,25 @@ Ui.Panel {
                 id: header
                 width: parent.width
                 height: Style.space(32)
-                Text {
+                IconButton {
+                    id: backButton
+                    objectName: "panel-back"
                     anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.configurationPage || !!root.resetProvider
+                    iconName: "arrow-left"
+                    tooltipText: root.aboutPage ? "Back to settings (Esc)" : "Back to usage (Esc)"
+                    enabled: !Plugin.Model.settingsSaving
+                    onPressed: button => { if (button === Qt.LeftButton) root.goBack() }
+                }
+                Text {
+                    objectName: "panel-title"
+                    anchors.left: parent.left
+                    anchors.leftMargin: backButton.visible ? backButton.width + Style.space(8) : 0
                     anchors.right: controls.left
                     anchors.rightMargin: Style.space(8)
                     anchors.verticalCenter: parent.verticalCenter
-                    text: root.configurationPage ? "Settings" : "AI Status"
+                    text: root.aboutPage ? "About" : root.configurationPage ? "Settings" : "AI Status"
                     textFormat: Text.PlainText
                     color: root.barForeground
                     font.family: root.panelFont
@@ -147,20 +191,23 @@ Ui.Panel {
                         rightPadding: Style.space(8)
                     }
                     IconButton {
+                        objectName: "panel-refresh"
                         visible: !root.configurationPage
                         enabled: !Plugin.Model.snapshot.loading
                         iconName: "refresh-cw"
+                        spinning: !!Plugin.Model.snapshot.loading
                         tooltipText: "Refresh usage (R)"
                         onPressed: button => { if (button === Qt.LeftButton) Plugin.Model.action("refresh") }
                     }
                     IconButton {
-                        iconName: root.configurationPage || root.resetProvider ? "arrow-left" : "settings"
-                        tooltipText: root.configurationPage || root.resetProvider ? "Back to usage (Esc)" : "Configure (C)"
+                        objectName: "panel-settings"
+                        visible: !root.configurationPage && !root.resetProvider
+                        iconName: "settings"
+                        tooltipText: "Configure (C)"
                         enabled: !Plugin.Model.settingsSaving && !!Plugin.Model.snapshot.settings
                         onPressed: button => {
                             if (button === Qt.LeftButton) {
-                                if (root.configurationPage || root.resetProvider) root.showUsage()
-                                else root.configure()
+                                root.configure()
                             }
                         }
                     }
@@ -168,9 +215,11 @@ Ui.Panel {
             }
             Rectangle {
                 id: divider
+                objectName: "panel-divider"
                 anchors.top: header.bottom
                 anchors.topMargin: Style.space(8)
-                width: parent.width
+                x: -panel.padding
+                width: parent.width + panel.padding * 2
                 height: Style.space(1)
                 color: Qt.rgba(root.barForeground.r, root.barForeground.g, root.barForeground.b, 0.12)
             }
@@ -187,6 +236,7 @@ Ui.Panel {
                 contentHeight: content.implicitHeight
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
+                onContentYChanged: settings.closeSelectors()
 
                 Column {
                     id: content
@@ -218,12 +268,20 @@ Ui.Panel {
                         provider: root.resetEntry
                         foreground: root.barForeground
                         fontFamily: root.panelFont
-                        onBackRequested: root.showUsage()
                     }
                     Plugin.SettingsPage {
                         id: settings
+                        objectName: "panel-settings-page"
                         width: parent.width
-                        visible: root.configurationPage
+                        visible: root.configurationPage && !root.aboutPage
+                        foreground: root.barForeground
+                        fontFamily: root.panelFont
+                        popupParent: keyCatcher
+                        onAboutRequested: root.showAbout()
+                    }
+                    Plugin.AboutPage {
+                        width: parent.width
+                        visible: root.aboutPage
                         foreground: root.barForeground
                         fontFamily: root.panelFont
                     }
@@ -234,8 +292,17 @@ Ui.Panel {
                 anchors.bottom: parent.bottom
                 anchors.right: parent.right
                 spacing: Style.space(8)
-                visible: root.configurationPage
+                visible: root.configurationPage && !root.aboutPage
+                Text {
+                    visible: settings.saved
+                    text: "Saved"
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: root.barForeground
+                    font.family: root.panelFont
+                    font.pixelSize: Style.font.caption
+                }
                 Plugin.PanelButton {
+                    objectName: "settings-cancel"
                     text: "Cancel"
                     foreground: root.barForeground
                     fontFamily: root.panelFont
@@ -243,6 +310,7 @@ Ui.Panel {
                     onClicked: root.showUsage()
                 }
                 Plugin.PanelButton {
+                    objectName: "settings-save"
                     text: Plugin.Model.settingsSaving ? "Saving…" : "Save"
                     foreground: root.barForeground
                     fontFamily: root.panelFont

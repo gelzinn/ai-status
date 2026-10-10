@@ -24,4 +24,5 @@ if not python_license.is_file():
     raise SystemExit("Python LICENSE.txt missing from build runtime")
 parts.append("\nPython\n" + python_license.read_text(encoding="utf-8"))
 parts.append("\nGeist Mono\n" + (Path(__file__).resolve().parents[1] / "assets/fonts/OFL.txt").read_text(encoding="utf-8"))
+parts.append("\nLucide control icons\n" + (Path(__file__).resolve().parents[1] / "quickshell/LUCIDE-LICENSE").read_text(encoding="utf-8"))
 Path(sys.argv[1]).write_text("\n".join(parts), encoding="utf-8")

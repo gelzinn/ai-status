@@ -46,7 +46,8 @@ Ui.BarWidget {
         fixedHeight: root.height
         labelVisible: false
         hasVisualContent: true
-        tooltipText: Plugin.Model.errorMessage || "AI Status · click for usage · right-click for settings · scroll to switch provider · middle-click to switch limit"
+        tooltipText: ""
+        Accessible.name: "AI Status"
         onPressed: buttonCode => {
             if (buttonCode === Qt.LeftButton) root.toggle()
             else if (buttonCode === Qt.RightButton) root.configure()
