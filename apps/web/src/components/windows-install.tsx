@@ -3,7 +3,7 @@ import { ArrowRight, Download } from "lucide-react";
 
 export function WindowsInstall() {
 	return (
-		<div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 text-left">
+		<div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-4 text-left">
 			<div className="flex flex-col gap-1">
 				<p className="text-sm font-medium text-foreground">Windows 10 &amp; 11 · x64</p>
 				<p className="text-sm leading-relaxed text-muted-foreground">

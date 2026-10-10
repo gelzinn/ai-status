@@ -33,7 +33,7 @@ export function WindowsConfiguration() {
             description: "Click the provider logo beside the clock to see usage and reset timers. Select a provider or metric to update the tray icon and tooltip; use Refresh to check immediately.",
           },
         ].map(({ icon: Icon, title, description }, index) => (
-          <div key={title} className="flex gap-4 border-border p-5 not-first:border-t">
+          <div key={title} className="flex gap-4 border-border p-4 not-first:border-t">
             <div className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-border bg-background">
               <Icon className="size-4 text-muted-foreground" />
             </div>
