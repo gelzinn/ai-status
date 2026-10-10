@@ -1,74 +1,76 @@
-# AI Status
+<div align="center">
+  <img src="packages/lib/assets/app.png" alt="AI Status logo" width="72" height="72" />
+  <h1>AI Status</h1>
+  <p><strong>Your AI usage, at a glance.</strong></p>
+  <p>Track usage limits, reset timers and available reset credits from your desktop.<br />Native panels for Omarchy Quickshell and Windows, plus Waybar integration.</p>
+  <p>
+    <a href="https://github.com/gelzinn/ai-status/releases/latest"><img src="https://img.shields.io/github/v/release/gelzinn/ai-status?style=flat-square&amp;label=release" alt="Latest stable release" /></a>
+    <a href="https://github.com/gelzinn/ai-status/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/gelzinn/ai-status/ci.yml?branch=main&amp;style=flat-square&amp;label=checks" alt="CI status on main" /></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT license" /></a>
+  </p>
+  <p>
+    <a href="https://ai-status.gelzin.com">Website &amp; interactive preview</a> ·
+    <a href="#quick-start">Install</a> ·
+    <a href="#supported-providers">Providers</a> ·
+    <a href="#documentation">Documentation</a>
+  </p>
+</div>
 
-Monitor AI provider usage limits in **Waybar and the Omarchy Quickshell bar** — across Claude, Copilot, Codex, Z.AI, Kiro, Antigravity, OpenCode, and Command Code in real time.
+<table>
+  <tr>
+    <th align="left">Omarchy Quickshell</th>
+    <th align="left">Windows tray</th>
+  </tr>
+  <tr>
+    <td valign="top"><img src="docs/screenshots/omarchy-usage.png" alt="Omarchy panel with Codex and Claude usage bars, reset timers and available reset credits" width="360" /></td>
+    <td valign="top"><img src="docs/screenshots/windows-usage.png" alt="Windows panel showing the same provider usage, refresh and settings controls" width="360" /></td>
+  </tr>
+</table>
 
-**Windows:** the lib also includes a native tray app for Windows 10/11 x64,
-with a usage dashboard, provider settings and packaged installer. See the
-[Windows guide](packages/lib/WINDOWS.md) for installation, build instructions
-and provider compatibility (especially Kiro on Windows 10).
+*Example panels rendered with sample usage data. Omarchy follows your shell theme.*
 
-<img width="348" height="954" alt="Screenshot" src="https://github.com/user-attachments/assets/dcba0b97-d462-452e-b1b6-000cc445b803" />
+## Quick start
 
-## Features
+| Desktop | Integration | Setup |
+| --- | --- | --- |
+| **Omarchy Quickshell** | Native bar widget, usage panel and settings | [Install the plugin](#omarchy-quickshell) |
+| **Linux with Waybar** | Status module with a detailed usage tooltip | [Run the installer](#linux-with-waybar) |
+| **Windows 10/11 x64** | Native tray app, usage panel and settings | [Download the installer or portable ZIP](#windows-1011) |
 
-| Feature | Description |
-|---|---|
-| **Two Bars** | Native Omarchy Quickshell widget and panel, plus the existing Waybar integration |
-| **Multi-Provider** | Tracks API usage limits across eight AI services simultaneously |
-| **Live Updates** | Auto-refreshes every 5 minutes with animated loading states |
-| **Usage Details** | Per-provider progress bars, percentages, and resets in a Waybar tooltip or Quickshell panel |
-| **Reset Credits** | Available Claude and Codex manual resets, with labels and expiration dates when reported |
-| **Configurable** | Native settings page on Quickshell; interactive TUI on Waybar (right-click) |
-| **Self-Updating** | One command installs and keeps the module up to date |
-| **Lightweight** | Python and Bash backend, native QML UI on Quickshell; no Node or NPM needed on your desktop |
+Sign in to the providers you want to monitor using their apps or CLIs, then follow the setup for your desktop. See [provider authentication](packages/lib/PROVIDERS.md) for the credentials and additional setup each integration needs.
 
-## Supported Providers
+### Omarchy Quickshell
 
-| Provider | Data Source | Tracks |
-|---|---|---|
-| Antigravity | agy CLI (PTY) | Gemini and Claude/GPT rolling + weekly usage |
-| Claude | OpenCode session tokens | Usage metrics |
-| Codex | .codex/auth.json API | 5-hour and weekly usage limits |
-| Copilot | GitHub Copilot token | Chat and completions usage |
-| Kiro | Session cookie scraping | Usage percentage + reset timer |
-| OpenCode | OpenCode Go binary | Rolling, weekly, and monthly usage |
-| Z.AI | Bearer token from config | Rolling, weekly, and monthly usage |
-| Command Code | Command Code local auth | Monthly spend and remaining credit |
-
-See the [Providers & Authentication Guide](packages/lib/PROVIDERS.md) for setup details.
-
-## ⚠️ Upgrading from v0.4.x (omarchy-ai-status)?
-The project has been renamed to **AI Status**. When you run the install script below, your existing configurations will be migrated automatically. However, **you must update your Waybar config** to use the new `ai-status` command instead of `waybar-ai-status`.
-
-## Quick Start
-
-```bash
-curl -fsSL https://ai-status.gelzin.com/install | bash
-```
-
-The installer detects your active bar and walks you through a short setup. Choose how the module looks (provider logo, plan, percentage) and let it configure **Waybar or Omarchy Quickshell**. It configures only the selected bar. Run the same command again to update; existing preferences are preserved unless you change them.
-
-To choose explicitly, pass `--bar waybar` or `--bar quickshell`. Existing `--configure-waybar` flags continue to select Waybar. Waybar setup keeps a backup you can restore with `ai-status revert`.
-
-### Omarchy Quickshell plugin
-
-On the new Omarchy desktop, you can also install directly:
+On the Omarchy Quattro shell:
 
 ```bash
 omarchy plugin add https://github.com/gelzinn/ai-status.git --enable
 ```
 
-The plugin includes its Python backend, so a separate CLI installation is unnecessary. It uses the same provider credentials, preferences, and cache as Waybar. Left-click opens a native details panel with provider logos, aligned percentages, progress bars, and reset details. The header keeps **Refresh** and **Configure** visible while scrolling. The usage list omits providers without valid data and uses the Windows shimmer and staggered fill animations. Click a heading or metric to select it. Available Claude/Codex **Reset credits** open a separate details table with expiry dates, countdowns, and time zones; Back or Escape returns without changing the selection. **Configure** or right-click switches to a native settings page: choose the active provider and limit, change bar display options, enable/disable providers, and reorder them. **Save** applies the changes and keeps settings open; **Cancel**, Back or Escape returns to usage. Both selectors open floating lists, with provider logos in the active limit and its options. **About AI Status** in Settings contains the project details, quick guide and useful links. The bar has no hover tutorial. Scroll the bar to switch providers; middle-click cycles metrics. Escape from the usage page closes the panel.
+The plugin includes its Python backend. Click the widget for usage; right-click or use the settings icon to configure providers, limits and the bar appearance. The panel shares your existing AI Status preferences and cache with Waybar.
+
+Update the plugin with:
 
 ```bash
 omarchy plugin update io.github.gelzinn.ai-status
-omarchy plugin disable io.github.gelzinn.ai-status
-omarchy plugin remove io.github.gelzinn.ai-status
 ```
 
-See the [installation guide](packages/lib/INSTALL.md) for dependencies, placement, and development validation. The Waybar instructions below apply when you opt out of its automatic setup.
+[Dependencies, placement and configuration →](packages/lib/INSTALL.md#omarchy-quickshell-plugin)
 
-### Manual Waybar setup
+### Linux with Waybar
+
+```bash
+curl -fsSL https://ai-status.gelzin.com/install | bash -s -- --bar waybar
+```
+
+The installer walks you through provider selection and appearance, then configures Waybar. Hover for details, scroll to switch providers, middle-click to switch limits and right-click for configuration.
+
+Run the same command to update to the latest stable release. Existing preferences are preserved, and the installer keeps a backup of your Waybar configuration. The installer also supports Omarchy; omit `--bar waybar` to detect your active bar automatically.
+
+[Installation options →](packages/lib/INSTALL.md) · [Updates and rollback →](packages/lib/UPDATES.md)
+
+<details>
+<summary>Manual Waybar configuration</summary>
 
 Add the module definition to `~/.config/waybar/config.jsonc`:
 
@@ -103,26 +105,108 @@ Then reference it in whichever bar section you use — a module that's defined b
 
 **Want the provider's logo too?** Install with `--icon-mode logo` (or add it by hand — see [INSTALL.md](packages/lib/INSTALL.md)). It adds an `image#ai-status` module next to the text that shows the same tooltip on hover; just remember to list `"image#ai-status"` in `modules-right` alongside `"custom/ai-status"`.
 
-The status bar shows the usage percentage of the active provider. Scroll up/down to switch providers, middle-click to cycle through the active provider's limits (rolling, weekly, monthly — including per-model ones, like Claude's Fable weekly). Right-click opens settings: a native page on Quickshell or the provider configuration TUI on Waybar. Toggle providers on or off and reorder them. Hover the Waybar module or click the Quickshell widget to see all providers with full details (the active one is marked with →).
+</details>
 
-## How It Works
+### Windows 10/11
 
-A Python daemon runs persistently in the background, fetching usage data from all enabled providers in parallel every 5 minutes. Each provider has a `query.py` (raw data fetching) and a `parse.py` (structured formatting), making it straightforward to add new providers. Legacy Bash collectors remain as a fallback for providers without a Python collector.
+1. Open the [latest release](https://github.com/gelzinn/ai-status/releases/latest).
+2. Download `ai-status-<version>-windows-x64-setup.exe` and run it as your normal user, or extract the portable `ai-status-<version>-windows-x64.zip`.
+3. Launch **AI Status** from the Start menu, or open `ai-status.exe` in the extracted portable folder. Click the tray logo to see usage.
 
-By default the daemon outputs Waybar's `return-type: json` format and Pango tooltip. `ai-status daemon --format quickshell` emits structured JSON snapshots for the Omarchy plugin. One shared QML model runs a single Python daemon across all monitors inside the existing Omarchy shell; it never starts another Quickshell instance.
+The packaged app includes its runtime. Installation needs no administrator access, Python setup or WSL. Provider apps and authenticated sessions remain separate prerequisites. Enable **Start when I sign in to Windows** in Settings if you want it to launch at sign-in.
 
-## Repository Structure
+[Windows installation, updates and provider compatibility →](packages/lib/WINDOWS.md)
+
+## What you get
+
+- **Eight providers in one view.** Track the limits your services report, including separate rolling, weekly, monthly and per-model windows.
+- **Choose what stays visible.** Pick the active provider and limit, then choose the provider name, plan, limit name, percentage and icon shown in the bar. On Windows, the tray logo and tooltip follow your selection.
+- **Native settings.** Enable providers, reorder them and select limits inside the Omarchy and Windows panels. Windows also supports drag and drop; Waybar uses an interactive configuration TUI.
+- **Useful reset details.** See reset countdowns and available Claude/Codex reset credits, with expiry dates, remaining time and time zones when reported. Redeem credits in the provider's own app.
+- **Refresh when you need it.** Usage updates every five minutes, with manual refresh and loading feedback. Usable cached data remains visible when a refresh fails.
+- **A desktop runtime.** The Omarchy widget runs inside the existing shell with one backend across monitors. Windows uses Qt widgets with a bundled runtime. Desktop installation requires no Node or NPM.
+
+<details>
+<summary>More views: settings, reset credits and Waybar</summary>
+
+<table>
+  <tr>
+    <th align="left">Omarchy settings</th>
+    <th align="left">Windows settings</th>
+  </tr>
+  <tr>
+    <td valign="top"><img src="docs/screenshots/omarchy-settings.png" alt="Omarchy settings with provider logos, limit and icon selectors, display options and reorder arrows" width="360" /></td>
+    <td valign="top"><img src="docs/screenshots/windows-settings.png" alt="Windows settings with the same options and a draggable provider list" width="360" /></td>
+  </tr>
+</table>
+
+<img src="docs/screenshots/reset-credits.png" alt="Codex reset-credit table with three available resets, expiry dates and remaining time" width="360" />
+
+Save applies preferences and keeps Settings open. Back sits before the panel title. **About AI Status** contains the project details, links and a short usage guide.
+
+**Waybar usage tooltip**
+
+<img src="docs/screenshots/waybar-tooltip.png" alt="Waybar tooltip showing per-provider usage percentages, progress bars and reset countdowns" width="320" />
+
+</details>
+
+## Supported providers
+
+| Provider | Usage tracked | Credentials / source |
+| --- | --- | --- |
+| <img src="packages/lib/assets/providers/claude.png" width="18" height="18" alt="" /> **Claude** | 5-hour and weekly usage, including per-model weekly limits | Claude Code OAuth; OpenCode fallback |
+| <img src="packages/lib/assets/providers/codex.png" width="18" height="18" alt="" /> **Codex** | 5-hour and weekly limits; monthly window on free plans | Codex local auth |
+| <img src="packages/lib/assets/providers/copilot.png" width="18" height="18" alt="" /> **Copilot** | Chat and completions usage | Copilot session in OpenCode |
+| <img src="packages/lib/assets/providers/antigravity.png" width="18" height="18" alt="" /> **Antigravity** | 5-hour and weekly limits per model | Authenticated `agy` CLI |
+| <img src="packages/lib/assets/providers/kiro.png" width="18" height="18" alt="" /> **Kiro** | Usage percentage and reset timer | Authenticated `kiro-cli` session |
+| <img src="packages/lib/assets/providers/opencode.png" width="18" height="18" alt="" /> **OpenCode** | Rolling, weekly and monthly usage | OpenCode auth and Go workspace configuration |
+| <img src="packages/lib/assets/providers/zai.png" width="18" height="18" alt="" /> **Z.AI** | Rolling, weekly and monthly usage | Z.AI account key in OpenCode |
+| <img src="packages/lib/assets/providers/commandcode.png" width="18" height="18" alt="" /> **Command Code** | Monthly spend and remaining credit | Command Code local auth or API key |
+
+Available metrics depend on the account, plan and upstream API. Providers without usable data stay available in Settings. See the [authentication guide](packages/lib/PROVIDERS.md) and [Windows compatibility notes](packages/lib/WINDOWS.md#authentication-and-provider-compatibility) for setup details, including Kiro on Windows 10.
+
+## Documentation
+
+| Guide | What you will find |
+| --- | --- |
+| [Install and configure](packages/lib/INSTALL.md) | Dependencies, bar placement, display options and manual setup |
+| [Windows](packages/lib/WINDOWS.md) | Installer, portable app, sign-in option, compatibility and local builds |
+| [Providers and authentication](packages/lib/PROVIDERS.md) | Credential sources, account setup and troubleshooting |
+| [Updates and rollback](packages/lib/UPDATES.md) | Stable releases, version selection, checksums and recovery |
+| [Changelog](packages/lib/CHANGELOG.md) | Changes in each published release |
+| [Releases](https://github.com/gelzinn/ai-status/releases) | Linux packages, Windows downloads and release notes |
+
+## How it works
+
+A shared Python backend queries enabled providers in parallel every five minutes. Each provider has its own collector and parser. Waybar consumes JSON with a Pango tooltip; the Omarchy plugin consumes structured snapshots through a shared QML model. The Windows adapter renders the same provider data in a native Qt tray panel.
+
+Credentials come from your local provider authentication stores or explicitly configured keys. AI Status does not ship credentials, perform provider sign-in or modify provider credential files. Authenticate through the provider's own app or CLI. [Read the security overview →](https://ai-status.gelzin.com/security)
+
+<details>
+<summary>Repository layout</summary>
 
 | Path | Purpose |
-|---|---|
+| --- | --- |
 | `packages/lib/src/bin/ai-status` | CLI entry point |
-| `packages/lib/src/core/` | Shared daemon, queries, state, and frontend output |
-| `packages/lib/src/providers/<name>/` | Per-provider query and parse scripts |
-| `packages/lib/quickshell/` | Native Omarchy bar widget, panel, and shared model |
+| `packages/lib/src/core/` | Shared queries, state, output and desktop adapter |
+| `packages/lib/src/providers/` | Provider collectors and parsers |
+| `packages/lib/quickshell/` | Native Omarchy widget, panels and shared model |
+| `packages/lib/windows/` | Windows packaging and installer |
+| `packages/shared/providers/` | Provider names, logos and metadata |
+| `apps/web/` | Website, interactive preview and documentation |
 | `manifest.json` | Omarchy plugin contract |
-| `packages/lib/install.sh` | Installer and updater for both bars |
-| `packages/lib/check.sh` | Dependencies for the selected bar |
 
-## Security
+</details>
 
-This repository does **not** ship with any API keys or session tokens. Each provider script reads credentials from your existing local authentication files -- OpenCode tokens, `.codex/auth.json`, Copilot OAuth sessions, and similar.
+<details>
+<summary>Upgrading from v0.4.x / omarchy-ai-status</summary>
+
+The project is now **AI Status**. The installer migrates existing preferences. Update your Waybar configuration to use `ai-status` instead of `waybar-ai-status`. See the [update guide](packages/lib/UPDATES.md) for the current stable-release flow.
+
+</details>
+
+## Contributing
+
+[Report a bug](https://github.com/gelzinn/ai-status/issues/new?template=bug_report.md), [suggest a feature](https://github.com/gelzinn/ai-status/issues/new?template=feature_request.md) or open a pull request. Provider integrations live in `packages/lib/src/providers/`; see the [provider architecture](packages/lib/PROVIDERS.md#provider-architecture) before adding a collector.
+
+[MIT licensed](LICENSE) · Created by [gelzin.com](https://gelzin.com).
