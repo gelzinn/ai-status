@@ -29,8 +29,13 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
       - name: Build portable package and installer
+        id: package
         shell: pwsh
-        run: ./packages/lib/windows/build.ps1
+        run: |
+          $version = (Get-Content packages/lib/VERSION -Raw).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') { throw "Invalid package version" }
+          ./packages/lib/windows/build.ps1
+          "version=$version" >> $env:GITHUB_OUTPUT
       - name: Test packaged CLI and collectors without credentials
         shell: pwsh
         run: |
@@ -49,6 +54,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Packaged CLI smoke test failed" }
           $version = (Get-Content packages/lib/VERSION -Raw).Trim()
           $installer = Join-Path $PWD "dist/ai-status-$version-windows-x64-setup.exe"
+          $identity = (Get-Item $installer).VersionInfo
+          if ($identity.OriginalFilename -ne "ai-status-$version-windows-x64-setup.exe" -or
+              $identity.ProductName -ne "AI Status" -or $identity.CompanyName -ne "gelzinn") {
+            throw "Installer product identity does not match its versioned filename"
+          }
           $installed = Join-Path $env:RUNNER_TEMP "AI Status instalado — teste"
           $result = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$installed`"") -Wait -PassThru
           if ($result.ExitCode -ne 0) { throw "Silent installation failed" }
@@ -74,13 +84,13 @@ jobs:
         run: python packages/lib/windows/size_report.py
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-portable
+          name: ai-status-${{ steps.package.outputs.version }}-windows-x64-portable
           path: dist/ai-status/
           compression-level: 9
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
+          name: ai-status-${{ steps.package.outputs.version }}-windows-x64-setup
           path: dist/*-windows-x64-setup.exe
           compression-level: 0
           if-no-files-found: error

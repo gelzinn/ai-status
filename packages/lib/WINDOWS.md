@@ -49,10 +49,25 @@ or installed automatically. Uninstalling removes the sign-in entry and keeps
 your AI Status settings/cache. It never deletes provider credentials.
 
 Before a release includes Windows assets, use the **Windows package** workflow's
-separate **windows-installer** or **windows-portable** artifact. The installer and
-portable payload are no longer combined in one download. The UI uses the app's
+separate **ai-status-<version>-windows-x64-setup** or
+**ai-status-<version>-windows-x64-portable** artifact. GitHub wraps each artifact
+in a ZIP. Extract the setup artifact and run
+`ai-status-<version>-windows-x64-setup.exe` inside it; do not rename the downloaded
+ZIP to `.exe`. The installer and portable payload are separate downloads.
+The UI uses the app's
 favicon for its executable/installer identity, bundled provider logos, and the
 same Geist Mono font as the landing-page preview, all available offline.
+
+### Windows publisher and SmartScreen
+
+Preview packages are currently unsigned. Windows can show **Unknown publisher**
+and a **Windows protected your PC** SmartScreen prompt for these downloads.
+The application name, icon and version metadata identify the package, but they
+do not establish a verified publisher. Authenticode signing requires a trusted
+code-signing certificate or a signing service configured by the maintainer.
+Even a valid signature does not guarantee that a new download already has
+SmartScreen reputation. See Microsoft's
+[SmartScreen guidance for developers](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation).
 
 ## Authentication and provider compatibility
 
