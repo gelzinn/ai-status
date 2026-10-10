@@ -49,9 +49,16 @@ Item {
 
     function action(command) {
         if (["refresh", "scroll-up", "scroll-down", "cycle-metric"].indexOf(command) !== -1) {
-            actions = actions.concat([command])
+            if (command === "refresh" && snapshot.loading) return
+            actions = actions.concat([[command, "--frontend", "quickshell"]])
             drain()
         }
+    }
+
+    function selectMetric(provider, idx, metric) {
+        actions = actions.concat([["select-metric", "--frontend", "quickshell", "--selection-json",
+                                  JSON.stringify({provider: provider, idx: idx, metric: metric})]])
+        drain()
     }
 
     function saveSettings(settings) {
@@ -65,7 +72,7 @@ Item {
         if (consumers === 0 || actionProcess.running || actions.length === 0) return
         const command = actions[0]
         actions = actions.slice(1)
-        actionProcess.exec(["python3", cliPath, command, "--frontend", "quickshell"])
+        actionProcess.exec(["python3", cliPath].concat(command))
     }
 
     Process {

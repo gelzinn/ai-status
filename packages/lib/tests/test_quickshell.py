@@ -46,11 +46,13 @@ class SnapshotTests(unittest.TestCase):
 
     def test_missing_provider_and_first_load(self):
         snapshot = quickshell.build_snapshot([], SELECTED, pending={"claude", "codex"})
-        self.assertEqual(snapshot["text"], "claude …")
-        self.assertEqual(len(snapshot["providers"]), 2)
-        self.assertFalse(snapshot["providers"][0]["error"])
+        self.assertEqual(snapshot["text"], "AI Status …")
+        self.assertEqual(snapshot["providers"], [])
+        self.assertTrue(snapshot["loading"])
         final = quickshell.build_snapshot([], SELECTED)
-        self.assertEqual(final["providers"][0]["error"], "No usage data available")
+        self.assertEqual(final["providers"], [])
+        self.assertEqual(final["text"], "AI Status")
+        self.assertFalse(final["loading"])
 
     def test_display_preferences_and_logo_path(self):
         selected = dict(SELECTED, icon_mode="logo", show_provider=False, show_model=False, show_pct=True)
@@ -76,8 +78,27 @@ class SnapshotTests(unittest.TestCase):
     def test_non_finite_percentage_is_valid_json(self):
         data = [{"_dir": "claude", "metrics": [{"type": "rolling", "percentage": float("nan")}]}]
         snapshot = quickshell.build_snapshot(data, dict(SELECTED, provider="missing"))
-        self.assertEqual(snapshot["providers"][0]["metrics"][0]["percentage"], 0)
+        self.assertEqual(snapshot["providers"], [])
         json.dumps(snapshot, allow_nan=False)
+
+    def test_failed_providers_hidden_but_real_zero_and_cached_success_remain(self):
+        data = DATA + [dict(DATA[0], _idx=1, metrics=[]),
+                       dict(DATA[0], _idx=2, metrics=[{"type": "generic", "percentage": 0, "detail": "Authentication failed"}]),
+                       dict(DATA[0], _idx=4, _error="Temporarily unavailable", metrics=[{"type": "generic", "percentage": 0, "detail": "Temporarily unavailable"}]),
+                       dict(DATA[0], _idx=3, metrics=[{"type": "rolling", "percentage": 0, "reset_in_seconds": 3600}])]
+        snapshot = quickshell.build_snapshot(data, SELECTED)
+        self.assertEqual([(p["id"], p["idx"]) for p in snapshot["providers"]], [("claude", 0), ("claude", 3), ("codex", 0)])
+        self.assertEqual(snapshot["providers"][1]["metrics"][0]["percentage"], 0)
+        self.assertIn("codex", snapshot["settings"]["enabled"])
+
+    def test_native_metric_click_preserves_preferences_and_does_not_fetch(self):
+        with patch.object(state, "load_cache", return_value=DATA), patch.object(state, "load_selected", return_value=SELECTED.copy()), patch.object(state, "save_selected") as save, patch.object(state, "trigger_refresh") as refresh:
+            quickshell.select_metric(dict(provider="codex", idx=0, metric="rolling"))
+            self.assertEqual(save.call_args.args[0], dict(SELECTED, provider="codex", metric="rolling"))
+            with self.assertRaises(ValueError):
+                quickshell.select_metric(dict(provider="codex", idx=0, metric="missing"))
+            self.assertEqual(save.call_count, 1)
+            refresh.assert_not_called()
 
     def test_default_waybar_output_keeps_pango(self):
         output = render.build_final_state(DATA, SELECTED)
@@ -172,7 +193,34 @@ class SnapshotTests(unittest.TestCase):
     def test_unavailable_selection_does_not_report_zero_usage(self):
         data = DATA[1:] + [{"_dir": "claude", "_idx": 0, "provider": "Claude", "metrics": [], "_error": "Authentication failed"}]
         snapshot = quickshell.build_snapshot(data, SELECTED)
-        self.assertEqual(snapshot["text"], "Claude unavailable")
+        self.assertEqual(snapshot["text"], "Codex 10%")
+        self.assertEqual(snapshot["selected"]["provider"], "codex")
+        self.assertEqual(len(snapshot["providers"]), 1)
+
+    def test_native_scroll_skips_failed_providers(self):
+        data = [dict(DATA[0], metrics=[]), DATA[1]]
+        with patch.object(state, "load_cache", return_value=data), patch.object(state, "load_selected", return_value=SELECTED.copy()), patch.object(state, "save_selected") as save:
+            cli.scroll_down("quickshell")
+            self.assertEqual(save.call_args.args[0]["provider"], "codex")
+        with patch.object(state, "load_cache", return_value=[]), patch.object(state, "save_selected") as save:
+            cli.scroll_down("quickshell")
+            save.assert_not_called()
+
+    def test_streamed_metrics_are_selectable_before_all_queries_finish(self):
+        saved_cache = []
+
+        def query(on_result=None, include_errors=False):
+            on_result("claude", DATA[:1])
+            self.assertEqual(saved_cache, DATA[:1])
+            self.assertNotIn("claude", daemon._pending)
+            self.assertIn("codex", daemon._pending)
+            return DATA
+
+        daemon._results_by_dir = {}
+        daemon._pending = {"claude", "codex"}
+        with patch.object(state, "acquire_lock", return_value=True), patch.object(state, "release_lock"), patch.object(state, "save_cache", side_effect=lambda data: saved_cache.__setitem__(slice(None), data)), patch.object(fetch, "fetch_all_data", side_effect=query):
+            daemon.update_task("quickshell")
+        self.assertEqual(saved_cache, DATA)
 
     @unittest.skipIf(sys.platform == "win32", "Requires Unix PID signaling and pipe selectors")
     def test_unregister_keeps_other_frontends_refresh_targets(self):
@@ -221,7 +269,7 @@ fetch.fetch_all_data = query
 sys.argv = ['ai-status', 'daemon', '--format', 'quickshell']
 cli.main()
 '''
-            process = subprocess.Popen([sys.executable, "-u", "-c", script, source, directory, json.dumps(DATA[:1]), json.dumps(SELECTED)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            process = subprocess.Popen([sys.executable, "-u", "-c", script, source, directory, json.dumps(DATA[:1]), json.dumps(dict(SELECTED, metric="missing"))], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             self.addCleanup(lambda: process.kill() if process.poll() is None else None)
             selector = selectors.DefaultSelector()
             selector.register(process.stdout, selectors.EVENT_READ)
@@ -230,6 +278,8 @@ cli.main()
             initial = json.loads(process.stdout.readline())
             self.assertEqual(initial["schemaVersion"], 1)
             self.assertEqual(initial["selected"]["provider"], "claude")
+            self.assertEqual(initial["selected"]["metric"], "rolling")
+            self.assertEqual(json.loads((Path(directory) / "selected").read_text())["metric"], "rolling")
             process.terminate()
             output, errors = process.communicate(timeout=5)
             self.assertEqual(process.returncode, 0, errors)

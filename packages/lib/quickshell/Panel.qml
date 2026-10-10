@@ -11,6 +11,9 @@ Ui.Panel {
     property var anchorItem: null
     property var hostWidget: null
     property bool configurationPage: false
+    property var resetProvider: null
+    property real usageScrollPosition: 0
+    readonly property var resetEntry: resetProvider ? Plugin.Model.snapshot.providers.find(entry => entry.id === resetProvider.id && entry.idx === resetProvider.idx) || null : null
     readonly property string panelFont: bar ? bar.fontFamily : Style.font.family
 
     component IconButton: Ui.WidgetButton {
@@ -37,12 +40,31 @@ Ui.Panel {
     function configure() {
         if (!Plugin.Model.snapshot.settings || Plugin.Model.settingsSaving) return
         settings.begin()
+        resetProvider = null
         configurationPage = true
         open()
     }
 
     function showUsage() {
-        if (!Plugin.Model.settingsSaving) configurationPage = false
+        if (Plugin.Model.settingsSaving) return
+        configurationPage = false
+        const previous = resetProvider
+        resetProvider = null
+        if (previous) Qt.callLater(() => {
+            scroller.contentY = Math.min(usageScrollPosition, Math.max(0, scroller.contentHeight - scroller.height))
+            const button = usage.resetButton(previous.id, previous.idx)
+            if (button && button.visible) button.forceActiveFocus()
+            else keyCatcher.forceActiveFocus()
+        })
+    }
+
+    function showResetCredits(provider, idx) {
+        const entry = Plugin.Model.snapshot.providers.find(item => item.id === provider && item.idx === idx)
+        if (!entry || !entry.resetCredits || entry.resetCredits.available === 0) return
+        usageScrollPosition = scroller.contentY
+        resetProvider = {id: provider, idx: idx}
+        scroller.contentY = 0
+        Qt.callLater(credits.focusBack)
     }
 
     function switchPanel(direction) {
@@ -52,7 +74,10 @@ Ui.Panel {
     }
 
     onConfigurationPageChanged: scroller.contentY = 0
-    onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) configurationPage = false
+    onResetEntryChanged: if (resetProvider && !resetEntry) Qt.callLater(() => {
+        if (resetProvider && !resetEntry) showUsage()
+    })
+    onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; resetProvider = null }
 
     Connections {
         target: Plugin.Model
@@ -73,11 +98,12 @@ Ui.Panel {
             id: keyCatcher
             anchors.fill: parent
             onCloseRequested: {
-                if (root.configurationPage) root.showUsage()
+                if (root.configurationPage || root.resetProvider) root.showUsage()
                 else root.close()
             }
             onTabRequested: direction => {
                 if (root.configurationPage) settings.focusFirstControl()
+                else if (root.resetProvider) credits.focusBack()
                 else root.switchPanel(direction)
             }
             onMoveRequested: (dx, dy) => {
@@ -122,17 +148,18 @@ Ui.Panel {
                     }
                     IconButton {
                         visible: !root.configurationPage
+                        enabled: !Plugin.Model.snapshot.loading
                         iconName: "refresh-cw"
                         tooltipText: "Refresh usage (R)"
                         onPressed: button => { if (button === Qt.LeftButton) Plugin.Model.action("refresh") }
                     }
                     IconButton {
-                        iconName: root.configurationPage ? "arrow-left" : "settings"
-                        tooltipText: root.configurationPage ? "Back to usage (Esc)" : "Configure (C)"
+                        iconName: root.configurationPage || root.resetProvider ? "arrow-left" : "settings"
+                        tooltipText: root.configurationPage || root.resetProvider ? "Back to usage (Esc)" : "Configure (C)"
                         enabled: !Plugin.Model.settingsSaving && !!Plugin.Model.snapshot.settings
                         onPressed: button => {
                             if (button === Qt.LeftButton) {
-                                if (root.configurationPage) root.showUsage()
+                                if (root.configurationPage || root.resetProvider) root.showUsage()
                                 else root.configure()
                             }
                         }
@@ -150,6 +177,7 @@ Ui.Panel {
 
             Flickable {
                 id: scroller
+                objectName: "panel-scroller"
                 anchors.top: divider.bottom
                 anchors.topMargin: Style.space(12)
                 anchors.bottom: footer.visible ? footer.top : parent.bottom
@@ -175,10 +203,22 @@ Ui.Panel {
                         font.pixelSize: Style.font.caption
                     }
                     Plugin.UsagePage {
+                        id: usage
                         width: parent.width
-                        visible: !root.configurationPage
+                        visible: !root.configurationPage && !root.resetProvider
                         foreground: root.barForeground
                         fontFamily: root.panelFont
+                        onResetRequested: (provider, idx) => root.showResetCredits(provider, idx)
+                        onSettingsRequested: root.configure()
+                    }
+                    Plugin.ResetCreditsPage {
+                        id: credits
+                        width: parent.width
+                        visible: !!root.resetProvider && !root.configurationPage
+                        provider: root.resetEntry
+                        foreground: root.barForeground
+                        fontFamily: root.panelFont
+                        onBackRequested: root.showUsage()
                     }
                     Plugin.SettingsPage {
                         id: settings

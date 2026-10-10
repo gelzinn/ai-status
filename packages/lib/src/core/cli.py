@@ -37,6 +37,8 @@ def _scroll(direction, frontend="waybar"):
         return
 
     cache = state.load_cache()
+    if frontend == "quickshell":
+        cache = [dict(p, metrics=quickshell.usable_metrics(p)) for p in cache if quickshell.usable_metrics(p)]
     items = []
     seen = set()
     for p in cache:
@@ -47,6 +49,8 @@ def _scroll(direction, frontend="waybar"):
                 items.append(key)
 
     if not items:
+        if frontend == "quickshell":
+            return
         items = [(p, 0) for p in providers]
 
     selected = state.load_selected() or {}
@@ -75,13 +79,16 @@ def scroll_up(frontend="waybar"):
 def scroll_down(frontend="waybar"):
     _scroll(1, frontend)
 
-def cycle_metric():
+def cycle_metric(frontend="waybar"):
     selected = state.load_selected() or {}
     provider = selected.get("provider")
     idx = selected.get("idx", 0)
     current = selected.get("metric", "rolling")
     
-    keys = _provider_metric_keys(state.load_cache(), provider, idx)
+    cache = state.load_cache()
+    if frontend == "quickshell":
+        cache = [dict(p, metrics=quickshell.usable_metrics(p)) for p in cache if quickshell.usable_metrics(p)]
+    keys = _provider_metric_keys(cache, provider, idx)
 
     if len(keys) <= 1:
         return
@@ -206,16 +213,27 @@ def main():
 
 def _frontend_main():
     parser = argparse.ArgumentParser(prog="ai-status")
-    parser.add_argument("command", choices=["daemon", "refresh", "config", "save-settings", "scroll-up", "scroll-down", "cycle-metric", "logo", "revert"])
+    parser.add_argument("command", choices=["daemon", "refresh", "config", "save-settings", "select-metric", "scroll-up", "scroll-down", "cycle-metric", "logo", "revert"])
     parser.add_argument("--format", choices=["waybar", "quickshell"], default="waybar")
     parser.add_argument("--frontend", choices=["waybar", "quickshell"], default="waybar")
     parser.add_argument("--settings-json")
+    parser.add_argument("--selection-json")
     args = parser.parse_args()
     if args.format != "waybar" and args.command != "daemon":
         parser.error("--format is only supported by daemon")
     if args.settings_json is not None and args.command != "save-settings":
         parser.error("--settings-json is only supported by save-settings")
-    if args.command == "save-settings":
+    if args.selection_json is not None and args.command != "select-metric":
+        parser.error("--selection-json is only supported by select-metric")
+    if args.command == "select-metric":
+        if args.frontend != "quickshell" or args.selection_json is None:
+            parser.error("select-metric requires --frontend quickshell and --selection-json")
+        try:
+            quickshell.select_metric(json.loads(args.selection_json))
+        except (ValueError, OSError) as error:
+            print(str(error), file=sys.stderr)
+            return 1
+    elif args.command == "save-settings":
         if args.frontend != "quickshell" or args.settings_json is None:
             parser.error("save-settings requires --frontend quickshell and --settings-json")
         try:
@@ -244,7 +262,7 @@ def _frontend_main():
     elif args.command == "scroll-down":
         scroll_down(args.frontend)
     elif args.command == "cycle-metric":
-        cycle_metric()
+        cycle_metric(args.frontend)
     elif args.command == "logo":
         print_logo()
     elif args.command == "revert":

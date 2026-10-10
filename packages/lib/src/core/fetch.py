@@ -45,7 +45,7 @@ def _is_error_result(result):
     if isinstance(result, list):
         return all(_is_error_result(item) for item in result)
     if isinstance(result, dict):
-        if "error" in result:
+        if "error" in result or result.get("_error") and not result.get("_cached"):
             return True
         metrics = result.get("metrics", [])
         if not metrics:

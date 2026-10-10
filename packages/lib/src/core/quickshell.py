@@ -125,6 +125,35 @@ def save_settings(payload):
     state.trigger_refresh()
 
 
+def usable_metrics(entry):
+    """Keep genuine zero usage and cached successes, but omit error placeholders."""
+    if fetch._is_error_result(entry):
+        return []
+    metrics = []
+    for metric in entry.get("metrics", []):
+        try:
+            percentage = float(metric["percentage"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(percentage):
+            metrics.append(metric)
+    return metrics
+
+
+def select_metric(selection):
+    if not isinstance(selection, dict):
+        raise ValueError("Invalid metric selection")
+    provider, idx, key = selection.get("provider"), selection.get("idx"), selection.get("metric")
+    for entry in state.load_cache():
+        if entry.get("_dir") == provider and entry.get("_idx", 0) == idx and provider in config.enabled_order():
+            if key in [render.metric_key(metric) for metric in usable_metrics(entry)]:
+                selected = state.load_selected() or {}
+                selected.update(provider=provider, idx=idx, metric=key)
+                state.save_selected(selected)
+                return
+    raise ValueError("This usage metric is no longer available")
+
+
 def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=None):
     selected = dict(selected or {})
     pending = set(pending or ())
@@ -133,17 +162,10 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
     providers = []
     for name in order:
         entries = [p for p in data if p.get("_dir") == name]
-        if not entries:
-            entries = [{"_dir": name, "_idx": 0, "provider": name, "metrics": []}]
         for entry in entries:
             metrics = []
-            for metric in sorted(entry.get("metrics", []), key=lambda m: render.TYPE_ORDER.get(m.get("type"), 4)):
-                try:
-                    percentage = float(metric.get("percentage", 0))
-                except (TypeError, ValueError):
-                    percentage = 0.0
-                if not math.isfinite(percentage):
-                    percentage = 0.0
+            for metric in sorted(usable_metrics(entry), key=lambda m: render.TYPE_ORDER.get(m.get("type"), 4)):
+                percentage = float(metric["percentage"])
                 detail = metric.get("detail")
                 if detail is None:
                     detail = render.format_reset_time(metric.get("reset_in_seconds"), metric.get("type"))
@@ -155,6 +177,8 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
                     "resetInSeconds": metric.get("reset_in_seconds"),
                     "detail": plain_text(detail),
                 })
+            if not metrics:
+                continue
             providers.append({
                 "id": name,
                 "idx": entry.get("_idx", 0),
@@ -168,17 +192,18 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
             })
     current = next((p for p in providers if p["id"] == selected.get("provider") and p["idx"] == selected.get("idx", 0)), None)
     if current is None and providers:
-        current = next((p for p in providers if p["metrics"]), providers[0])
+        current = providers[0]
         selected.update(provider=current["id"], idx=current["idx"])
     if current and current["metrics"] and selected.get("metric") not in [m["key"] for m in current["metrics"]]:
         selected["metric"] = current["metrics"][0]["key"]
     selected_loading = selected.get("provider") in pending
-    enabled_data = [p for p in data if p.get("_dir") in order]
+    enabled_data = [dict(p, metrics=usable_metrics(p)) for p in data if p.get("_dir") in order and usable_metrics(p)]
     text = render.get_selected_metric_text(enabled_data, selected, spinner="…" if selected_loading else None)
-    if current and not current["metrics"]:
-        text = (render.ICON + " " if state.get_icon_mode(selected) == "bot" else "") + current["name"] + (" …" if selected_loading else " unavailable")
-    elif not current:
-        text = "AI Status"
+    if not current:
+        text = "AI Status …" if pending else "AI Status"
+        logo_path = ""
+    elif state.get_icon_mode(selected) == "logo":
+        logo_path = logo_paths.get(current["id"], logo_path)
     return {
         "schemaVersion": 1,
         "version": fetch.get_version_info(),

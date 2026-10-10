@@ -43,6 +43,32 @@ DETAILS = {"available_count": 99, "credits": [
 
 
 class ResetCreditsTests(unittest.TestCase):
+    def test_claude_explicit_api_error_is_never_displayed_as_zero_usage(self):
+        data = parser("claude")(json.dumps({"error": {"message": "Temporarily unavailable"}}))
+        data.update(_dir="claude", _idx=0)
+        with patch("core.config.enabled_order", return_value=["claude"]):
+            self.assertEqual(quickshell.build_snapshot([data])["providers"], [])
+
+    def test_native_reset_table_uses_windows_live_counts_dates_and_timezone(self):
+        now = datetime(2099, 10, 10, 16, tzinfo=timezone.utc)
+        date = datetime(2099, 10, 22, 18, tzinfo=timezone.utc)
+        inventory = {"available": 4, "credits": [
+            {"title": "Expired", "count": 1, "expires_at": "2099-10-01T00:00:00Z"},
+            {"title": "Full reset", "count": 2, "expires_at": date.isoformat()},
+        ]}
+        presentation = reset_credits.presentation(inventory, now)
+        self.assertEqual(presentation["available"], 3)
+        self.assertEqual(presentation["undetailed"], 1)
+        self.assertEqual(presentation["rows"][0]["expires"], date.astimezone().strftime("%b %d, %H:%M"))
+        self.assertEqual(presentation["rows"][0]["remaining"], "12d 2h left")
+        self.assertEqual(presentation["rows"][0]["count"], 2)
+        self.assertTrue(presentation["rows"][0]["timezone"].startswith("UTC"))
+        self.assertEqual(presentation["rows"][1], {
+            "title": "Reset credit", "count": 1, "expires": "Not provided", "remaining": "", "timezone": ""})
+        self.assertNotIn("Expired", json.dumps(presentation))
+        self.assertIsNone(reset_credits.presentation({"available": 1, "credits": [
+            {"count": 1, "expires_at": "2099-10-01T00:00:00Z"}]}, now))
+
     def test_claude_counts_only_redeemable_grants_and_discards_handles(self):
         result = parser("claude")(json.dumps({"plan": "max", "usage": CLAUDE}))
         self.assertEqual(result["metrics"][0]["percentage"], 4)

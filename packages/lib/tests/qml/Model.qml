@@ -1,16 +1,23 @@
 pragma Singleton
 import QtQuick
 Item {
+    signal settingsSaved()
+    property string errorMessage: ""
+    function action(command) {}
     property var saved: null
+    property var chosen: null
     property bool settingsSaving: false
     property string settingsError: ""
     property string spinner: "⠋"
     property var snapshot: ({})
     function saveSettings(settings) { saved = settings }
+    function selectMetric(provider, idx, metric) { chosen = {provider: provider, idx: idx, metric: metric} }
     function reset() {
         saved = null
+        chosen = null
         settingsError = ""
         snapshot = {
+            loading: false,
             selected: {provider: "claude", idx: 0, metric: "rolling"},
             providers: [
                 {id: "claude", idx: 0, name: "Claude (Max)", logoPath: "", loading: false, cached: false, error: "", metrics: [

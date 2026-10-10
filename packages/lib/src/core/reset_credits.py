@@ -134,7 +134,17 @@ def presentation(block, now=None):
         details.append(f"{title} · {detail}")
     if data["undetailed"]:
         details.append("Expiration not reported")
+    rows = []
+    credits = data["credits"] + ([{"title": "Reset credit", "count": data["undetailed"], "expires_at": None}]
+                                  if data["undetailed"] else [])
+    for item in credits:
+        date = item["expires_at"]
+        stamp, remaining = format_expiry(date, now) if date else ("Not provided", "")
+        offset = date.astimezone().strftime("%z") if date else ""
+        zone = f"UTC{offset[:3]}:{offset[3:]}" if offset else ""
+        rows.append({"title": item["title"], "count": item["count"],
+                     "expires": stamp, "remaining": remaining, "timezone": zone})
     available = data["available"]
     return {"available": available,
             "summary": f"{available} reset{'s' if available != 1 else ''} available",
-            "details": details}
+            "details": details, "rows": rows, "undetailed": data["undetailed"]}

@@ -6,6 +6,7 @@ Rectangle {
     id: root
     property string text: ""
     property string iconName: ""
+    property string trailingIconName: ""
     property string fontFamily: Style.font.family
     property color foreground: "white"
     property bool alignLeft: false
@@ -35,7 +36,7 @@ Rectangle {
         visible: root.iconName === ""
         anchors.fill: parent
         anchors.leftMargin: Style.space(10)
-        anchors.rightMargin: Style.space(10)
+        anchors.rightMargin: Style.space(root.trailingIconName ? 34 : 10)
         text: root.text
         textFormat: Text.PlainText
         color: root.foreground
@@ -52,6 +53,16 @@ Rectangle {
         height: Style.space(16)
         visible: root.iconName !== ""
         name: root.iconName
+        foreground: root.foreground
+    }
+    Plugin.PanelIcon {
+        anchors.right: parent.right
+        anchors.rightMargin: Style.space(8)
+        anchors.verticalCenter: parent.verticalCenter
+        width: Style.space(16)
+        height: Style.space(16)
+        visible: root.trailingIconName !== ""
+        name: root.trailingIconName
         foreground: root.foreground
     }
     MouseArea {

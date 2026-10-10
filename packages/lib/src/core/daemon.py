@@ -47,6 +47,12 @@ def update_task(output_format="waybar"):
                 def on_result(dir_name, providers):
                     if providers:
                         _results_by_dir[dir_name] = providers
+                    elif output_format == "quickshell":
+                        _results_by_dir.pop(dir_name, None)
+                    if output_format == "quickshell":
+                        # Clicks must be able to select newly streamed metrics
+                        # while another provider is still being queried.
+                        state.save_cache(_ordered_merged(cfgmod.enabled_order()))
                     _pending.discard(dir_name)
 
                 data = fetch.fetch_all_data(on_result=on_result, include_errors=output_format == "quickshell")
@@ -99,6 +105,9 @@ def _run(output_format="waybar"):
             logo_paths = {name: logo_cache.get(name) for name in cfgmod.enabled_order()}
             logo = logo_paths.get(selected.get("provider"), "") if state.get_icon_mode(selected) == "logo" else ""
             output = quickshell.build_snapshot(data, selected, pending=_pending.copy(), logo_path=logo, logo_paths=logo_paths)
+            if output["providers"] and any(selected.get(key) != output["selected"].get(key) for key in ("provider", "idx", "metric")):
+                selected.update(output["selected"])
+                state.save_selected(selected)
             serialized = json.dumps(output, ensure_ascii=False, allow_nan=False)
             if serialized != last_snapshot:
                 print(serialized, flush=True)
