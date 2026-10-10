@@ -36,3 +36,7 @@ Run the provider's fetch script by hand to see the raw response:
 ```bash
 bash ~/.local/share/ai-status/packages/lib/src/providers/codex/query.sh
 ```
+
+## Multiple accounts
+
+Set `auth_file` to that account's Codex `auth.json`, use `CODEX_HOME`, or map `CODEX_ACCESS_TOKEN` and, when needed, `CODEX_ACCOUNT_ID` to separate environment variables. This collector requires ChatGPT OAuth; OpenAI API keys belong to the OpenAI API provider. There is no application-imposed account limit. See the [authentication and multiple-account guide](https://github.com/gelzinn/ai-status/blob/main/packages/lib/PROVIDERS.md).

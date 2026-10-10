@@ -48,3 +48,7 @@ Run the provider's fetch script by hand to see the raw response:
 ```bash
 bash ~/.local/share/ai-status/packages/lib/src/providers/claude/query.sh
 ```
+
+## Multiple accounts
+
+Set `auth_file` to that account's Claude Code `.credentials.json`, use `CLAUDE_CONFIG_DIR`, or map `CLAUDE_ACCESS_TOKEN` to its own environment variable. Explicit accounts do not fall back to another OpenCode session. There is no application-imposed account limit. See the [authentication and multiple-account guide](https://github.com/gelzinn/ai-status/blob/main/packages/lib/PROVIDERS.md).

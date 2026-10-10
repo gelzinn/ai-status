@@ -28,7 +28,9 @@ PROVIDERS = paths.read_json(ASSETS / "providers.json") or paths.read_json(
 
 
 def provider_name(key):
-    return PROVIDERS.get(key, {}).get("name", key)
+    info = config.connection_info(key) or {"provider": key, "label": key}
+    name = PROVIDERS.get(info["provider"], {}).get("name", key)
+    return name + (" · " + info["label"] if key.startswith("account:") else "")
 
 # Colors, spacing and typography match the landing page's WaybarReplica.
 PANEL_STYLE = """
@@ -79,6 +81,7 @@ def asset_icon(filename):
 
 
 def provider_icon(name):
+    name = (config.connection_info(name) or {}).get("provider", name)
     filename = f"providers/{name}.png"
     if (ASSETS / filename).is_file():
         return asset_icon(filename)
@@ -637,7 +640,7 @@ class UsageWorker(QObject):
                 fetch.check_for_updates()
         except Exception:
             logging.exception("Usage refresh failed")
-            for name in config.enabled_order():
+            for name in config.enabled_connection_order():
                 self.error.emit(name, "Refresh failed; see the application log.")
         finally:
             self.finished.emit(data)
@@ -688,7 +691,7 @@ class ProviderSettings(QWidget):
         for key, label, default in (("show_provider", "Provider name", True),
                                     ("show_model", "Model / plan", True),
                                     ("show_metric", "Limit name", False),
-                                    ("show_pct", "Percentage", True)):
+                                    ("show_pct", "Usage value", True)):
             checkbox = QCheckBox(label)
             checkbox.setChecked(selected.get(key, default))
             self.display[key] = checkbox
@@ -705,8 +708,8 @@ class ProviderSettings(QWidget):
         hint.setWordWrap(True)
         layout.addWidget(hint)
         self.providers = ProviderList()
-        enabled = config.enabled_order()
-        available = config.available_providers()
+        enabled = config.enabled_connection_order()
+        available = config.available_connections()
         for name in dict.fromkeys(enabled + available):
             if name not in available:
                 continue
@@ -807,7 +810,7 @@ class ProviderSettings(QWidget):
         try:
             if paths.IS_WINDOWS:
                 set_startup(self.startup.isChecked())
-            config.save_config(order)
+            config.save_connection_order(order)
             state._save_json(state.SELECTED_FILE, selected)
         except OSError:
             self.message.setText("Unable to save settings. Check access to your user configuration directory.")
@@ -872,7 +875,7 @@ class Dashboard(QWidget):
         self.resize(380, 620)
         self.data = {}
         for item in state.load_cache():
-            self.data.setdefault(item.get("_dir"), []).append(item)
+            self.data.setdefault(render.connection_key(item), []).append(item)
         self.errors = {}
         self.selected = state.load_selected() or {}
         self.busy = False
@@ -1154,7 +1157,7 @@ class Dashboard(QWidget):
         dialog.setStyleSheet(PANEL_STYLE)
         dialog.resize(440, 360)
         layout = QVBoxLayout(dialog)
-        for name in config.enabled_order():
+        for name in config.enabled_connection_order():
             cached = next((entry for entry in self.data.get(name, []) if entry.get("_cached")), None)
             message = self.errors.get(name) or (cached or {}).get("_error")
             if message:
@@ -1205,7 +1208,7 @@ class Dashboard(QWidget):
             QTimer.singleShot(5000, self.refresh)
             return
         self.busy = True
-        self.pending = set(config.enabled_order())
+        self.pending = set(config.enabled_connection_order())
         self.errors = {}
         self.refresh_action.setEnabled(False)
         self.refresh_button.setEnabled(False)
@@ -1269,7 +1272,7 @@ class Dashboard(QWidget):
         for name, entry, metric, value in self.visible_metrics:
             if value == self.selected_value():
                 loading = name in self.pending
-                percentage = render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else f"{float(metric.get('percentage', 0)):.0f}%"
+                percentage = render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else render.metric_value(metric)
                 text = f"{self.entry_name(name, entry)} {percentage}"
                 if entry.get("_cached"):
                     text += " · cached"
@@ -1284,13 +1287,13 @@ class Dashboard(QWidget):
 
     @staticmethod
     def entry_name(name, entry):
-        label = entry.get("provider") or provider_name(name)
+        label = render.entry_name(entry) if entry.get("provider") else provider_name(name)
         return provider_name(name) if label == name else label
 
     def draw(self):
         scroll_position = self.scroll.verticalScrollBar().value()
         self.visible_metrics = []
-        for name in config.enabled_order():
+        for name in config.enabled_connection_order():
             for entry in self.data.get(name) or []:
                 for metric in sorted(entry.get("metrics", []), key=lambda m: render.TYPE_ORDER.get(m.get("type"), 4)):
                     value = (name, entry.get("_idx", 0), render.metric_key(metric))
@@ -1312,7 +1315,7 @@ class Dashboard(QWidget):
         layout = QVBoxLayout(content)
         layout.setContentsMargins(16, 18, 16, 18)
         layout.setSpacing(26)
-        for name in config.enabled_order():
+        for name in config.enabled_connection_order():
             for entry in self.data.get(name) or []:
                 metrics = sorted(entry.get("metrics", []), key=lambda m: render.TYPE_ORDER.get(m.get("type"), 4))
                 if not metrics:
@@ -1350,10 +1353,10 @@ class Dashboard(QWidget):
                     value = (name, entry.get("_idx", 0), render.metric_key(metric))
                     active = value == self.selected_value()
                     color = "#eeeeee" if active else "#888888"
-                    pct = float(metric.get("percentage", 0))
+                    pct = render.metric_percentage(metric)
                     button = UsageButton()
                     button.value = value
-                    button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {pct:.0f}%")
+                    button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {render.metric_value(metric)}")
                     button.clicked.connect(lambda checked=False, value=value: self.choose_metric(value))
                     self.metric_buttons.append(button)
                     metric_layout = QVBoxLayout(button)
@@ -1377,7 +1380,7 @@ class Dashboard(QWidget):
                     bar_row.addWidget(button.bar, 1)
                     button.close_bracket = plain_label("]", color)
                     bar_row.addWidget(button.close_bracket)
-                    button.percentage = plain_label(f"{pct:.0f}%", color)
+                    button.percentage = plain_label(render.metric_value(metric), color)
                     button.percentage.setFixedSize(38, self.fontMetrics().height())
                     button.percentage.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                     bar_row.addWidget(button.percentage)
@@ -1433,21 +1436,24 @@ class Dashboard(QWidget):
             active = value == self.selected_value()
             loading = name in self.pending
             color = "#eeeeee" if active else "#888888"
-            pct = float(metric.get("percentage", 0))
+            pct = render.metric_percentage(metric)
             title = metric.get("name") or render.TYPE_NAMES.get(metric.get("type"), "Usage")
             button.bullet.setText("•" if active else "")
             button.title.setText(title + ":")
-            button.bar.set_usage(pct, active, loading, group_indices[value[:2]])
-            button.percentage.setText(render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else f"{pct:.0f}%")
+            button.bar.set_usage(pct or 0, active, loading, group_indices[value[:2]])
+            for item in (button.bar, button.open_bracket, button.close_bracket):
+                item.setVisible(pct is not None)
+            button.percentage.setFixedWidth(max(38, self.fontMetrics().horizontalAdvance(render.metric_value(metric)) + 4))
+            button.percentage.setText(render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else render.metric_value(metric))
             for label in (button.bullet, button.title, button.open_bracket, button.close_bracket, button.percentage):
                 label.setStyleSheet(f"color: {color};")
             seconds = metric.get("reset_in_seconds")
             reset = render.format_reset_time(seconds, metric.get("type")) if seconds is not None else "no reset available"
             button.description.setText("    " + (metric.get("detail") or reset))
-            button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {pct:.0f}%")
+            button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {render.metric_value(metric)}")
         if not self.metric_values:
             self.empty_message.setText("Checking your connected providers…" if self.busy else
-                "No usage available. Connect a provider and refresh." if config.enabled_order() else
+                "No usage available. Connect a provider and refresh." if config.enabled_connection_order() else
                 "No providers enabled. Choose them in Settings.")
         self.update_tooltip()
         if self.reset_provider is not None:
@@ -1492,7 +1498,7 @@ def smoke_test():
     widget.ensurePolished()
     image = widget.grab().toImage()
     result = {"widget_render": not image.isNull(),
-              "provider_icons": len(PROVIDERS) == 8 and all(icon_has_pixels(provider_icon(name)) for name in PROVIDERS),
+              "provider_icons": len(PROVIDERS) == len(config.available_providers()) and all(icon_has_pixels(provider_icon(name)) for name in PROVIDERS),
               "font_family": panel_font().family(), "native_console": False}
     widget.deleteLater()
     if paths.IS_WINDOWS:

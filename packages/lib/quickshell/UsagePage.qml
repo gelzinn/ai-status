@@ -138,7 +138,7 @@ Column {
                         implicitHeight: block.implicitHeight
                         activeFocusOnTab: true
                         Accessible.role: Accessible.Button
-                        Accessible.name: provider.modelData.name + " " + modelData.name + " " + Math.round(modelData.percentage) + "%"
+                        Accessible.name: provider.modelData.name + " " + modelData.name + " " + (modelData.value || Math.round(modelData.percentage) + "%")
                         Keys.onReturnPressed: provider.choose(modelData.key)
                         Keys.onSpacePressed: provider.choose(modelData.key)
                         Label { width: Style.space(16); text: metric.selected ? "•" : "" }
@@ -156,24 +156,26 @@ Column {
                             Row {
                                 width: parent.width
                                 spacing: Style.space(4)
-                                Label { id: leftBracket; text: "["; opacity: metric.selected ? 1 : 0.55 }
+                                Label { id: leftBracket; visible: metric.modelData.hasPercentage !== false; text: "["; opacity: metric.selected ? 1 : 0.55 }
                                 Plugin.UsageBar {
+                                    visible: metric.modelData.hasPercentage !== false
                                     objectName: "usage-bar-" + provider.modelData.id + "-" + provider.modelData.idx + "-" + metric.modelData.key
                                     width: Math.max(0, parent.width - leftBracket.width - rightBracket.width - percentage.width - parent.spacing * 3)
                                     height: implicitHeight
                                     anchors.verticalCenter: parent.verticalCenter
-                                    percentage: metric.modelData.percentage
+                                    percentage: metric.modelData.percentage || 0
                                     active: metric.selected
                                     loading: provider.modelData.loading
                                     groupIndex: provider.index
                                     foreground: root.foreground
                                 }
-                                Label { id: rightBracket; text: "]"; opacity: metric.selected ? 1 : 0.55 }
+                                Label { id: rightBracket; visible: metric.modelData.hasPercentage !== false; text: "]"; opacity: metric.selected ? 1 : 0.55 }
                                 Label {
                                     id: percentage
-                                    width: Style.space(40)
-                                    horizontalAlignment: Text.AlignRight
-                                    text: provider.modelData.loading ? Plugin.Model.spinner : Math.round(metric.modelData.percentage) + "%"
+                                    objectName: "usage-value-" + provider.modelData.id + "-" + provider.modelData.idx + "-" + metric.modelData.key
+                                    width: metric.modelData.hasPercentage === false ? parent.width : Style.space(40)
+                                    horizontalAlignment: metric.modelData.hasPercentage === false ? Text.AlignLeft : Text.AlignRight
+                                    text: provider.modelData.loading ? Plugin.Model.spinner : (metric.modelData.value || Math.round(metric.modelData.percentage) + "%")
                                     opacity: metric.selected ? 1 : 0.55
                                 }
                             }

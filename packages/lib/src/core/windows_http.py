@@ -1,6 +1,6 @@
 """Small synchronous WinHTTP client using Windows' TLS and certificate store.
 
-Only GET is needed by the collectors. Keep credentials out of exceptions and
+Keep credentials out of exceptions and
 disable automatic redirects so authorization cannot cross origins. WinHTTP is
 part of Windows 10/11; this avoids distributing a second TLS implementation.
 """
@@ -17,8 +17,9 @@ REDIRECTS = {301, 302, 303, 307, 308}
 
 
 class HTTPError(OSError):
-    def __init__(self, code):
+    def __init__(self, code, retry_after=None):
         self.code = code
+        self.retry_after = retry_after
         super().__init__(f"HTTP {code}")
 
 
@@ -63,6 +64,15 @@ def _url(url):
     parts = urlsplit(url)
     if parts.scheme not in ("https", "http") or not parts.hostname or parts.username is not None:
         raise ValueError("Invalid HTTP URL")
+    if parts.scheme == "http":
+        import ipaddress
+        loopback = parts.hostname.lower() == "localhost"
+        try:
+            loopback = loopback or ipaddress.ip_address(parts.hostname).is_loopback
+        except ValueError:
+            pass
+        if not loopback:
+            raise ValueError("HTTP is only permitted on localhost")
     port = parts.port or (443 if parts.scheme == "https" else 80)
     if not 0 < port <= 65535:
         raise ValueError("Invalid HTTP port")
@@ -95,7 +105,22 @@ def _location(api, handle):
     return buffer.value
 
 
-def _once(url, headers, timeout):
+def _retry_after(api, handle):
+    """Read only this safe header, never expose arbitrary server error bodies."""
+    size = DWORD()
+    try:
+        api.WinHttpQueryHeaders(handle, 65535, "Retry-After", None, C.byref(size), None)
+        if not size.value or size.value > 32768:
+            return None
+        buffer = C.create_unicode_buffer((size.value + C.sizeof(C.c_wchar) - 1) // C.sizeof(C.c_wchar))
+        if api.WinHttpQueryHeaders(handle, 65535, "Retry-After", buffer, C.byref(size), None):
+            return buffer.value
+    except (ValueError, OSError):
+        pass
+    return None
+
+
+def _once(url, headers, timeout, method="GET", data=None):
     parts, (_, host, port) = _url(url)
     api = _api()
     handles = []
@@ -109,7 +134,7 @@ def _once(url, headers, timeout):
         connection = _check(api.WinHttpConnect(session, host.encode("idna").decode("ascii"), port, 0))
         handles.append(connection)
         target = (parts.path or "/") + ("?" + parts.query if parts.query else "")
-        handle = _check(api.WinHttpOpenRequest(connection, "GET", target, None, None, None,
+        handle = _check(api.WinHttpOpenRequest(connection, method, target, None, None, None,
                                              0x00800000 if parts.scheme == "https" else 0))
         handles.append(handle)
         _option(api, handle, 88, 0)  # Handle redirects ourselves.
@@ -119,7 +144,9 @@ def _once(url, headers, timeout):
         if credentials:
             _check(api.WinHttpSetCredentials(handle, 1, 1, *credentials, None))
         raw_headers = "".join(f"{name}: {value}\r\n" for name, value in headers.items())
-        _check(api.WinHttpSendRequest(handle, raw_headers, len(raw_headers), None, 0, 0, 0))
+        body = C.create_string_buffer(data) if data is not None else None
+        length = len(data) if data is not None else 0
+        _check(api.WinHttpSendRequest(handle, raw_headers, len(raw_headers), body, length, length, 0))
         _check(api.WinHttpReceiveResponse(handle, None))
         status, size = DWORD(), DWORD(C.sizeof(DWORD))
         _check(api.WinHttpQueryHeaders(handle, 19 | 0x20000000, None,
@@ -127,7 +154,7 @@ def _once(url, headers, timeout):
         if status.value in REDIRECTS:
             return status.value, _location(api, handle)
         if not 200 <= status.value < 300:
-            raise HTTPError(status.value)
+            raise HTTPError(status.value, _retry_after(api, handle) if status.value == 429 else None)
         chunks, total = [], 0
         buffer, count = C.create_string_buffer(65536), DWORD()
         deadline = time.monotonic() + timeout
@@ -146,10 +173,12 @@ def _once(url, headers, timeout):
             api.WinHttpCloseHandle(handle)
 
 
-def request(url, headers=None, timeout=8):
+def request(url, headers=None, timeout=8, method="GET", data=None):
     """Return bytes. Certificate/hostname validation remains enabled in WinHTTP."""
     if timeout <= 0:
         raise ValueError("HTTP timeout must be positive")
+    if method not in {"GET", "POST"} or (data is not None and not isinstance(data, bytes)):
+        raise ValueError("Invalid HTTP method or body")
     headers = dict(headers or {})
     for name, value in headers.items():
         if (not name or any(character in name for character in ":\r\n\0")
@@ -157,10 +186,15 @@ def request(url, headers=None, timeout=8):
             raise ValueError("Invalid HTTP header")
     for _ in range(6):
         _, origin = _url(url)
-        status, data = _once(url, headers, timeout)
+        status, response = (_once(url, headers, timeout) if method == "GET" and data is None
+                            else _once(url, headers, timeout, method=method, data=data))
         if status not in REDIRECTS:
-            return data
-        destination = urljoin(url, data)
+            return response
+        if method != "GET" or data is not None:
+            raise OSError("HTTP redirected a request body")
+        destination = urljoin(url, response)
+        if origin[0] == "https" and urlsplit(destination).scheme != "https":
+            raise OSError("Insecure HTTP redirect")
         _, next_origin = _url(destination)
         if origin[0] == "https" and next_origin[0] != "https":
             raise OSError("Insecure HTTP redirect")

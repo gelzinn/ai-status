@@ -1,9 +1,55 @@
 import json
 import re
+from datetime import datetime, timezone
+from core.metered import number
+
+
+def parse_api(raw_output):
+    try:
+        data = json.loads(raw_output)
+        response = data.get("response")
+        groups = response.get("groups") if isinstance(response, dict) else None
+        if not isinstance(groups, list):
+            groups = data.get("groups")
+        if not isinstance(groups, list):
+            raise ValueError
+        pools = {"Gemini": [], "Claude/GPT": []}
+        seen = set()
+        for group in groups:
+            name = str(group.get("displayName") or "").lower()
+            for bucket in group.get("buckets") or []:
+                identity = str(bucket.get("bucketId") or "").lower()
+                window = bucket.get("window")
+                kind = ("weekly" if identity.endswith("weekly") or window == "weekly" else
+                        "rolling" if identity.endswith("5h") or window == "5h" else None)
+                pool = ("Gemini" if identity.startswith("gemini") else "Claude/GPT" if identity.startswith("3p") else
+                        "Gemini" if "gemini" in name else "Claude/GPT" if "claude" in name or "gpt" in name else None)
+                if kind is None or pool is None:
+                    continue
+                fraction = number(bucket.get("remainingFraction"))
+                if fraction is None or not 0 <= fraction <= 1 or (pool, kind) in seen:
+                    raise ValueError
+                seen.add((pool, kind))
+                reset = bucket.get("resetTime")
+                if reset:
+                    stamp = datetime.fromisoformat(str(reset).replace("Z", "+00:00"))
+                    if stamp.tzinfo is None:
+                        stamp = stamp.replace(tzinfo=timezone.utc)
+                    reset = max(0, int((stamp - datetime.now(timezone.utc)).total_seconds()))
+                pools[pool].append({"type": kind, "percentage": round((1-fraction)*100, 2),
+                                    "detail": "Weekly quota" if kind == "weekly" else "5-hour quota",
+                                    "reset_in_seconds": reset or None})
+        if not seen:
+            raise ValueError
+        return [{"provider": pool + " (Antigravity)", "metrics": metrics} for pool, metrics in pools.items() if metrics]
+    except (ValueError, TypeError, AttributeError, OverflowError):
+        return [{"provider": "Antigravity", "metrics": [], "_error": "Antigravity returned no compatible quota windows; check the session and response format."}]
 
 def parse(raw_output):
     if not raw_output:
         return []
+    if raw_output.lstrip().startswith("{"):
+        return parse_api(raw_output)
 
     providers = parse_agy_output(raw_output)
     return providers

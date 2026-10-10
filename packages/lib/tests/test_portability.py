@@ -129,6 +129,10 @@ class PlatformTests(IsolatedState):
     def test_query_errors_and_timeout_mark_cached_data(self):
         directory = str(SRC / "providers/codex")
         fetch._save_cache(directory, {"provider": "Codex", "metrics": [{"percentage": 30}]})
+        cache_path = fetch._cache_path(directory)
+        cache = paths.read_json(cache_path)
+        cache["timestamp"] = time.time() - fetch.MIN_REFRESH_SECONDS - 1
+        self.write(cache_path, cache)
         result = fetch.run_provider(directory)
         self.assertTrue(result["_cached"])
         self.assertIn("Sign in", result["_error"])
@@ -215,15 +219,15 @@ class CollectorTests(IsolatedState):
             module.query()
         self.assertEqual(api.call_args.args[1]["Authorization"], "Bearer example")
 
-    def test_opencode_validates_config_and_quotes_workspace(self):
+    def test_opencode_direct_usage_needs_no_cookie_or_workspace(self):
         self.write(self.root / "data/opencode/auth.json", {"opencode-go": {"key": "example"}})
         module = load_provider("opencode")
-        with self.assertRaises(QueryError):
-            module.query()
-        self.write(self.root / "config/opencode-bar/opencode-go.json", {"workspaceId": "a/b", "authCookie": "cookie=example"})
-        with patch.object(module, "request", side_effect=["{}", "html"]) as api:
-            self.assertEqual(module.query(), "html")
-        self.assertEqual(api.call_args.args[0], "https://opencode.ai/workspace/a%2Fb/go")
+        response = '{"usage":{"rolling":{"percent":12.5,"resetsAt":"2099-01-01T00:00:00Z"}}}'
+        with patch.object(module, "request", return_value=response) as api:
+            self.assertEqual(module.query(), response)
+        api.assert_called_once_with("https://opencode.ai/zen/go/v1/usage", {"Authorization": "Bearer example"})
+        parsed = load_provider("opencode", "parse").parse(response)
+        self.assertEqual(parsed["metrics"][0]["percentage"], 12.5)
 
     def test_commandcode_collects_budget_and_propagates_failure(self):
         module = load_provider("commandcode")
@@ -234,7 +238,22 @@ class CollectorTests(IsolatedState):
             data = module.query()
         self.assertEqual(data["used"], 2)
         self.assertEqual(data["remaining"], 8)
-        self.assertEqual(load_provider("commandcode", "parse").parse(json.dumps(data))["metrics"][0]["percentage"], 20)
+        parsed = load_provider("commandcode", "parse").parse(json.dumps(data))
+        self.assertIsNone(parsed["metrics"][0]["percentage"])
+        self.assertEqual(parsed["metrics"][0]["amount"], 2)
+        self.assertEqual(parsed["metrics"][1]["amount"], 8)
+
+    def test_commandcode_uses_reported_window_caps_and_amount_only_monthly_spend(self):
+        data = {"used": 12, "remaining": 30, "windows": {
+            "fiveHour": {"used": 3.5, "cap": 14, "resetAt": 4070908800000},
+            "weekly": {"used": 10.5, "cap": 35, "resetAt": 4070908800000},
+        }}
+        metrics = load_provider("commandcode", "parse").parse(json.dumps(data))["metrics"]
+        self.assertEqual([metric["type"] for metric in metrics], ["rolling", "weekly", "monthly", "balance"])
+        self.assertEqual([metric["percentage"] for metric in metrics[:2]], [25, 30])
+        self.assertIsNone(metrics[2]["percentage"])
+        self.assertEqual(metrics[2]["amount"], 12)
+        self.assertGreater(metrics[0]["reset_in_seconds"], 0)
 
     def test_kiro_requires_native_cli_and_returns_usage(self):
         module = load_provider("kiro")
@@ -244,7 +263,8 @@ class CollectorTests(IsolatedState):
 
     def test_http_errors_do_not_expose_tokens(self):
         from urllib.error import HTTPError
-        with patch("core.paths.IS_WINDOWS", False), patch("urllib.request.urlopen", side_effect=HTTPError("https://example.invalid?secret=example", 401, "token example", {}, None)):
+        with patch("core.paths.IS_WINDOWS", False), patch("urllib.request.build_opener") as opener:
+            opener.return_value.open.side_effect = HTTPError("https://example.invalid?secret=example", 401, "token example", {}, None)
             with self.assertRaises(QueryError) as result:
                 request("https://example.invalid", {"Authorization": "Bearer example"})
         self.assertNotIn("example", str(result.exception))

@@ -24,7 +24,7 @@ import shutil
 import signal
 import subprocess
 
-from . import state
+from . import state, config
 from . import paths
 from .provider_http import request_bytes
 
@@ -202,7 +202,7 @@ def update_current(selected, notify=True):
     signal waybar to reload it. No-op unless the icon mode is ``logo``."""
     if paths.IS_WINDOWS or not selected or state.get_icon_mode(selected) != "logo":
         return False
-    provider = selected.get("provider", "antigravity")
+    provider = (config.connection_info(selected.get("provider", "antigravity")) or {}).get("provider", "antigravity")
     png = provider_png(provider)
     if not png or not os.path.exists(png):
         return False

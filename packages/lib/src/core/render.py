@@ -10,6 +10,8 @@ TYPE_NAMES = {
     "daily": "Daily Usage",
     "weekly": "Weekly Usage",
     "monthly": "Monthly Usage",
+    "credits": "Available balance",
+    "balance": "Available balance",
     "generic": "Usage",
 }
 
@@ -22,6 +24,38 @@ ICON = "\U000f06a9"
 
 DIM_INACTIVE = 55   # non-selected providers and inactive metrics
 DIM_RESET = 60      # reset lines
+
+
+def connection_key(entry):
+    return entry.get("_connection_id") or entry.get("_dir")
+
+
+def entry_name(entry):
+    name = entry.get("provider", "AI Provider")
+    label = entry.get("_account_label")
+    return f"{name} · {label}" if label else name
+
+
+def metric_percentage(metric):
+    try:
+        value = float(metric.get("percentage"))
+        return value if math.isfinite(value) else None
+    except (ValueError, TypeError):
+        return None
+
+
+def metric_value(metric):
+    percentage = metric_percentage(metric)
+    if percentage is not None:
+        return f"{percentage:.0f}%"
+    try:
+        amount = float(metric.get("amount"))
+        if not math.isfinite(amount):
+            return "Unavailable"
+    except (ValueError, TypeError):
+        return str(metric.get("value") or "Unavailable")
+    unit = metric.get("unit", "")
+    return f"${amount:.2f}" if unit == "USD" else f"{amount:,.2f} {unit}".strip()
 
 
 def _dim(text, alpha):
@@ -51,7 +85,7 @@ def _find_selected_provider(latest_data, selected):
     idx = selected.get("idx", 0)
     count = 0
     for p in latest_data:
-        if p.get("_dir") == dir_name:
+        if connection_key(p) == dir_name:
             if count == idx:
                 return p
             count += 1
@@ -66,7 +100,7 @@ def get_selected_metric_text(latest_data, selected, spinner=None):
             return f"{ICON} {spinner}" if show_icon else spinner
         return ICON
 
-    provider_full_name = p.get("provider", "")
+    provider_full_name = entry_name(p)
     selected_key = selected.get("metric", "rolling")
     metrics = p.get("metrics", [])
 
@@ -104,8 +138,7 @@ def get_selected_metric_text(latest_data, selected, spinner=None):
         pct_str = spinner
         show_pct = True
     elif m:
-        pct = float(m.get("percentage", 0.0))
-        pct_str = f"{pct:.0f}%"
+        pct_str = metric_value(m)
     else:
         pct_str = "0%"
 
@@ -194,13 +227,13 @@ def format_reset_time(seconds, mtype):
 def format_provider_block(
     provider_data, selected_dir=None, selected_idx=None, selected_metric=None
 ):
-    provider = provider_data.get("provider", "AI Provider")
+    provider = escape(entry_name(provider_data))
     metrics = provider_data.get("metrics", [])
     if not metrics:
         return ""
 
     is_selected = (
-        provider_data.get("_dir") == selected_dir
+        connection_key(provider_data) == selected_dir
         and provider_data.get("_idx") == selected_idx
     )
     prefix = "→ " if is_selected else "  "
@@ -219,7 +252,7 @@ def format_provider_block(
     lines = [header, ""]
     for metric in sorted_metrics:
         mtype = metric.get("type", "generic")
-        name = TYPE_NAMES.get(mtype, "Usage")
+        name = escape(metric.get("name") or TYPE_NAMES.get(mtype, "Usage"))
         is_active = is_selected and metric_key(metric) == selected_metric
         seconds = metric.get("reset_in_seconds")
         detail = metric.get("detail")
@@ -231,7 +264,8 @@ def format_provider_block(
         label = f"•   {name}:" if is_active else f"    {name}:"
         if recede:
             label = _dim(label, recede)
-        bar_str = make_progress_bar(float(metric.get("percentage", 0.0)))
+        percentage = metric_percentage(metric)
+        bar_str = make_progress_bar(percentage) if percentage is not None else escape(metric_value(metric))
         bar_line = ("    " + _dim(bar_str, recede)) if recede else f"    {bar_str}"
 
         lines.append(label)
@@ -247,7 +281,7 @@ def format_provider_block(
 def format_loading_provider_block(
     provider_data, frame_index, selected_dir=None, selected_idx=None, selected_metric=None
 ):
-    provider = provider_data.get("provider", "AI Provider")
+    provider = escape(entry_name(provider_data))
     metrics = provider_data.get("metrics", [])
     if not metrics:
         return ""
@@ -256,7 +290,7 @@ def format_loading_provider_block(
     # indentation) so nothing shifts when loading resolves — only the bar (a
     # shimmer) and the value (a spinner) differ.
     is_selected = (
-        provider_data.get("_dir") == selected_dir
+        connection_key(provider_data) == selected_dir
         and provider_data.get("_idx") == selected_idx
     )
     prefix = "→ " if is_selected else "  "
@@ -276,7 +310,7 @@ def format_loading_provider_block(
     lines = [header, ""]
     for metric in sorted_metrics:
         mtype = metric.get("type", "generic")
-        name = TYPE_NAMES.get(mtype, "Usage")
+        name = escape(metric.get("name") or TYPE_NAMES.get(mtype, "Usage"))
         is_active = is_selected and metric_key(metric) == selected_metric
         seconds = metric.get("reset_in_seconds")
         detail = metric.get("detail")
@@ -327,7 +361,7 @@ def build_loading_state(latest_data, frame, selected=None, pending=None):
     selected_metric = selected.get("metric") if selected else None
 
     def _is_pending(p):
-        return True if pending is None else (p.get("_dir") in pending)
+        return True if pending is None else (connection_key(p) in pending)
 
     if latest_data:
         blocks = []

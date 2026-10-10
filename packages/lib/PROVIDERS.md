@@ -3,20 +3,41 @@
 For Windows credential locations and native CLI compatibility, see the
 [Windows guide](WINDOWS.md#authentication-and-provider-compatibility).
 
-**AI Status never ships or hardcodes API keys.** Every provider script reads credentials from your existing local authentication files -- OpenCode tokens, Copilot OAuth sessions, `.codex/auth.json`, and similar. Below is how each provider authenticates.
+**AI Status never ships or hardcodes API keys.** Collectors read existing local authentication files or explicitly configured credential sources. External CLI credentials are read only; refresh expired sessions in the client that owns them. New providers require explicit enabling.
 
 ## Provider Overview
 
-| Provider | Tracks | Auth Source | Key File |
-|---|---|---|---|
-| Antigravity | Weekly + 5-hour limits per model (Gemini, Claude/GPT) | agy CLI session | agy login state (handled by Antigravity CLI) |
-| Claude | Session (5h) + weekly, including per-model weekly limits | Claude Code OAuth (fallback: OpenCode) | `~/.claude/.credentials.json`, `~/.local/share/opencode/auth.json` |
-| Codex | 5-hour + weekly (a single monthly window on free plans) | Codex auth token | `~/.codex/auth.json` |
-| Copilot | Chat + completions usage | OpenCode Copilot OAuth | `~/.local/share/opencode/auth.json` |
-| Kiro | Usage percentage + reset timer | Native CLI session | `kiro-cli` login state |
-| OpenCode | Rolling, weekly, monthly usage | OpenCode auth | `~/.local/share/opencode/auth.json` |
-| Z.AI | Rolling, weekly, monthly usage | OpenCode account key | `~/.local/share/opencode/account.json` |
-| Command Code | Monthly usage | Native CLI API key | `~/.commandcode/auth.json` or `COMMANDCODE_API_KEY` |
+| Provider ID | Provider | Usage | Authentication |
+| --- | --- | --- | --- |
+| `claude` | Claude | Session (5h) and weekly usage, including per-model weekly limits | Claude Code OAuth (OpenCode fallback) |
+| `codex` | Codex | 5-hour and weekly limits (a single monthly window on free plans) | ~/.codex/auth.json |
+| `opencode` | OpenCode | Rolling, weekly, and monthly usage | OPENCODE_GO_API_KEY or OpenCode auth |
+| `antigravity` | Antigravity | Weekly and 5-hour limits per model (Gemini and Claude/GPT) | agy CLI session |
+| `copilot` | Copilot | Chat and completions usage | GITHUB_COPILOT_TOKEN, gh auth token, or OpenCode |
+| `zai` | Z.AI | Rolling, weekly, and monthly usage | ZAI_API_KEY or OpenCode |
+| `kiro` | Kiro | Usage percentage and reset timer | kiro-cli session |
+| `commandcode` | Command Code | 5-hour and weekly spend limits; monthly spend and available credits | ~/.commandcode/auth.json (cmd login) |
+| `anthropic-api` | Anthropic API | Monthly organization API spend | ANTHROPIC_ADMIN_KEY (organization Admin key) |
+| `openai-api` | OpenAI API | Monthly organization API spend | OPENAI_ADMIN_KEY (organization Admin key) |
+| `google-cloud` | Google Cloud | Project quotas; optional billing-export monthly cost | gcloud or GOOGLE_CLOUD_ACCESS_TOKEN; project_id option |
+| `openrouter` | OpenRouter | Key usage, monthly spend, remaining limit and prepaid credits | OPENROUTER_API_KEY |
+| `deepseek` | DeepSeek | Available prepaid balance | DEEPSEEK_API_KEY |
+| `deepinfra` | DeepInfra | Prepaid balance and current-month spend | DEEPINFRA_API_KEY |
+| `kimi` | Kimi | Coding subscription quota and rolling limits | KIMI_API_KEY or Kimi CLI login |
+| `minimax` | MiniMax | Token Plan quota windows | MINIMAX_API_KEY (Token Plan key) |
+| `kilo` | Kilo | Personal or organization credit balance | KILO_API_KEY; optional organization_id |
+| `lyceum` | Lyceum | Available USD balance and reported spend | LYCEUM_API_KEY |
+| `novita` | Novita | Available prepaid balance | NOVITA_API_KEY |
+| `moonshot` | Moonshot | Available USD or CNY balance | MOONSHOT_API_KEY; region option |
+| `grok` | Grok API (xAI) | Team prepaid balance | XAI_MANAGEMENT_KEY; team_id for organization-scoped keys |
+| `supergrok` | SuperGrok | Subscription credits and product usage | Grok Build login or SUPERGROK_ACCESS_TOKEN |
+| `grok-bot` | Grok Bot | Weekly included usage | Grok Bot desktop login or GROK_BOT_ACCESS_TOKEN |
+| `cursor` | Cursor | Included usage pools and on-demand spend | Cursor IDE/agent login or CURSOR_ACCESS_TOKEN |
+| `nous` | Nous Research | Subscription and top-up credits | NOUS_ACCESS_TOKEN or existing OAuth credentials |
+| `ollama` | Ollama Cloud | Cloud session/weekly or monthly quota | OLLAMA_API_KEY (cloud key) |
+| `orcarouter` | OrcaRouter | Credit limit, spend and remaining balance | ORCAROUTER_API_KEY |
+| `modelstudio` | Alibaba Model Studio | Token Plan rolling and weekly quota | bl auth login --console |
+| `devin` | Devin | Daily and weekly CLI quota; optional overage balance | Official Devin CLI credentials |
 
 ## Per-Provider Details
 
@@ -58,51 +79,34 @@ These sections display the provider's inventory for manual resets, separately fr
 
 ### Copilot
 
-Authenticates via GitHub Copilot's OAuth token stored by the Copilot CLI.
+Uses GITHUB_COPILOT_TOKEN, the token returned by the authenticated GitHub CLI (`gh auth token`), or an existing OpenCode Copilot session.
 
 | Detail | |
 |---|---|
-| **Auth** | Copilot must be signed in via `github-copilot-cli` |
+| **Auth** | `gh auth login`, `GITHUB_COPILOT_TOKEN`, or OpenCode Copilot login |
 | **Metrics** | Chat and completions usage with remaining counts |
 
 ### Kiro
 
-Scrapes usage data from Kiro's web API using session cookies.
+Reads usage through the authenticated native Kiro CLI; explicit connections can query GetUsageLimits using their own session.
 
 | Detail | |
 |---|---|
-| **Auth** | Valid session cookie exported from browser or extension |
+| **Auth** | Native `kiro-cli` login, or a per-account token/authentication file |
 | **Metrics** | Usage percentage and reset timer |
 
 ### OpenCode (Go)
 
-Queries the [opencode.ai](https://opencode.ai) Go dashboard for usage statistics.
+Queries the read-only `https://opencode.ai/zen/go/v1/usage` endpoint directly. The parser retains compatibility with cached legacy dashboard responses.
 
 | Detail | |
 |---|---|
-| **Auth** | API key from `~/.local/share/opencode/auth.json` + workspace config (see below) |
+| **Auth** | `OPENCODE_GO_API_KEY` or key from `~/.local/share/opencode/auth.json`; no workspace cookie required |
 | **Metrics** | Rolling, weekly, and monthly usage percentages with reset timers |
 
 #### Setup
 
-The provider needs a config file at `~/.config/opencode-bar/opencode-go.json` with two values from your browser:
-
-1. **`workspaceId`** — Log in at [opencode.ai](https://opencode.ai), go to your workspace. The URL will be `https://opencode.ai/workspace/<workspaceId>/go`. Copy the ID.
-
-2. **`authCookie`** — On the same page, open DevTools (F12) → Network tab → click any request to `opencode.ai` → in Request Headers, copy the full `Cookie` header value.
-
-Then create the file:
-
-```bash
-mkdir -p ~/.config/opencode-bar
-cat > ~/.config/opencode-bar/opencode-go.json <<'EOF'
-{
-  "workspaceId": "<workspaceId>",
-  "authCookie": "<authCookie>"
-}
-EOF
-chmod 600 ~/.config/opencode-bar/opencode-go.json
-```
+Connect OpenCode Go in OpenCode, or provide `OPENCODE_GO_API_KEY` to the AI Status process. The old `opencode-go.json` workspace cookie is no longer used or required.
 
 ### Z.AI
 
@@ -137,3 +141,66 @@ If a provider shows **"API unreachable"**, **0%**, or nothing at all:
 4. **Refresh without restarting.** After fixing credentials, left-click the module (or run `ai-status refresh`) — no need to restart Waybar.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development details.
+
+## Multiple accounts and connections
+
+There is no configured account-count limit. Each connection has a stable ID and label, its own credential references and provider options. Accounts work independently of the default provider session; adding an OpenRouter account does not require enabling the default OpenRouter entry. Every desktop can select, enable, disable and reorder saved connections. The CLI manages their credential sources:
+
+```bash
+ai-status accounts add openrouter --id personal --label Personal --env OPENROUTER_API_KEY=OPENROUTER_PERSONAL_KEY
+ai-status accounts add openrouter --id work --label Work --env OPENROUTER_API_KEY=OPENROUTER_WORK_KEY
+ai-status accounts list
+ai-status accounts edit work --disabled
+ai-status accounts remove work
+```
+
+Provide the source variables to the actual AI Status process (a shell export affects processes launched from that shell). For desktop launches, a credential file reference avoids depending on inherited environment variables. Add an account with `ai-status accounts add --file connection.json`, or use `--file -` to read JSON from stdin:
+
+```json
+{
+  "id": "openai-work",
+  "provider": "openai-api",
+  "label": "Work organization",
+  "env": {
+    "OPENAI_ADMIN_KEY": {"from_file": "~/.config/my-credentials/openai-admin-key"}
+  },
+  "options": {
+    "organization_id": "org_example",
+    "project_ids": ["proj_example"],
+    "monthly_budget": 100,
+    "budget_currency": "USD"
+  }
+}
+```
+
+For CLI sessions, point to an existing account-specific credential file:
+
+```bash
+ai-status accounts add codex --id work-codex --label Work --auth-file /path/to/work-codex/auth.json
+ai-status accounts add claude --id personal-claude --label Personal --auth-file /path/to/personal-claude/.credentials.json
+```
+
+Connections are stored in `~/.config/ai-status/accounts.json` on Linux and `%APPDATA%\ai-status\accounts.json` on Windows. Unix configuration files are written with mode `0600`. Environment references and filenames are saved; secret values are resolved in memory. `accounts list --json` omits option values. Existing `providers.json` and `selected.json` preferences remain supported. Removing a connection retains its external credential files.
+
+Caches are private to the user and bound to both connection identity and credential/context fingerprints. Changing an account's key, auth file or project cannot reuse another account's cached usage. Explicit connections require their own credential source and never silently fall back to the default login. Expired OAuth sessions must be refreshed in their owning CLI.
+
+## API spend, balance and quota
+
+Spend, available credit and subscription quota are separate metrics. A balance has no invented percentage. An amount only gains a percentage if the API reports its applicable limit or you set a positive `monthly_budget`; a configured budget is a local monitoring preference, not a provider-enforced limit. Multiple currencies remain separate.
+
+- **OpenAI API:** `OPENAI_ADMIN_KEY`, optionally `organization_id`/`OPENAI_ORG_ID`, `project_ids`, `monthly_budget`, `budget_currency`. Queries the paginated [organization costs API](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs) for the current UTC month; a project inference key or Codex OAuth login cannot query it.
+- **Anthropic API:** `ANTHROPIC_ADMIN_KEY` for a Console Admin key or an unscoped personal/service account key with admin access; alternatively `ANTHROPIC_ADMIN_TOKEN` for `org:admin` OAuth. Workspace inference keys cannot read costs. Optional `workspace_id` scopes the paginated report, `monthly_budget`/`budget_currency` supplies a monitoring budget. [Cost report](https://platform.claude.com/docs/en/api/http/beta/organization/cost_report/retrieve) amounts are decimal cents and are converted to currency units. Claude subscriptions, Bedrock and Vertex invoices are separate.
+- **OpenRouter:** `OPENROUTER_API_KEY` reports key usage, daily/weekly/monthly spend and any applicable limit. Optional management-key credit retrieval requires the permissions of a management key. The collector uses `/api/v1/key` and `/api/v1/credits`; ordinary key metrics remain usable if the optional credit request fails.
+- **Google Cloud:** `GOOGLE_CLOUD_ACCESS_TOKEN`, or `gcloud auth print-access-token` with optional `gcloud_account`. Set `project_id` (or `GOOGLE_CLOUD_PROJECT`). Cloud Monitoring quota series require Monitoring read permissions. `service` and `quota_metric` filter series; allocation usage is paired with the matching limit, and rate-window quotas only use compatible labels/windows.
+
+Google Cloud billing is optional: set `billing_table` to an existing `project.dataset.table` [Cloud Billing export](https://cloud.google.com/billing/docs/how-to/export-data-bigquery). AI Status queries net current-month cost, including credits, scoped to `project_id`. `billing_project_id` controls the BigQuery job project, `billing_location` its location, `service_id` narrows services, and `billing_all_projects: true` explicitly broadens the spend scope. BigQuery read/query IAM permissions are required. Queries can incur BigQuery charges; `maximum_bytes_billed` defaults to 1 GB and query caching is enabled. Export delays apply, and missing quota/billing data stays unavailable rather than becoming a zero balance.
+
+For prepaid providers, the table above lists the key environment variable. Additional options: `region: "cn"` for MiniMax/Moonshot, `region: "global"` for Kimi's international endpoint; `organization_id` for Kilo teams; `team_id` for organization-scoped xAI management keys; `region` and `site` for Model Studio. Native login providers accept `auth_file`, while `CURSOR_ACCESS_TOKEN`, `SUPERGROK_ACCESS_TOKEN`, `GROK_BOT_ACCESS_TOKEN`, `NOUS_ACCESS_TOKEN` and `DEVIN_API_KEY` provide explicit overrides. Nous can reuse an existing separately authorized OAuth credential file; AI Status does not start a Nous device-login flow. Grok Bot's Linux/macOS credential stores and Windows credential overrides are supported; native session compatibility varies with the desktop app's storage format.
+
+## Request limits and cached data
+
+Automatic refresh remains every five minutes. Fresh successful results are reused for at least 60 seconds, including manual refresh. Collection uses at most eight workers, serializes calls to the same upstream service and spaces connection starts by at least one second, so adding accounts does not create an unbounded request burst. HTTP 429 starts a persistent cooldown for that connection and credential context: `Retry-After` is respected, with a five-minute fallback when the header is absent. Manual refresh and application restarts do not bypass the cooldown. The last valid snapshot stays visible with a cache/error indicator; when no cache exists, the connection reports its wait time.
+
+This reduces request pressure but cannot guarantee that an upstream API never rate-limits the application. Provider policies, other tools using the same key, and undocumented endpoint changes still apply. Authenticated live checks require your own accounts; mocked contract tests do not establish entitlement or live availability.
+
+Default Antigravity CLI sessions can have an OS-keyring identity that cannot be verified from credential files. These sessions query fresh usage and do not reuse cached snapshots from a previous login. An explicit token or account authentication file enables identity-bound caching.

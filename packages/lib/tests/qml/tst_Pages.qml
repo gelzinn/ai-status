@@ -54,6 +54,23 @@ Item {
             compare(settings.enabledProviders.length, 2)
             compare(settings.order[0], "claude")
         }
+        function test_amount_only_account_keeps_identity_and_hides_progress() {
+            settings.visible = false
+            const snapshot = Plugin.Model.snapshot
+            snapshot.selected = {provider: "account:work", idx: 0, metric: "balance:credits"}
+            snapshot.providers = [{id: "account:work", providerId: "openrouter", idx: 0, name: "OpenRouter · Work", logoPath: "", loading: false, cached: false, error: "", metrics: [
+                {key: "balance:credits", name: "Available credits", percentage: null, hasPercentage: false, value: "$42.50", detail: "Credit balance"}
+            ]}]
+            Plugin.Model.snapshot = Object.assign({}, snapshot)
+            usage.visible = true
+            wait(20)
+            const bar = findChild(usage, "usage-bar-account:work-0-balance:credits")
+            verify(bar !== null)
+            verify(!bar.visible)
+            const value = findChild(usage, "usage-value-account:work-0-balance:credits")
+            compare(value.text, "$42.50")
+            verify(value.visible)
+        }
         function test_reorder_and_save() {
             settings.moveProvider(1, -1)
             settings.selected = {provider: "claude", idx: 0, metric: "weekly:Fable"}

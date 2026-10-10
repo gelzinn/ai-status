@@ -119,8 +119,9 @@ The packaged app includes its runtime. Installation needs no administrator acces
 
 ## What you get
 
-- **Eight providers in one view.** Track the limits your services report, including separate rolling, weekly, monthly and per-model windows.
+- **29 providers in one view.** Track subscription limits, API costs and prepaid balances, including separate rolling, weekly, monthly and per-model windows.
 - **Choose what stays visible.** Pick the active provider and limit, then choose the provider name, plan, limit name, percentage and icon shown in the bar. On Windows, the tray logo and tooltip follow your selection.
+- **Multiple accounts.** Add as many connections as you need for each provider, with independent labels, credentials, caches and selected metrics. Manage connections with `ai-status accounts`; enable and reorder them in the desktop Settings.
 - **Native settings.** Enable providers, reorder them and select limits inside the Omarchy and Windows panels. Windows also supports drag and drop; Waybar uses an interactive configuration TUI.
 - **Useful reset details.** See reset countdowns and available Claude/Codex reset credits, with expiry dates, remaining time and time zones when reported. Redeem credits in the provider's own app.
 - **Refresh when you need it.** Usage updates every five minutes, with manual refresh and loading feedback. Usable cached data remains visible when a refresh fails.
@@ -154,14 +155,35 @@ Save applies preferences and keeps Settings open. Back sits before the panel tit
 
 | Provider | Usage tracked | Credentials / source |
 | --- | --- | --- |
-| <img src="packages/lib/assets/providers/claude.png" width="18" height="18" alt="" /> **Claude** | 5-hour and weekly usage, including per-model weekly limits | Claude Code OAuth; OpenCode fallback |
-| <img src="packages/lib/assets/providers/codex.png" width="18" height="18" alt="" /> **Codex** | 5-hour and weekly limits; monthly window on free plans | Codex local auth |
-| <img src="packages/lib/assets/providers/copilot.png" width="18" height="18" alt="" /> **Copilot** | Chat and completions usage | Copilot session in OpenCode |
-| <img src="packages/lib/assets/providers/antigravity.png" width="18" height="18" alt="" /> **Antigravity** | 5-hour and weekly limits per model | Authenticated `agy` CLI |
-| <img src="packages/lib/assets/providers/kiro.png" width="18" height="18" alt="" /> **Kiro** | Usage percentage and reset timer | Authenticated `kiro-cli` session |
-| <img src="packages/lib/assets/providers/opencode.png" width="18" height="18" alt="" /> **OpenCode** | Rolling, weekly and monthly usage | OpenCode auth and Go workspace configuration |
-| <img src="packages/lib/assets/providers/zai.png" width="18" height="18" alt="" /> **Z.AI** | Rolling, weekly and monthly usage | Z.AI account key in OpenCode |
-| <img src="packages/lib/assets/providers/commandcode.png" width="18" height="18" alt="" /> **Command Code** | Monthly spend and remaining credit | Command Code local auth or API key |
+| **Claude** | Session (5h) and weekly usage, including per-model weekly limits | Claude Code OAuth (OpenCode fallback) |
+| **Codex** | 5-hour and weekly limits (a single monthly window on free plans) | ~/.codex/auth.json |
+| **OpenCode** | Rolling, weekly, and monthly usage | OpenCode auth + workspace config |
+| **Antigravity** | Weekly and 5-hour limits per model (Gemini and Claude/GPT) | agy CLI session |
+| **Copilot** | Chat and completions usage | OpenCode auth (Copilot) |
+| **Z.AI** | Rolling, weekly, and monthly usage | OpenCode auth (Z.AI) |
+| **Kiro** | Usage percentage and reset timer | kiro-cli session |
+| **Command Code** | 5-hour and weekly spend limits; monthly spend and available credits | ~/.commandcode/auth.json (cmd login) |
+| **Anthropic API** | Monthly organization API spend | ANTHROPIC_ADMIN_KEY (organization Admin key) |
+| **OpenAI API** | Monthly organization API spend | OPENAI_ADMIN_KEY (organization Admin key) |
+| **Google Cloud** | Project quotas; optional billing-export monthly cost | gcloud or GOOGLE_CLOUD_ACCESS_TOKEN; project_id option |
+| **OpenRouter** | Key usage, monthly spend, remaining limit and prepaid credits | OPENROUTER_API_KEY |
+| **DeepSeek** | Available prepaid balance | DEEPSEEK_API_KEY |
+| **DeepInfra** | Prepaid balance and current-month spend | DEEPINFRA_API_KEY |
+| **Kimi** | Coding subscription quota and rolling limits | KIMI_API_KEY or Kimi CLI login |
+| **MiniMax** | Token Plan quota windows | MINIMAX_API_KEY (Token Plan key) |
+| **Kilo** | Personal or organization credit balance | KILO_API_KEY; optional organization_id |
+| **Lyceum** | Available USD balance and reported spend | LYCEUM_API_KEY |
+| **Novita** | Available prepaid balance | NOVITA_API_KEY |
+| **Moonshot** | Available USD or CNY balance | MOONSHOT_API_KEY; region option |
+| **Grok API (xAI)** | Team prepaid balance | XAI_MANAGEMENT_KEY; team_id for organization-scoped keys |
+| **SuperGrok** | Subscription credits and product usage | Grok Build login or SUPERGROK_ACCESS_TOKEN |
+| **Grok Bot** | Weekly included usage | Grok Bot desktop login or GROK_BOT_ACCESS_TOKEN |
+| **Cursor** | Included usage pools and on-demand spend | Cursor IDE/agent login or CURSOR_ACCESS_TOKEN |
+| **Nous Research** | Subscription and top-up credits | NOUS_ACCESS_TOKEN or existing OAuth credentials |
+| **Ollama Cloud** | Cloud session/weekly or monthly quota | OLLAMA_API_KEY (cloud key) |
+| **OrcaRouter** | Credit limit, spend and remaining balance | ORCAROUTER_API_KEY |
+| **Alibaba Model Studio** | Token Plan rolling and weekly quota | bl auth login --console |
+| **Devin** | Daily and weekly CLI quota; optional overage balance | Official Devin CLI credentials |
 
 Available metrics depend on the account, plan and upstream API. Providers without usable data stay available in Settings. See the [authentication guide](packages/lib/PROVIDERS.md) and [Windows compatibility notes](packages/lib/WINDOWS.md#authentication-and-provider-compatibility) for setup details, including Kiro on Windows 10.
 
@@ -178,7 +200,7 @@ Available metrics depend on the account, plan and upstream API. Providers withou
 
 ## How it works
 
-A shared Python backend queries enabled providers in parallel every five minutes. Each provider has its own collector and parser. Waybar consumes JSON with a Pango tooltip; the Omarchy plugin consumes structured snapshots through a shared QML model. The Windows adapter renders the same provider data in a native Qt tray panel.
+A shared Python backend queries enabled connections with bounded parallel workers every five minutes. Each provider has its own collector and parser. Waybar consumes JSON with a Pango tooltip; the Omarchy plugin consumes structured snapshots through a shared QML model. The Windows adapter renders the same provider data in a native Qt tray panel.
 
 Credentials come from your local provider authentication stores or explicitly configured keys. AI Status does not ship credentials, perform provider sign-in or modify provider credential files. Authenticate through the provider's own app or CLI. [Read the security overview →](https://ai-status.gelzin.com/security)
 

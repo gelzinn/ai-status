@@ -262,6 +262,23 @@ class DesktopTests(IsolatedState):
         for name in config.available_providers():
             self.assertTrue(tray.icon_has_pixels(tray.provider_icon(name)), name)
 
+    def test_account_amounts_are_selectable_without_fake_percentage_bar(self):
+        from core import accounts
+        accounts.save_document({"version": 1, "accounts": [
+            {"id": "work", "provider": "openrouter", "label": "Work"},
+        ]}, config.accounts_file())
+        config.save_config([])
+        entry = {"provider": "OpenRouter", "_dir": "openrouter", "_connection_id": "account:work",
+                 "_account_label": "Work", "metrics": [{"type": "balance", "name": "Credits",
+                 "percentage": None, "amount": 42.5, "unit": "USD", "detail": "Available credits"}]}
+        self.dashboard.on_result("account:work", [entry])
+        button = self.dashboard.metric_buttons[0]
+        self.assertEqual(button.percentage.text(), "$42.50")
+        self.assertTrue(button.bar.isHidden())
+        self.assertIn("Work $42.50", self.dashboard.tray.toolTip())
+        button.click()
+        self.assertEqual(state.load_selected()["provider"], "account:work")
+
     def test_refresh_keeps_rows_and_geometry_while_providers_finish_independently(self):
         from core import fetch
         self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [

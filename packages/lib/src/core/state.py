@@ -2,6 +2,7 @@ import os
 import json
 import time
 import uuid
+import threading
 from . import paths
 
 if not paths.IS_WINDOWS:
@@ -15,6 +16,21 @@ PID_FILE = str(paths.RUNTIME_DIR / "ai-status.pids")
 REFRESH_FILE = str(paths.RUNTIME_DIR / "ai-status-refresh.json")
 
 ICON_MODES = ["off", "bot", "logo"]
+_lock_heartbeat = None
+
+
+def _keep_lock_alive(stop):
+    # Many account connections may take longer than the stale-lock timeout.
+    # Renew while this process owns the refresh so another frontend cannot
+    # start a duplicate batch just because the first one is still running.
+    while not stop.wait(20):
+        try:
+            with open(LOCK_FILE, encoding="utf-8") as stream:
+                if stream.read().strip() != str(os.getpid()):
+                    return
+            os.utime(LOCK_FILE, None)
+        except OSError:
+            return
 
 def get_icon_mode(selected):
     if not selected:
@@ -45,6 +61,7 @@ def save_cache(data):
         pass
 
 def acquire_lock():
+    global _lock_heartbeat
     try:
         os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
         if os.path.exists(LOCK_FILE):
@@ -54,11 +71,19 @@ def acquire_lock():
             os.remove(LOCK_FILE)
         with open(LOCK_FILE, "x") as f:
             f.write(str(os.getpid()))
+        if _lock_heartbeat is not None:
+            _lock_heartbeat.set()
+        _lock_heartbeat = threading.Event()
+        threading.Thread(target=_keep_lock_alive, args=(_lock_heartbeat,), daemon=True).start()
         return True
     except Exception:
         return False
 
 def release_lock():
+    global _lock_heartbeat
+    if _lock_heartbeat is not None:
+        _lock_heartbeat.set()
+        _lock_heartbeat = None
     try:
         if os.path.exists(LOCK_FILE):
             os.remove(LOCK_FILE)
