@@ -14,17 +14,17 @@ export async function WindowsInstall({ align = "start" }: { align?: "start" | "c
 					Install the app and monitor usage from your system tray. No terminal setup required.
 				</p>
 			</div>
-			<div className={cn("flex flex-wrap items-center gap-4", centered && "justify-center")}>
+			<div className={cn("flex flex-wrap items-center gap-4", centered && "w-full flex-col justify-center gap-2 sm:w-auto sm:flex-row sm:gap-4")}>
 				<a
 					href={download.href}
 					target="_blank"
 					rel="noreferrer"
-					className="inline-flex items-center justify-center gap-2 rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+					className={cn("inline-flex items-center justify-center gap-2 rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary", centered && "min-h-11 w-full max-w-xs sm:min-h-0 sm:w-auto")}
 				>
 					<Download className="size-4" />
 					Download for Windows
 				</a>
-				<Link href="/windows" className="inline-flex items-center gap-1 text-sm font-medium transition-colors hover:text-muted-foreground">
+				<Link href="/windows" className={cn("inline-flex items-center gap-1 text-sm font-medium transition-colors hover:text-muted-foreground", centered && "min-h-11 sm:min-h-0")}>
 					Setup guide <ArrowRight className="size-3.5" />
 				</Link>
 			</div>
