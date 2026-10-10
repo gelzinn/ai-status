@@ -219,5 +219,8 @@ tests native HTTP against localhost (including invalid TLS certificates), and
 verifies public HTTPS from the frozen executable. It also tests the native
 launcher, silent install/upgrade/uninstall in a Unicode path (including removal
 of obsolete runtime DLLs and preservation of user data), and enforces size budgets
-of 54 MiB installed, 22 MiB for the portable ZIP, and 17 MiB for the installer.
-The build summary lists the largest remaining runtime files.
+of 56 MiB installed, 23 MiB for the portable ZIP, and 18 MiB for the installer.
+These budgets include the required SQLite runtime for Cursor/Kiro credential
+readers and live Google Cloud authentication fingerprints. Optional Qt/OpenSSL
+libraries remain excluded. The build summary lists the largest remaining
+runtime files.
