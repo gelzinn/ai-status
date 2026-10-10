@@ -17,9 +17,11 @@ if not installation:
     raise SystemExit("Install the x64 MSVC build tools and Windows SDK to build the launcher")
 devcmd = Path(installation) / "Common7/Tools/VsDevCmd.bat"
 # Capture the compiler environment without printing it (CI may contain secrets).
-result = subprocess.run(["cmd.exe", "/d", "/u", "/s", "/c",
-                         f'call "{devcmd}" -no_logo -arch=x64 -host_arch=x64 && set'],
-                        capture_output=True, check=True)
+# Pass a raw Windows command line: list2cmdline's C-runtime quote escaping is
+# incompatible with cmd.exe when the developer-tools path contains spaces.
+command = (f'"{os.environ["COMSPEC"]}" /d /u /s /c '
+           f'"call "{devcmd}" -no_logo -arch=x64 -host_arch=x64 && set"')
+result = subprocess.run(command, capture_output=True, check=True)
 environment = dict(os.environ)
 for line in result.stdout.decode("utf-16le").splitlines():
     key, separator, value = line.partition("=")
