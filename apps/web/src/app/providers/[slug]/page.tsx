@@ -55,7 +55,7 @@ export async function generateMetadata({
 	if (!provider) return { title: `Provider not found | ${site.name}` };
 	return {
 		title: `${provider.name} | ${site.name}`,
-		description: `How to authenticate ${provider.name} in your Waybar with ${LIB_NAME} — ${provider.tracks}.`,
+		description: `How to authenticate ${provider.name} in Waybar and Omarchy Quickshell with ${LIB_NAME} — ${provider.tracks}.`,
 	};
 }
 

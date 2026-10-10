@@ -9,6 +9,8 @@ from . import fetch
 from . import render
 from . import logos
 from . import config as cfgmod
+from . import quickshell
+from . import paths
 
 should_update = True
 is_updating = False
@@ -37,7 +39,7 @@ def _ordered_merged(order):
     return out
 
 
-def update_task():
+def update_task(output_format="waybar"):
     global latest_data, is_updating
     try:
         if state.acquire_lock():
@@ -45,12 +47,17 @@ def update_task():
                 def on_result(dir_name, providers):
                     if providers:
                         _results_by_dir[dir_name] = providers
+                    elif output_format in ("quickshell", "macos"):
+                        _results_by_dir.pop(dir_name, None)
+                    if output_format in ("quickshell", "macos"):
+                        # Clicks must be able to select newly streamed metrics
+                        # while another provider is still being queried.
+                        state.save_cache(_ordered_merged(cfgmod.enabled_order()))
                     _pending.discard(dir_name)
 
-                data = fetch.fetch_all_data(on_result=on_result)
-                if data:
-                    latest_data = data
-                    state.save_cache(data)
+                data = fetch.fetch_all_data(on_result=on_result, include_errors=output_format in ("quickshell", "macos"))
+                latest_data = data
+                state.save_cache(data)
             finally:
                 state.release_lock()
         else:
@@ -70,11 +77,9 @@ def handle_signal(signum, frame):
     global should_update
     should_update = True
 
-def run():
+def _run(output_format="waybar"):
     global should_update, is_updating, latest_data, _results_by_dir, _pending
 
-    state.register_pid()
-    signal.signal(signal.SIGUSR1, handle_signal)
     latest_data = state.load_cache()
 
     if not state.load_selected():
@@ -88,18 +93,56 @@ def run():
                 state.save_selected({"provider": providers[0], "idx": 0, "metric": "rolling"})
 
     # Seed the waybar logo (current.png) for the selected provider on startup.
-    logos.update_current(state.load_selected())
+    if output_format == "waybar":
+        logos.update_current(state.load_selected())
+
+    if output_format == "macos":
+        from .macos import LogoCache
+        logo_cache = LogoCache()
+    else:
+        logo_cache = quickshell.LogoCache() if output_format == "quickshell" else None
+    last_snapshot = None
+
+    def emit(data, selected, frame=None):
+        nonlocal last_snapshot
+        if output_format in ("quickshell", "macos"):
+            logo_paths = {name: logo_cache.get(name) for name in cfgmod.enabled_order()}
+            logo = logo_paths.get(selected.get("provider"), "") if state.get_icon_mode(selected) == "logo" else ""
+            output = quickshell.build_snapshot(data, selected, pending=_pending.copy(), logo_path=logo, logo_paths=logo_paths)
+            if output["providers"] and any(selected.get(key) != output["selected"].get(key) for key in ("provider", "idx", "metric")):
+                selected.update(output["selected"])
+                state.save_selected(selected)
+            serialized = json.dumps(output, ensure_ascii=False, allow_nan=False)
+            if serialized != last_snapshot:
+                print(serialized, flush=True)
+                last_snapshot = serialized
+        else:
+            output = (render.build_loading_state(data, frame, selected, pending=_pending.copy())
+                      if frame is not None else render.build_final_state(data, selected))
+            print(json.dumps(output, ensure_ascii=False), flush=True)
+            logos.write_tooltip(output.get("tooltip", ""))
+            logos.signal_waybar()
 
     last_auto_update = time.time()
     last_update_check = 0
     last_config_mtime = 0
     last_selected_mtime = 0
+    last_refresh = paths.read_json(state.REFRESH_FILE)
     should_update = True
-    selected = state.load_selected()
+    selected = state.load_selected() or {}
+
+    if output_format in ("quickshell", "macos"):
+        _pending = set(cfgmod.enabled_order())
+        emit(latest_data, selected)
 
     while True:
         try:
             now = time.time()
+            if paths.IS_WINDOWS:
+                refresh = paths.read_json(state.REFRESH_FILE)
+                if refresh != last_refresh:
+                    last_refresh = refresh
+                    should_update = True
             
             if now - last_update_check >= 3600:
                 fetch.check_for_updates()
@@ -119,7 +162,7 @@ def run():
             # Only re-parse selected.json when it changed — keeps the fast poll
             # cheap (the idle hot path is just two getmtime calls).
             if selected_mtime != last_selected_mtime:
-                selected = state.load_selected()
+                selected = state.load_selected() or {}
 
             if should_update and not is_updating:
                 should_update = False
@@ -132,27 +175,20 @@ def run():
                 _results_by_dir = _group_by_dir(latest_data)
                 _pending = set(order)
 
-                t = threading.Thread(target=update_task)
+                t = threading.Thread(target=update_task, args=(output_format,), daemon=True)
                 t.start()
 
                 frame = 0
                 while is_updating:
+                    # Selection must remain responsive while another provider
+                    # is slow; both frontends use the same selection file.
+                    selected = state.load_selected() or selected
                     merged = _ordered_merged(order)
-                    output = render.build_loading_state(
-                        merged, frame, selected, pending=_pending
-                    )
-                    print(json.dumps(output, ensure_ascii=False), flush=True)
-                    # Mirror each loading frame onto the logo's tooltip so it
-                    # animates in sync with the text one.
-                    logos.write_tooltip(output.get("tooltip", ""))
-                    logos.signal_waybar()
+                    emit(merged, selected, frame)
                     frame += 1
                     time.sleep(0.15)
 
-                output = render.build_final_state(latest_data, selected)
-                print(json.dumps(output, ensure_ascii=False), flush=True)
-                logos.write_tooltip(output.get("tooltip", ""))
-                logos.signal_waybar()
+                emit(latest_data, selected)
                 last_auto_update = now
                 last_selected_mtime = selected_mtime
 
@@ -161,15 +197,18 @@ def run():
             # (which the scroll command updates instantly) without a visible lag.
             elif selected_mtime != last_selected_mtime and not is_updating:
                 last_selected_mtime = selected_mtime
-                output = render.build_final_state(latest_data, selected)
-                print(json.dumps(output, ensure_ascii=False), flush=True)
-                logos.write_tooltip(output.get("tooltip", ""))
-                logos.update_current(selected)
+                emit(latest_data, selected)
+                if output_format == "waybar":
+                    logos.update_current(selected)
+
+            elif output_format in ("quickshell", "macos"):
+                # Publish asynchronously downloaded logos without a new fetch.
+                emit(latest_data, selected)
 
             # Short poll so the text reacts to a scroll/selection change almost
             # as fast as the logo (which updates instantly via its signal),
             # keeping the two in sync. The per-iteration work is tiny.
-            time.sleep(0.02)
+            time.sleep(0.15 if output_format in ("quickshell", "macos") else 0.02)
             if now - last_auto_update >= 300:
                 should_update = True
                 
@@ -182,3 +221,28 @@ def run():
             traceback.print_exc(file=sys.stderr)
             sys.stderr.flush()
             time.sleep(5)
+
+
+def _terminate(signum, frame):
+    raise KeyboardInterrupt
+
+
+def run(output_format="waybar"):
+    if output_format == "macos":
+        from .macos import configure_environment
+        configure_environment()
+        if os.getpgrp() != os.getpid():
+            # The native host terminates the whole collector group on app exit.
+            os.setsid()
+    state.register_pid()
+    previous = signal.signal(signal.SIGTERM, _terminate)
+    previous_refresh = signal.signal(signal.SIGUSR1, handle_signal) if not paths.IS_WINDOWS else None
+    try:
+        _run(output_format)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        state.unregister_pid()
+        signal.signal(signal.SIGTERM, previous)
+        if not paths.IS_WINDOWS:
+            signal.signal(signal.SIGUSR1, previous_refresh)

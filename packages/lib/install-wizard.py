@@ -1,6 +1,9 @@
 import os, sys, json, termios, tty
+import shutil
 
 outfile = sys.argv[1] if len(sys.argv) > 1 else None
+bar = sys.argv[2] if len(sys.argv) > 2 else "waybar"
+bar_explicit = len(sys.argv) > 3 and sys.argv[3] == "true"
 
 STYLE_SELECTED = "\033[4m\033[36m"
 STYLE_INACTIVE = "\033[2m"
@@ -60,12 +63,16 @@ results = {}
 try:
     w(f"\r\n  \033[1m\033[36mAI Status\033[39m\033[22m — Configuration Wizard\r\n\r\n")
 
+    if not bar_explicit and shutil.which("waybar") and shutil.which("omarchy") and shutil.which("omarchy-shell") and (shutil.which("qs") or shutil.which("quickshell")):
+        bar = "quickshell" if yesno("Use the Omarchy Quickshell bar instead of Waybar?", bar == "quickshell") else "waybar"
+    results["BAR"] = bar
     results["ICON_MODE"] = "logo" if yesno("Show the provider logo as an image next to the text?", True) else "off"
     results["SHOW_PROVIDER"] = "true" if yesno("Show provider name in the status text? (e.g. 'Claude')", True) else "false"
     results["SHOW_MODEL"] = "true" if yesno("Show model/plan name in parens? (e.g. '(Pro)')", True) else "false"
     results["SHOW_METRIC"] = "true" if yesno("Show metric type name? (e.g. 'Rolling Usage')", False) else "false"
     results["SHOW_PCT"] = "true" if yesno("Show percentage? (e.g. '4%')", True) else "false"
-    results["CONFIGURE_WAYBAR"] = "true" if yesno("Add AI Status modules to your Waybar config automatically?", True) else "false"
+    label = "Omarchy Quickshell bar" if bar == "quickshell" else "Waybar config"
+    results["CONFIGURE_BAR"] = "true" if yesno(f"Add AI Status to your {label} automatically?", True) else "false"
 finally:
     cleanup()
 

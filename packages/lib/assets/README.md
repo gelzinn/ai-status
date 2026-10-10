@@ -1,0 +1,22 @@
+# Desktop artwork
+
+`app.png` is rasterized from `apps/web/public/favicon.svg`. The Windows build
+generates the multi-resolution executable/installer ICO from that same favicon.
+Do not replace it with a platform-specific logo.
+
+Provider artwork uses the URLs in `packages/shared/providers/providers.json`,
+the same sources as the landing page. SVG sources are retained beside 96px PNG
+renders; OpenCode's redundant outer SVG wrapper is removed for compatibility.
+PNG rendering uses resvg-js, so masks/filters (including Antigravity) match the
+browser and the runtime does not need QtSvg. Antigravity's black alpha-mask fill
+is rendered as white for compatibility with renderers that treat masks as
+luminance; the resulting silhouette is unchanged. Kiro and Command Code sources are
+already raster favicons. Provider logos belong to their respective owners.
+
+The unmodified Geist Mono regular/medium fonts come from the project's Geist
+package (1.7.2), the same family as the landing-page preview. Their SIL Open Font
+License and copyright are in `fonts/OFL.txt` and the Windows license bundle.
+
+Windows paints its refresh, settings, back and reorder controls as monochrome
+Lucide vectors, matching Quickshell without a QtSvg runtime dependency. Their
+copyright and license are in `quickshell/LUCIDE-LICENSE` and the Windows license bundle.

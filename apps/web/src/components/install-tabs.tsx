@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { AppleIcon, LinuxIcon, WindowsIcon } from "@/components/os-icons";
+import { useInstallPlatform, type InstallPlatform } from "@/components/install-platform";
 
 import { cn } from "@/lib/utils";
 
@@ -9,36 +9,36 @@ export function InstallTabs({
 	linux,
 	mac,
 	win,
-	align = "start",
 }: {
 	linux: React.ReactNode;
 	mac: React.ReactNode;
 	win: React.ReactNode;
-	align?: "start" | "center";
 }) {
-	const [activeOs, setActiveOs] = useState("Linux");
+	const { activeOs, setActiveOs } = useInstallPlatform();
 
-	const platforms = [
+	const platforms: { name: string; available: boolean; id: InstallPlatform; icon: React.ReactNode }[] = [
 		{ name: "Linux", available: true, id: "Linux", icon: <LinuxIcon className="size-4" /> },
 		{ name: "macOS", available: true, id: "macOS", icon: <AppleIcon className="size-4" /> },
-		{ name: "Windows", available: false, id: "Windows", icon: <WindowsIcon className="size-4" /> },
+		{ name: "Windows", available: true, id: "Windows", icon: <WindowsIcon className="size-4" /> },
 	];
 
 	return (
-		<div className={cn("flex w-full min-w-0 flex-col gap-4 motion-safe:animate-fade-up [animation-delay:200ms]", align === "center" ? "items-center" : "items-start")}>
+		<div className="flex w-full min-w-0 flex-col items-start gap-4 motion-safe:animate-fade-up [animation-delay:200ms]">
 			<div className="w-full">
 				<div className={activeOs === "Linux" ? "block" : "hidden"}>{linux}</div>
 				<div className={activeOs === "macOS" ? "block" : "hidden"}>{mac}</div>
 				<div className={activeOs === "Windows" ? "block" : "hidden"}>{win}</div>
 			</div>
 
-			<div className={cn("flex flex-wrap items-center gap-3 mt-1 text-sm font-medium", align === "center" && "sm:justify-center")}>
+			<div className="mt-1 flex flex-wrap items-center gap-3 text-sm font-medium">
 				{platforms.map((p) => {
           const isActive = activeOs === p.id;
 
 					return (
 						<button
 							key={p.id}
+							aria-label={p.name}
+							aria-pressed={isActive}
 							onClick={() => p.available && setActiveOs(p.id)}
 							type="button"
 							disabled={!p.available}

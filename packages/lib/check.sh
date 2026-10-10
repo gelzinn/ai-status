@@ -26,16 +26,29 @@ else
     echo -e "  ${GREEN}✔${RESET} OS: Linux"
 fi
 
-# Status Bar Check
-if ! command -v waybar >/dev/null 2>&1; then
-    ERR_MSG+="  ${RED}✖${RESET} waybar not found (required status bar)\n"
-    MISSING_DEPS=1
-else
-    echo -e "  ${GREEN}✔${RESET} Waybar"
-fi
+# Status Bar Check (the installer passes its selected target).
+BAR="${1:-waybar}"
+case "$BAR" in
+    waybar)
+        if ! command -v waybar >/dev/null 2>&1; then
+            ERR_MSG+="  ${RED}✖${RESET} waybar not found\n"
+            MISSING_DEPS=1
+        else
+            echo -e "  ${GREEN}✔${RESET} Waybar"
+        fi ;;
+    quickshell)
+        if ! command -v omarchy >/dev/null 2>&1 || ! command -v omarchy-shell >/dev/null 2>&1 ||
+            ! { command -v qs >/dev/null 2>&1 || command -v quickshell >/dev/null 2>&1; }; then
+            ERR_MSG+="  ${RED}✖${RESET} Omarchy Quickshell shell and plugin commands are required\n"
+            MISSING_DEPS=1
+        else
+            echo -e "  ${GREEN}✔${RESET} Omarchy Quickshell"
+        fi ;;
+    *) echo "Unknown bar: $BAR" >&2; exit 1 ;;
+esac
 
 # Utilities Check
-for cmd in python3 jq curl git; do
+for cmd in python3 jq curl; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         ERR_MSG+="  ${RED}✖${RESET} $cmd not found\n"
         MISSING_DEPS=1
@@ -47,7 +60,9 @@ done
 # Optional: an SVG rasterizer is needed to render the provider logo (image
 # module). Not fatal — without it the logo is simply skipped and the bar keeps
 # working with text only.
-if command -v magick >/dev/null 2>&1 || command -v convert >/dev/null 2>&1 || command -v rsvg-convert >/dev/null 2>&1; then
+if [ "$BAR" = quickshell ]; then
+    echo -e "  ${GREEN}✔${RESET} Provider logos rendered by Qt"
+elif command -v magick >/dev/null 2>&1 || command -v convert >/dev/null 2>&1 || command -v rsvg-convert >/dev/null 2>&1; then
     echo -e "  ${GREEN}✔${RESET} SVG rasterizer ${DIM}(provider logo)${RESET}"
 else
     echo -e "  ${YELLOW}!${RESET} No SVG rasterizer ${DIM}(install imagemagick or librsvg for the provider logo — optional)${RESET}"
@@ -61,7 +76,7 @@ if [ $MISSING_DEPS -ne 0 ]; then
     echo -e "  ${RED}Installation aborted${RESET}"
     echo ""
     echo "  Missing dependencies? Install them and try again."
-    echo "  For non-Linux or non-Waybar support, see CONTRIBUTING.md:"
+    echo "  Supported bars: Waybar and the Omarchy Quickshell shell. See CONTRIBUTING.md:"
     echo "  $REPO_URL"
     exit 1
 fi

@@ -7,6 +7,8 @@ node_modules/
 *.json
 !package.json
 !tsconfig.json
+!release-please-config.json
+!.release-please-manifest.json
 *.key
 *.pem
 *.cert
@@ -18,6 +20,8 @@ __pycache__/
 env/
 venv/
 .venv/
+build/
+dist/
 
 # Locks and PIDs (though they are in /tmp, good practice)
 *.lock
@@ -29,3 +33,4 @@ venv/
 .idea/
 .DS_Store
 !packages/shared/providers/providers.json
+!manifest.json

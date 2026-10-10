@@ -8,7 +8,7 @@ import {
 	type ReactNode,
 } from "react";
 import Link from "next/link";
-import { Terminal } from "lucide-react";
+import { Download, Terminal } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { cn } from "@/lib/utils";
 
@@ -47,22 +47,24 @@ function InstallButton({
 	href,
 	label,
 	full,
+	icon = "terminal",
 }: {
 	href: string;
 	label: string;
 	full?: boolean;
+	icon?: "terminal" | "download";
 }) {
+	const Icon = icon === "download" ? Download : Terminal;
+	const className = cn(
+		"flex items-center justify-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black transition-colors hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+		full && "w-full",
+	);
+	const contents = <><Icon className="-ml-1 size-4" />{label}</>;
+	if (icon === "download") {
+		return <a href={href} target="_blank" rel="noreferrer" className={className}>{contents}</a>;
+	}
 	return (
-		<Link
-			href={href}
-			className={cn(
-				"flex items-center justify-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black transition-colors hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-				full && "w-full",
-			)}
-		>
-			<Terminal className="-ml-1 size-4" />
-			{label}
-		</Link>
+		<Link href={href} className={className}>{contents}</Link>
 	);
 }
 
@@ -70,20 +72,24 @@ function InstallButton({
 export function HeroInstallCta({
 	href = "/",
 	label,
+	icon,
 }: {
 	href?: string;
 	label: string;
+	icon?: "terminal" | "download";
 }) {
-	return <InstallButton href={href} label={label} />;
+	return <InstallButton href={href} label={label} icon={icon} />;
 }
 
 /** Install button revealed at the top of the sticky sidebar (desktop only). */
 export function StickyInstallCta({
 	href = "/",
 	label,
+	icon,
 }: {
 	href?: string;
 	label: string;
+	icon?: "terminal" | "download";
 }) {
 	const stuck = useContext(StuckContext);
 
@@ -98,7 +104,7 @@ export function StickyInstallCta({
 					exit={{ height: 0, opacity: 0, y: -8 }}
 					transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
 				>
-					<InstallButton href={href} label={label} full />
+					<InstallButton href={href} label={label} icon={icon} full />
 				</motion.div>
 			)}
 		</AnimatePresence>

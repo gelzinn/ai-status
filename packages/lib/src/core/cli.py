@@ -2,12 +2,14 @@ import os
 import sys
 import time
 import subprocess
+import argparse
+import json
 from . import daemon
 from . import state
-from . import tui
 from . import logos
 from . import render
 from . import config as cfgmod
+from . import quickshell, paths, fetch
 
 TERMINALS = ["foot", "alacritty", "kitty", "ghostty", "wezterm", "xterm"]
 
@@ -30,22 +32,26 @@ def _first_metric_for(cache, dir_name, idx):
     keys = _provider_metric_keys(cache, dir_name, idx)
     return keys[0] if keys else "rolling"
 
-def _scroll(direction):
+def _scroll(direction, frontend="waybar"):
     providers = cfgmod.enabled_order()
     if not providers:
         return
 
     cache = state.load_cache()
+    if frontend in ("quickshell", "macos", "swiftbar"):
+        cache = [dict(p, metrics=quickshell.usable_metrics(p)) for p in cache if quickshell.usable_metrics(p)]
     items = []
     seen = set()
     for p in cache:
-        if p.get("metrics"):
+        if p.get("metrics") and p.get("_dir") in providers:
             key = (p.get("_dir"), p.get("_idx", 0))
             if key not in seen:
                 seen.add(key)
                 items.append(key)
 
     if not items:
+        if frontend in ("quickshell", "macos", "swiftbar"):
+            return
         items = [(p, 0) for p in providers]
 
     selected = state.load_selected() or {}
@@ -65,21 +71,25 @@ def _scroll(direction):
     selected["metric"] = new_metric
 
     state.save_selected(selected)
-    logos.update_current(selected)
+    if frontend == "waybar":
+        logos.update_current(selected)
 
-def scroll_up():
-    _scroll(-1)
+def scroll_up(frontend="waybar"):
+    _scroll(-1, frontend)
 
-def scroll_down():
-    _scroll(1)
+def scroll_down(frontend="waybar"):
+    _scroll(1, frontend)
 
-def cycle_metric():
+def cycle_metric(frontend="waybar"):
     selected = state.load_selected() or {}
     provider = selected.get("provider")
     idx = selected.get("idx", 0)
     current = selected.get("metric", "rolling")
     
-    keys = _provider_metric_keys(state.load_cache(), provider, idx)
+    cache = state.load_cache()
+    if frontend in ("quickshell", "macos", "swiftbar"):
+        cache = [dict(p, metrics=quickshell.usable_metrics(p)) for p in cache if quickshell.usable_metrics(p)]
+    keys = _provider_metric_keys(cache, provider, idx)
 
     if len(keys) <= 1:
         return
@@ -119,7 +129,7 @@ def _refresh_in_flight():
     the ``Refresh`` menu action, or the periodic plugin's spawned child. Lets the
     stream animate the spark for a manual refresh too, not just its own."""
     try:
-        return time.time() - os.path.getmtime(state.LOCK_FILE) < 20
+        return time.time() - os.path.getmtime(state.LOCK_FILE) < 90
     except OSError:
         return False
 
@@ -131,11 +141,14 @@ def _swiftbar_refresh():
     query lock keeps two refreshes from running at once — if one already holds
     it, this call is a no-op and the running one updates the cache."""
     from . import fetch
+    if sys.platform == "darwin":
+        from .macos import configure_environment
+        configure_environment()
 
     if not state.acquire_lock():
         return
     try:
-        data = fetch.fetch_all_data()
+        data = fetch.fetch_all_data(include_errors=True)
         if data:
             state.save_cache(data)
     finally:
@@ -177,11 +190,8 @@ def _swiftbar_select(args):
     except ValueError:
         idx = 0
     metric = args[2] if len(args) > 2 else None
-    selected = state.load_selected() or {}
-    selected["provider"] = dir_name
-    selected["idx"] = idx
-    selected["metric"] = metric or _first_metric_for(state.load_cache(), dir_name, idx)
-    state.save_selected(selected)
+    quickshell.select_metric({"provider": dir_name, "idx": idx,
+                              "metric": metric or _first_metric_for(state.load_cache(), dir_name, idx)})
 
 
 def swiftbar_render():
@@ -203,7 +213,7 @@ def _swiftbar_sig():
             return os.path.getmtime(path)
         except OSError:
             return 0
-    return (mt(state.CACHE_FILE), mt(state.SELECTED_FILE))
+    return (mt(state.CACHE_FILE), mt(state.SELECTED_FILE), mt(cfgmod.CONFIG_FILE))
 
 
 def swiftbar_stream():
@@ -353,41 +363,115 @@ def revert_waybar():
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == "refresh":
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+    command = sys.argv[1] if len(sys.argv) > 1 else ""
+    if command == "--query":
+        if len(sys.argv) != 3:
+            raise SystemExit("Usage: ai-status --query PROVIDER")
+        fetch.run_query(sys.argv[2])
+    elif command == "doctor":
+        info = {"version": fetch.get_version_info()["current"],
+                "providers": cfgmod.available_providers(), "config": str(paths.CONFIG_DIR),
+                "cache": str(paths.CACHE_DIR), "desktop": False, "conpty": False}
+        try:
+            from . import tray
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance() or QApplication([])
+            info["desktop"] = not tray.status_icon().isNull()
+            if paths.IS_WINDOWS:
+                from .windows_console import available
+                info["conpty"] = available()
+            if "--smoke" in sys.argv:
+                info.update(tray.smoke_test())
+        except ImportError:
+            pass
+        if "--http-smoke" in sys.argv:
+            from .provider_http import request
+            response = json.loads(request("https://api.github.com/", timeout=10))
+            info["native_https"] = paths.IS_WINDOWS and "current_user_url" in response
+        print(json.dumps(info, ensure_ascii=False))
+    elif command == "status":
+        errors = {}
+        data = fetch.fetch_all_data(on_error=lambda name, message: errors.update({name: message}))
+        state.save_cache(data)
+        print(json.dumps({"providers": data, "errors": errors}, ensure_ascii=False))
+    elif command in ("swiftbar", "swiftbar-stream", "swiftbar-refresh", "swiftbar-select"):
+        actions = {"swiftbar": swiftbar_render, "swiftbar-stream": swiftbar_stream,
+                   "swiftbar-refresh": _swiftbar_refresh}
+        if command == "swiftbar-select":
+            try:
+                _swiftbar_select(sys.argv[2:])
+            except (ValueError, OSError) as error:
+                print(str(error), file=sys.stderr)
+                return 1
+        else:
+            actions[command]()
+    elif command == "macos" or (sys.platform == "darwin" and command in ("", "config") and "--frontend" not in sys.argv):
+        from . import macos
+        macos.launch(configure=command == "config" or "--settings" in sys.argv)
+    elif command == "tray" or (paths.IS_WINDOWS and command in ("", "config")):
+        from . import tray
+        tray.run(configure=command == "config")
+
+    else:
+        return _frontend_main()
+
+
+def _frontend_main():
+    parser = argparse.ArgumentParser(prog="ai-status")
+    parser.add_argument("command", choices=["daemon", "refresh", "config", "save-settings", "select-metric", "scroll-up", "scroll-down", "cycle-metric", "logo", "revert"])
+    parser.add_argument("--format", choices=["waybar", "quickshell", "macos"], default="waybar")
+    parser.add_argument("--frontend", choices=["waybar", "quickshell", "macos", "swiftbar"], default="waybar")
+    parser.add_argument("--settings-json")
+    parser.add_argument("--selection-json")
+    args = parser.parse_args()
+    if args.format != "waybar" and args.command != "daemon":
+        parser.error("--format is only supported by daemon")
+    if args.settings_json is not None and args.command != "save-settings":
+        parser.error("--settings-json is only supported by save-settings")
+    if args.selection_json is not None and args.command != "select-metric":
+        parser.error("--selection-json is only supported by select-metric")
+    if args.command == "select-metric":
+        if args.frontend not in ("quickshell", "macos") or args.selection_json is None:
+            parser.error("select-metric requires --frontend quickshell|macos and --selection-json")
+        try:
+            quickshell.select_metric(json.loads(args.selection_json))
+        except (ValueError, OSError) as error:
+            print(str(error), file=sys.stderr)
+            return 1
+    elif args.command == "save-settings":
+        if args.frontend not in ("quickshell", "macos") or args.settings_json is None:
+            parser.error("save-settings requires --frontend quickshell|macos and --settings-json")
+        try:
+            quickshell.save_settings(json.loads(args.settings_json))
+        except (ValueError, OSError) as error:
+            print(str(error), file=sys.stderr)
+            return 1
+    elif args.command == "refresh":
         state.trigger_refresh()
-    elif len(sys.argv) > 1 and sys.argv[1] == "daemon":
-        sys.stderr = open('/tmp/ai-status-error.log', 'w')
-        daemon.run()
-    elif len(sys.argv) > 1 and sys.argv[1] == "config":
+    elif args.command == "daemon":
+        if args.format == "waybar":
+            paths.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            sys.stderr = open(paths.LOG_FILE, 'w', encoding='utf-8')
+        daemon.run(output_format=args.format)
+    elif args.command == "config":
+        from . import tui
         if not sys.stdout.isatty():
             for term in TERMINALS:
                 if subprocess.run(["which", term], capture_output=True).returncode == 0:
-                    subprocess.Popen([term, "-e", sys.argv[0], "config"])
+                    subprocess.Popen([term, "-e", sys.executable, os.path.realpath(sys.argv[0]), "config"])
                     break
             return
         tui.run()
-    elif len(sys.argv) > 1 and sys.argv[1] == "scroll-up":
-        scroll_up()
-    elif len(sys.argv) > 1 and sys.argv[1] == "scroll-down":
-        scroll_down()
-    elif len(sys.argv) > 1 and sys.argv[1] == "cycle-metric":
-        cycle_metric()
-    elif len(sys.argv) > 1 and sys.argv[1] == "swiftbar":
-        swiftbar_render()
-    elif len(sys.argv) > 1 and sys.argv[1] == "swiftbar-stream":
-        swiftbar_stream()
-    elif len(sys.argv) > 1 and sys.argv[1] == "swiftbar-refresh":
-        _swiftbar_refresh()
-    elif len(sys.argv) > 1 and sys.argv[1] == "swiftbar-select":
-        _swiftbar_select(sys.argv[2:])
-    elif len(sys.argv) > 1 and sys.argv[1] == "logo":
+    elif args.command == "scroll-up":
+        scroll_up(args.frontend)
+    elif args.command == "scroll-down":
+        scroll_down(args.frontend)
+    elif args.command == "cycle-metric":
+        cycle_metric(args.frontend)
+    elif args.command == "logo":
         print_logo()
-    elif len(sys.argv) > 1 and sys.argv[1] == "revert":
+    elif args.command == "revert":
         revert_waybar()
-    else:
-        print(
-            "Usage: ai-status [daemon|refresh|config|scroll-up|scroll-down|"
-            "cycle-metric|logo|revert|swiftbar|swiftbar-stream|swiftbar-refresh|"
-            "swiftbar-select]"
-        )
-        sys.exit(1)

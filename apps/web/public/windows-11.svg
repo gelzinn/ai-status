@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <defs>
+    <linearGradient id="top-left" x1="0" y1="0" x2="9.436" y2="13.002" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#87e3ff"/>
+      <stop offset="1" stop-color="#52c3fc"/>
+    </linearGradient>
+    <linearGradient id="top-right" x1="12.5" y1="0" x2="24" y2="11.5" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#60e0ff"/>
+      <stop offset="1" stop-color="#2cb7ff"/>
+    </linearGradient>
+    <linearGradient id="bottom-left" x1="0" y1="12.5" x2="11.5" y2="24" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#56d9ff"/>
+      <stop offset="1" stop-color="#1caaff"/>
+    </linearGradient>
+    <linearGradient id="bottom-right" x1="12.5" y1="12.5" x2="24" y2="24" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3dc5ff"/>
+      <stop offset="1" stop-color="#089bff"/>
+    </linearGradient>
+    <clipPath id="corners">
+      <rect width="24" height="24" rx="1.25"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#corners)">
+    <rect width="11.5" height="11.5" fill="url(#top-left)"/>
+    <rect x="12.5" width="11.5" height="11.5" fill="url(#top-right)"/>
+    <rect y="12.5" width="11.5" height="11.5" fill="url(#bottom-left)"/>
+    <rect x="12.5" y="12.5" width="11.5" height="11.5" fill="url(#bottom-right)"/>
+  </g>
+</svg>

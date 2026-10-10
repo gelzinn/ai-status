@@ -15,9 +15,8 @@ no auth — matching the other CLI-backed providers.
 """
 import json
 import os
-import urllib.error
 import urllib.parse
-import urllib.request
+from core.provider_http import output, request, require_token
 
 AUTH_FILE = os.path.expanduser("~/.commandcode/auth.json")
 BASE_URL = os.environ.get("COMMANDCODE_API_URL", "https://api.commandcode.ai")
@@ -29,26 +28,18 @@ def _api_key():
     if key:
         return key
     try:
-        with open(AUTH_FILE) as f:
+        with open(AUTH_FILE, encoding="utf-8-sig") as f:
             return json.load(f).get("apiKey")
     except (OSError, ValueError):
         return None
 
 
 def _get(path, token):
-    req = urllib.request.Request(
-        f"{BASE_URL}{path}",
-        headers={
+    return json.loads(request(f"{BASE_URL}{path}", {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
             "User-Agent": "ai-status",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, ValueError, OSError):
-        return None
+    }, timeout=TIMEOUT))
 
 
 def _q(org_id=None, since=None):
@@ -60,10 +51,8 @@ def _q(org_id=None, since=None):
     return ("?" + urllib.parse.urlencode(params)) if params else ""
 
 
-def main():
-    token = _api_key()
-    if not token:
-        return  # not logged in — stay silent like the other providers
+def query():
+    token = require_token(_api_key(), "Sign in with cmd login or set COMMANDCODE_API_KEY.")
 
     whoami = _get("/alpha/whoami", token) or {}
     org_id = (whoami.get("org") or {}).get("id")
@@ -84,14 +73,18 @@ def main():
     summary = _get(f"/alpha/usage/summary{_q(org_id, since)}", token) or {}
     used = max(0.0, float(summary.get("totalCost") or 0))
 
-    print(json.dumps({
+    return {
         "used": used,
         "remaining": remaining,
         "tokens": summary.get("totalTokens"),
         "runs": summary.get("totalCount"),
         "period_end": period_end,
         "user": user_name,
-    }))
+    }
+
+
+def main():
+    output(query)
 
 
 if __name__ == "__main__":
