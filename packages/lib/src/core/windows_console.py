@@ -99,6 +99,10 @@ class PtyProcess:
                     self.console, ctypes.sizeof(self.console), None, None))
                 startup = STARTUPINFOEX()
                 startup.StartupInfo.cb = ctypes.sizeof(startup)
+                # Force fresh console handles instead of duplicating redirected
+                # parent stdio (the CLI helper itself has captured stdout).
+                # https://github.com/microsoft/terminal/discussions/15814
+                startup.StartupInfo.dwFlags = 0x00000100  # STARTF_USESTDHANDLES; null handles
                 startup.lpAttributeList = ctypes.addressof(attributes)
                 command = subprocess.list2cmdline(argv)
                 if Path(argv[0]).suffix.lower() in (".cmd", ".bat"):
