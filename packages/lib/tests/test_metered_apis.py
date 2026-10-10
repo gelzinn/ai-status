@@ -14,7 +14,7 @@ import urllib.error
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
-from core import metered, provider_http, windows_http
+from core import metered, provider_http, render, windows_http
 
 ROOT = Path(__file__).resolve().parents[1] / "src" / "providers"
 
@@ -179,13 +179,16 @@ class OpenRouterTests(unittest.TestCase):
 
 
 class GoogleCloudTests(unittest.TestCase):
-    def test_metric_names_preserve_quota_location_and_window(self):
+    def test_metric_identities_preserve_quota_location_and_window(self):
         parser = load("google-cloud", "parse").parse
         raw = {"allocation/usage": [series(4), series(3, location="europe-west1")],
                "limit": [series(10, limit_name="CPUs"), series(8, location="europe-west1", limit_name="CPUs")]}
         metrics = parser(json.dumps(raw))["metrics"]
-        self.assertEqual(len({m["name"] for m in metrics}), 2)
-        self.assertTrue(all("compute.googleapis.com" in m["name"] for m in metrics))
+        self.assertEqual(len({render.metric_key(m) for m in metrics}), 2)
+        self.assertTrue(all(m["name"] == "Compute Engine · vCPUs" for m in metrics))
+        self.assertEqual({m["detail"] for m in metrics}, {"p · us-central1", "p · europe-west1"})
+        self.assertEqual(render.metric_key(metrics[0]),
+                         "generic:p · compute.googleapis.com · compute.googleapis.com/cpus · us-central1")
         labels = {"limit_name": "Requests", "window_start_time": "2026-10-10T00:00:00Z"}
         raw = {"ratev2/net_usage": [series(10, **labels, window_size="1d"), series(2, **labels, window_size="1m")],
                "ratev2/limit": [series(100, limit_name="Requests", window_size="1d"), series(10, limit_name="Requests", window_size="1m")]}
@@ -193,6 +196,35 @@ class GoogleCloudTests(unittest.TestCase):
         self.assertEqual(len({m["name"] for m in metrics}), 2)
         self.assertTrue(any("1d" in m["name"] for m in metrics))
         self.assertTrue(any("1m" in m["name"] for m in metrics))
+
+    def test_quota_labels_omit_domains_and_keep_full_unknown_paths(self):
+        parser = load("google-cloud", "parse").parse
+        quotas = ["compute.googleapis.com/ssd_total_storage", "compute.googleapis.com/disks/read_ops",
+                  "compute.googleapis.com/instances/read_ops"]
+        raw = {"allocation/usage": [series(4, quota=quota) for quota in quotas],
+               "limit": [series(10, quota=quota) for quota in quotas]}
+        metrics = parser(json.dumps(raw))["metrics"]
+        self.assertEqual(metrics[0]["name"], "Compute Engine · SSD storage")
+        self.assertIn("Disks / Read ops", metrics[1]["name"])
+        self.assertIn("Instances / Read ops", metrics[2]["name"])
+        self.assertEqual(len({render.metric_key(m) for m in metrics}), 3)
+        self.assertTrue(all(".googleapis.com" not in m["name"] + m["detail"] for m in metrics))
+        self.assertTrue(all(m["percentage"] == 40 for m in metrics))
+
+    def test_projects_and_services_retain_distinct_quota_identities(self):
+        parser = load("google-cloud", "parse").parse
+        usages = [series(2, quota="compute.googleapis.com/requests") for _ in range(3)]
+        usages[1]["resource"]["labels"]["project_id"] = "other-project"
+        usages[2]["resource"]["labels"]["service"] = "custom.googleapis.com"
+        usages[2]["metric"]["labels"]["quota_metric"] = "custom.googleapis.com/requests"
+        limits = json.loads(json.dumps(usages))
+        for limit in limits:
+            limit["points"][0]["value"]["int64Value"] = "10"
+        metrics = parser(json.dumps({"allocation/usage": usages, "limit": limits}))["metrics"]
+        self.assertEqual(len({render.metric_key(m) for m in metrics}), 3)
+        self.assertIn("other-project", metrics[1]["detail"])
+        self.assertEqual(metrics[2]["name"], "Custom · Requests")
+        self.assertTrue(all(".googleapis.com" not in m["name"] + m["detail"] for m in metrics))
 
     def test_named_account_does_not_use_default_gcloud_credentials(self):
         query = load("google-cloud", "query")

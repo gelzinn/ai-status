@@ -66,8 +66,12 @@ def metric_key(metric):
     """Stable per-metric id within a provider. Normally just the type, but when
     a provider exposes two metrics of the same type (e.g. Claude's general vs
     Fable weekly limit) the label prefix in ``detail`` disambiguates them so
-    each can be selected independently."""
+    each can be selected independently. Explicit provider identities preserve
+    selections when display labels change."""
     t = metric.get("type", "generic")
+    identity = metric.get("id")
+    if isinstance(identity, str) and identity:
+        return f"{t}:{identity}"
     if metric.get("name"):
         return f"{t}:{metric['name']}"
     detail = metric.get("detail") or ""

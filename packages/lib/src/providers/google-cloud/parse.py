@@ -1,5 +1,35 @@
 """Pair quota gauges only when their authoritative scope/window matches."""
+import re
+
 from core.metered import amount_metric, number, parse_json, reset_seconds
+
+
+_SERVICES = {
+    "compute.googleapis.com": "Compute Engine",
+    "aiplatform.googleapis.com": "Vertex AI",
+    "bigquery.googleapis.com": "BigQuery",
+    "storage.googleapis.com": "Cloud Storage",
+    "run.googleapis.com": "Cloud Run",
+    "pubsub.googleapis.com": "Pub/Sub",
+}
+_QUOTAS = {"cpus": "vCPUs", "ssd_total_storage": "SSD storage"}
+
+
+def _readable(value):
+    value = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", str(value))
+    return " / ".join(part.strip().replace("_", " ").capitalize()
+                      for part in value.split("/") if part.strip())
+
+
+def _quota_name(resource, labels):
+    quota = str(labels.get("quota_metric") or "quota")
+    prefix, _, path = quota.partition("/")
+    if not prefix.endswith(".googleapis.com"):
+        path = quota
+    service = str(resource.get("service") or (prefix if prefix.endswith(".googleapis.com") else ""))
+    service_name = _SERVICES.get(service) or _readable(service.split(".")[0])
+    quota_name = _QUOTAS.get(path) or _readable(path) or "Quota"
+    return " · ".join(part for part in (service_name, quota_name) if part)
 
 
 def _latest(series):
@@ -62,9 +92,8 @@ def _quotas(data, usage_kind, limit_kind, windowed=False):
         limit = candidates[0] if len(candidates) == 1 else None
         labels = observations[0][2]
         resource = dict(key[1])
-        detail = labels.get("quota_metric", "Quota") + " · " + str(resource.get("location") or "global")
-        if windowed:
-            detail += " · " + str(labels.get("limit_name") or "rate quota")
+        detail = " · ".join((str(resource.get("project_id") or "project"),
+                             str(resource.get("location") or "global")))
         # Allocation gauges sharing an indistinguishable scope are ambiguous;
         # expose each amount separately instead of summing a possibly repeated gauge.
         groups = [observations] if windowed else [[item] for item in observations]
@@ -75,7 +104,16 @@ def _quotas(data, usage_kind, limit_kind, windowed=False):
             name_parts.extend(str(labels[field]) for field in ("limit_name", "window_size") if labels.get(field))
             if len(groups) > 1:
                 name_parts.append(str(index + 1))
-            metric["name"] = " · ".join(name_parts)
+            # Keep the previous identity so saved selections survive label changes.
+            metric["id"] = " · ".join(name_parts)
+            display_parts = [_quota_name(resource, labels)]
+            if labels.get("limit_name"):
+                display_parts.append(_readable(labels["limit_name"]))
+            if labels.get("window_size"):
+                display_parts.append(str(labels["window_size"]))
+            if len(groups) > 1:
+                display_parts.append(str(index + 1))
+            metric["name"] = " · ".join(display_parts)
             metric["observed_at"] = max(str(item[1] or "") for item in group)
             if window:
                 metric["window_start"] = window
