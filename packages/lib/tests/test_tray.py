@@ -8,6 +8,8 @@ from test_portability import IsolatedState
 from core import config, paths, state
 
 try:
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QLabel
     from core import tray
     HAS_QT = True
@@ -162,14 +164,136 @@ class DesktopTests(IsolatedState):
                 {"count": 1, "title": "Full reset", "expires_at": "2099-10-22T16:00:00Z"}]}}])
         heading = self.dashboard.provider_buttons[("codex", 0)]
         self.assertEqual(heading.credits_title.text(), "Reset credits: 2 available")
-        self.assertIn("Full reset", heading.credits_body.text())
-        self.assertIn("Expires", heading.credits_body.text())
+        main_text = "\n".join(label.text() for label in self.dashboard.scroll.widget().findChildren(QLabel))
+        self.assertNotIn("Full reset", main_text)
+        self.assertNotIn("Expires", main_text)
         self.assertEqual(len(self.dashboard.metric_values), 1)
         self.assertEqual(state.load_selected()["metric"], "weekly")
+        selected = state.load_selected()
+        heading.credits.click()
+        self.assertEqual(self.dashboard.reset_provider, ("codex", 0))
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.credits_scroll)
+        text = "\n".join(label.text() for label in self.dashboard.credits_view.findChildren(QLabel))
+        self.assertIn("Full reset", text)
+        self.assertIn("Oct 22, 2099", text)
+        self.assertIn("Not provided", text)  # The second credit's details are unavailable.
+        self.assertEqual(state.load_selected(), selected)
         self.dashboard.data["codex"][0]["reset_credits"]["available"] = 0
         self.dashboard.draw()
+        self.assertEqual(self.dashboard.credits_view.available.text(), "Available 0")
+        self.assertTrue(self.dashboard.credits_view.table.isHidden())
+        self.assertFalse(self.dashboard.credits_view.empty.isHidden())
+        self.dashboard.credits_view.back.click()
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
         self.assertTrue(heading.credits.isHidden())
         self.assertEqual(self.dashboard.tray.toolTip(), "Codex (Pro) 23%")
+
+    def test_reset_submenu_uses_the_clicked_provider_and_account(self):
+        config.save_config(["claude", "codex"])
+        self.dashboard.on_result("claude", [
+            {"provider": "Claude (Max)", "_idx": 0, "metrics": [{"type": "rolling", "percentage": 2}],
+             "reset_credits": {"available": 1, "credits": [{"title": "Max reset", "count": 1}]}},
+            {"provider": "Claude (Pro)", "_idx": 1, "metrics": [{"type": "rolling", "percentage": 4}],
+             "reset_credits": {"available": 2, "credits": [{"title": "Pro reset", "count": 2}]}},
+        ])
+        self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
+            {"type": "weekly", "percentage": 23}], "reset_credits": {"available": 3}}])
+        self.dashboard.provider_buttons[("codex", 0)].click()
+        selected = state.load_selected()
+        self.dashboard.provider_buttons[("claude", 1)].credits.click()
+        self.assertEqual(self.dashboard.reset_provider, ("claude", 1))
+        self.assertEqual(self.dashboard.credits_view.provider_label.text(), "Claude (Pro)")
+        text = "\n".join(label.text() for label in self.dashboard.credits_view.findChildren(QLabel))
+        self.assertIn("Pro reset", text)
+        self.assertIn("2 credits", text)
+        self.assertNotIn("Max reset", text)
+        self.assertEqual(state.load_selected(), selected)
+        self.assertEqual(self.dashboard.tray.toolTip(), "Codex (Pro) 23%")
+
+    def test_reset_details_refresh_in_place_and_back_restores_focus_and_position(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
+            {"type": "weekly", "percentage": 23}], "reset_credits": {"available": 3}}])
+        self.dashboard.show()
+        self.app.processEvents()
+        self.dashboard.move(80, 500)
+        heading = self.dashboard.provider_buttons[("codex", 0)]
+        bottom = self.dashboard.geometry().bottom()
+        heading.credits.click()
+        self.app.processEvents()
+        view = self.dashboard.credits_view
+        self.assertEqual(self.dashboard.geometry().bottom(), bottom)
+        self.assertTrue(view.back.hasFocus())
+        self.assertFalse(view.notice.isHidden())
+        self.assertEqual(view.rows[0][0].text(), "Not provided")
+        self.dashboard.pending = {"codex"}
+        self.dashboard.draw()
+        self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
+            {"type": "weekly", "percentage": 24}], "reset_credits": {"available": 3, "credits": [
+                {"count": 1, "title": "Full reset", "expires_at": "2099-10-22T16:00:00Z"},
+                {"count": 2, "title": "Weekly reset", "expires_at": "2099-10-29T16:00:00Z"}]}}])
+        self.app.processEvents()
+        self.assertIs(self.dashboard.provider_buttons[("codex", 0)], heading)
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.credits_scroll)
+        self.assertTrue(view.back.hasFocus())
+        self.assertTrue(view.notice.isHidden())
+        self.assertEqual(len(view.rows), 2)
+        self.assertEqual(self.dashboard.geometry().bottom(), bottom)
+        view.back.click()
+        self.app.processEvents()
+        self.assertTrue(heading.credits.hasFocus())
+        self.assertEqual(self.dashboard.geometry().bottom(), bottom)
+        self.assertEqual(self.dashboard.tray.toolTip(), "Codex (Pro) 24%")
+
+    def test_reset_submenu_keyboard_back_and_missing_provider(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
+            {"type": "rolling", "percentage": 3}, {"type": "weekly", "percentage": 23}],
+            "reset_credits": {"available": 3}}])
+        self.dashboard.show()
+        self.app.processEvents()
+        link = self.dashboard.provider_buttons[("codex", 0)].credits
+        link.setFocus()
+        QTest.keyClick(link, tray.Qt.Key.Key_Return)
+        self.assertEqual(self.dashboard.reset_provider, ("codex", 0))
+        selected = state.load_selected()
+        QTest.keyClick(self.dashboard.credits_view.back, tray.Qt.Key.Key_Down)
+        self.assertEqual(state.load_selected(), selected)
+        QTest.keyClick(self.dashboard.credits_view.back, tray.Qt.Key.Key_Escape)
+        self.assertIsNone(self.dashboard.reset_provider)
+        self.assertTrue(self.dashboard.isVisible())
+        self.assertTrue(link.hasFocus())
+        QTest.keyClick(link, tray.Qt.Key.Key_Escape)
+        self.assertFalse(self.dashboard.isVisible())
+        self.dashboard.show()
+        QTest.keyClick(link, tray.Qt.Key.Key_Space)
+        self.assertEqual(self.dashboard.reset_provider, ("codex", 0))
+        self.dashboard.on_result("codex", None)
+        self.assertIsNone(self.dashboard.reset_provider)
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
+        self.dashboard.show_reset_credits(("codex", 0))
+        self.assertIsNone(self.dashboard.reset_provider)
+
+    def test_many_reset_rows_scroll_without_changing_tray_selection(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
+            {"type": "rolling", "percentage": 3}, {"type": "weekly", "percentage": 23}],
+            "reset_credits": {"available": 10, "credits": [
+                {"title": "Full reset (Weekly + 5 hr)", "count": 1,
+                 "expires_at": "2099-10-22T16:00:00Z"} for _ in range(10)]}}])
+        self.dashboard.show()
+        self.dashboard.provider_buttons[("codex", 0)].credits.click()
+        self.app.processEvents()
+        selected = state.load_selected()
+        scroll = self.dashboard.credits_scroll
+        self.assertGreater(scroll.verticalScrollBar().maximum(), 0)
+        self.assertLessEqual(self.dashboard.height(), 720)
+        self.assertLessEqual(self.dashboard.credits_view.width(), scroll.viewport().width())
+        point = tray.QPoint(10, 10)
+        event = QWheelEvent(tray.QPointF(point), tray.QPointF(scroll.viewport().mapToGlobal(point)),
+                            tray.QPoint(), tray.QPoint(0, -120), tray.Qt.MouseButton.NoButton,
+                            tray.Qt.KeyboardModifier.NoModifier, tray.Qt.ScrollPhase.NoScrollPhase, False)
+        QApplication.sendEvent(scroll.viewport(), event)
+        self.app.processEvents()
+        self.assertGreater(scroll.verticalScrollBar().value(), 0)
+        self.assertEqual(state.load_selected(), selected)
 
     def test_provider_settings_save_disabled_providers(self):
         settings = tray.ProviderSettings(self.dashboard)

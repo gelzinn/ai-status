@@ -121,3 +121,21 @@ class ResetCreditsTests(IsolatedState):
                 self.assertEqual(reset_credits.count(amount), 0)
         self.assertEqual(reset_credits.display_lines({"available": 1, "credits": [None, "invalid"]}),
                          ["Reset credits: 1 available", "Expiry not provided"])
+
+    def test_display_details_do_not_exceed_available_count_or_include_expired_credits(self):
+        now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+        block = {"available": 4, "credits": [
+            {"title": "Expired", "count": 1, "expires_at": "2026-10-09T16:00:00Z"},
+            {"title": "Full reset", "count": 2, "expires_at": FUTURE},
+            {"title": "Weekly reset", "count": 9, "expires_at": FUTURE},
+            {"title": "Invalid", "count": 0}]}
+        data = reset_credits.available_credits(block, now)
+        self.assertEqual(data["available"], 3)
+        self.assertEqual([item["title"] for item in data["credits"]], ["Full reset", "Weekly reset"])
+        self.assertEqual([item["count"] for item in data["credits"]], [2, 1])
+        self.assertEqual(data["undetailed"], 0)
+        self.assertEqual(block["credits"][2]["count"], 9)  # Display normalization leaves cached data intact.
+        data = reset_credits.available_credits({"available": 3, "credits": [
+            {"title": "Full reset", "count": 1, "expires_at": FUTURE}]}, now)
+        self.assertEqual(data["available"], 3)
+        self.assertEqual(data["undetailed"], 2)

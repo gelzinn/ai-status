@@ -9,15 +9,15 @@ import time
 import uuid
 
 from PySide6.QtCore import QEasingCurve, QObject, QPoint, QPointF, QRectF, QLockFile, QTimer, Qt, QUrl, Signal, QSize, QVariantAnimation
-from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QCheckBox, QDialog, QDialogButtonBox, QHBoxLayout,
     QLabel, QListWidget, QListWidgetItem, QMenu, QMessageBox,
-    QPushButton, QScrollArea, QSizePolicy, QStyledItemDelegate, QStyle,
+    QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QStyledItemDelegate, QStyle,
     QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
-from . import __version__, config, fetch, paths, render, state
+from . import __version__, config, fetch, paths, render, reset_credits, state
 
 RELEASE_URL = "https://github.com/gelzinn/ai-status/releases/latest"
 ASSETS = paths.LIB_DIR / "assets"
@@ -39,6 +39,9 @@ QLabel { background: transparent; border: none; }
 QLabel#brand { color: #eeeeee; font-weight: 500; }
 QAbstractButton { border: none; background: transparent; text-align: left; }
 QAbstractButton:hover, QAbstractButton:focus { background: #1c1c1c; border-radius: 8px; }
+QWidget#creditTable { border: 1px solid #262626; border-radius: 8px; }
+QWidget#creditTableHeader { border-bottom: 1px solid #262626; }
+QWidget#creditRow { border-top: 1px solid #262626; }
 QScrollArea { border: none; background: transparent; }
 QScrollBar:vertical { background: transparent; width: 5px; margin: 6px 0; }
 QScrollBar::handle:vertical { background: #303030; border-radius: 2px; min-height: 24px; }
@@ -137,6 +140,13 @@ class UsageButton(QAbstractButton):
 
     def sizeHint(self):
         return self.layout().sizeHint() if self.layout() else QSize(32, 32)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.click()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
 
 class UsageBar(QWidget):
@@ -272,6 +282,168 @@ def plain_label(text, color=None):
     return label
 
 
+class ArrowIcon(QWidget):
+    """A centered arrow drawn without a font glyph or an extra SVG dependency."""
+    def __init__(self, back=False):
+        super().__init__()
+        self.back = back
+        self.setFixedSize(16, 16)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor("#aaaaaa"), 1.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        path = QPainterPath(QPointF(3, 8))
+        path.lineTo(13, 8)
+        tip, tail = (3, 7) if self.back else (13, 9)
+        path.moveTo(tail, 4)
+        path.lineTo(tip, 8)
+        path.lineTo(tail, 12)
+        painter.drawPath(path)
+
+
+class ResetCreditsView(QWidget):
+    """Provider-specific reset information inside the existing usage panel."""
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 18, 16, 18)
+        layout.setSpacing(18)
+        self.back = UsageButton()
+        row = QHBoxLayout(self.back)
+        row.setContentsMargins(4, 6, 4, 6)
+        row.setSpacing(8)
+        row.addWidget(ArrowIcon(back=True))
+        self.logo = plain_label("")
+        self.logo.setFixedSize(16, 16)
+        row.addWidget(self.logo)
+        self.provider_label = plain_label("", "#eeeeee")
+        row.addWidget(self.provider_label, 1)
+        layout.addWidget(self.back)
+        self.cached_label = plain_label("Cached data", "#666666")
+        layout.addWidget(self.cached_label)
+        intro = QVBoxLayout()
+        intro.setSpacing(8)
+        title = plain_label("Usage limit resets", "#eeeeee")
+        title.setStyleSheet(title.styleSheet() + "font-weight: 500;")
+        intro.addWidget(title)
+        self.explanation = plain_label("")
+        self.explanation.setWordWrap(True)
+        intro.addWidget(self.explanation)
+        layout.addLayout(intro)
+        self.table = QWidget()
+        self.table.setObjectName("creditTable")
+        table_layout = QVBoxLayout(self.table)
+        table_layout.setContentsMargins(1, 1, 1, 1)
+        table_layout.setSpacing(0)
+        header = QWidget()
+        header.setObjectName("creditTableHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(12, 12, 12, 12)
+        self.available = plain_label("", "#dddddd")
+        header_layout.addWidget(self.available)
+        header_layout.addStretch()
+        table_layout.addWidget(header)
+        columns = QHBoxLayout()
+        columns.setContentsMargins(12, 10, 12, 8)
+        columns.setSpacing(12)
+        for text in ("Reset type", "Expires"):
+            label = self.secondary_label(text)
+            columns.addWidget(label, 1)
+        table_layout.addLayout(columns)
+        self.rows_widget = QWidget()
+        self.rows_layout = QVBoxLayout(self.rows_widget)
+        self.rows_layout.setContentsMargins(0, 0, 0, 0)
+        self.rows_layout.setSpacing(0)
+        table_layout.addWidget(self.rows_widget)
+        layout.addWidget(self.table)
+        self.empty = plain_label("No reset credits available.")
+        self.empty.setWordWrap(True)
+        layout.addWidget(self.empty)
+        self.notice = self.secondary_label("")
+        self.notice.setWordWrap(True)
+        layout.addWidget(self.notice)
+        layout.addStretch()
+        self.rows = []
+        self.signature = None
+
+    @staticmethod
+    def secondary_label(text):
+        label = plain_label(text)
+        label.setStyleSheet("color: #777777; font-size: 11px;")
+        return label
+
+    def update_provider(self, name, entry, label):
+        self.provider_label.setText(label)
+        self.logo.setPixmap(provider_icon(name).pixmap(16, 16))
+        self.back.setAccessibleName(f"Back to usage from {label} resets")
+        self.explanation.setText(
+            "Restore your 5-hour or weekly limit,\nor both, depending on the reset type."
+            if name == "codex" else
+            "Restore eligible usage limits.\nCredits expire on the dates below.")
+        self.cached_label.setVisible(bool(entry.get("_cached")))
+        self.cached_label.setToolTip(entry.get("_error", "Unable to refresh"))
+        data = reset_credits.available_credits(entry.get("reset_credits"))
+        self.available.setText(f"Available {data['available']}")
+        self.table.setVisible(bool(data["available"]))
+        self.empty.setVisible(not data["available"])
+        self.notice.setText("Some reset details haven't been provided yet." if data["undetailed"] else "")
+        self.notice.setVisible(bool(data["undetailed"]))
+        credits = data["credits"] + ([{"title": "Reset credit", "count": data["undetailed"], "expires_at": None}]
+                                     if data["undetailed"] else [])
+        signature = tuple((item["title"], item["count"], item["expires_at"]) for item in credits)
+        if signature != self.signature:
+            self.signature = signature
+            while self.rows_layout.count():
+                previous = self.rows_layout.takeAt(0).widget()
+                previous.hide()
+                previous.deleteLater()
+            self.rows = []
+            for item in credits:
+                row = QWidget()
+                row.setObjectName("creditRow")
+                row_layout = QHBoxLayout(row)
+                row_layout.setContentsMargins(12, 12, 12, 12)
+                row_layout.setSpacing(12)
+                cells = []
+                for _ in range(2):
+                    cell = QVBoxLayout()
+                    cell.setSpacing(5)
+                    primary = plain_label("", "#dddddd")
+                    primary.setWordWrap(True)
+                    secondary = self.secondary_label("")
+                    secondary.setWordWrap(True)
+                    cell.addWidget(primary)
+                    cell.addWidget(secondary)
+                    cell.addStretch()
+                    row_layout.addLayout(cell, 1)
+                    cells.extend((primary, secondary))
+                title, amount, expiry, remaining = cells
+                title.setText(item["title"])
+                amount.setText(f"{item['count']} {'credit' if item['count'] == 1 else 'credits'}")
+                self.rows.append((expiry, remaining))
+                self.rows_layout.addWidget(row)
+        for item, (expiry, remaining) in zip(credits, self.rows):
+            date = item["expires_at"]
+            if date:
+                stamp, duration = reset_credits.format_expiry(date)
+                expiry.setText(stamp)
+                offset = date.astimezone().strftime("%z")
+                zone = f"UTC{offset[:3]}:{offset[3:]}"
+                remaining.setText(f"{duration}\n{zone}")
+            else:
+                expiry.setText("Not provided")
+                remaining.setText("")
+        self.rows_layout.activate()
+        self.table.layout().activate()
+        self.layout().invalidate()
+        self.layout().activate()
+
+
 class ProviderDelegate(QStyledItemDelegate):
     def initStyleOption(self, option, index):
         super().initStyleOption(option, index)
@@ -390,6 +562,7 @@ class Dashboard(QWidget):
         self.metric_values = []
         self.metric_buttons = []
         self.provider_buttons = {}
+        self.reset_provider = None
         self.structure = None
         self.queued = False
         self.quitting = False
@@ -427,7 +600,16 @@ class Dashboard(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.panel_layout.addWidget(self.scroll)
+        self.credits_view = ResetCreditsView()
+        self.credits_view.back.clicked.connect(self.show_usage)
+        self.credits_scroll = QScrollArea()
+        self.credits_scroll.setWidgetResizable(True)
+        self.credits_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.credits_scroll.setWidget(self.credits_view)
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self.scroll)
+        self.pages.addWidget(self.credits_scroll)
+        self.panel_layout.addWidget(self.pages)
         self.tray = QSystemTrayIcon(status_icon(), self)
         menu = QMenu(self)
         menu.setFont(panel_font())
@@ -509,15 +691,41 @@ class Dashboard(QWidget):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
-            self.hide()
-        elif event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
+            self.show_usage() if self.reset_provider is not None else self.hide()
+        elif self.reset_provider is None and event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
             self.cycle_metric(1 if event.key() == Qt.Key.Key_Down else -1)
         else:
             super().keyPressEvent(event)
 
     def wheelEvent(self, event):
+        if self.reset_provider is not None:
+            super().wheelEvent(event)
+            return
         self.cycle_metric(1 if event.angleDelta().y() < 0 else -1)
         event.accept()
+
+    def reset_entry(self, key):
+        return next((entry for _, entry, _, value in self.visible_metrics if value[:2] == key), None)
+
+    def show_reset_credits(self, key):
+        entry = self.reset_entry(key)
+        if entry is None or not reset_credits.available_credits(entry.get("reset_credits"))["available"]:
+            return
+        self.reset_provider = key
+        self.credits_view.update_provider(key[0], entry, self.entry_name(key[0], entry))
+        self.pages.setCurrentWidget(self.credits_scroll)
+        self.credits_scroll.verticalScrollBar().setValue(0)
+        self.fit_content()
+        self.credits_view.back.setFocus()
+
+    def show_usage(self):
+        key = self.reset_provider
+        self.reset_provider = None
+        self.pages.setCurrentWidget(self.scroll)
+        self.fit_content()
+        heading = self.provider_buttons.get(key)
+        if heading:
+            (heading.credits if not heading.credits.isHidden() else heading).setFocus()
 
     def animate(self):
         self.animation_frame += 1
@@ -783,16 +991,15 @@ class Dashboard(QWidget):
                     button.description.setWordWrap(True)
                     metric_layout.addWidget(button.description)
                     group_layout.addWidget(button)
-                heading.credits = QWidget()
-                credits_layout = QVBoxLayout(heading.credits)
-                credits_layout.setContentsMargins(24, 0, 4, 4)
-                credits_layout.setSpacing(4)
+                heading.credits = UsageButton()
+                credits_layout = QHBoxLayout(heading.credits)
+                credits_layout.setContentsMargins(24, 6, 8, 6)
+                credits_layout.setSpacing(8)
                 heading.credits_title = plain_label("")
-                heading.credits_title.setWordWrap(True)
-                heading.credits_body = plain_label("", "#666666")
-                heading.credits_body.setWordWrap(True)
-                credits_layout.addWidget(heading.credits_title)
-                credits_layout.addWidget(heading.credits_body)
+                credits_layout.addWidget(heading.credits_title, 1)
+                credits_layout.addWidget(ArrowIcon())
+                heading.credits.clicked.connect(lambda checked=False, key=(name, entry.get("_idx", 0)):
+                                                self.show_reset_credits(key))
                 group_layout.addWidget(heading.credits)
                 layout.addWidget(group)
         if not self.metric_values:
@@ -820,10 +1027,10 @@ class Dashboard(QWidget):
             heading.setAccessibleName(self.entry_name(name, entry))
             heading.cached_label.setVisible(bool(entry.get("_cached")))
             heading.cached_label.setToolTip(entry.get("_error", "Unable to refresh"))
-            credits = render.reset_credit_lines(entry.get("reset_credits"))
-            heading.credits.setVisible(bool(credits))
-            heading.credits_title.setText(credits[0] if credits else "")
-            heading.credits_body.setText("\n".join(credits[1:]))
+            available = reset_credits.available_credits(entry.get("reset_credits"))["available"]
+            heading.credits.setVisible(bool(available))
+            heading.credits_title.setText(f"Reset credits: {available} available")
+            heading.credits.setAccessibleName(f"{self.entry_name(name, entry)}: {available} reset credits. Open reset details")
         group_indices = {key: index for index, key in enumerate(groups)}
         for button, (name, entry, metric, value) in zip(self.metric_buttons, self.visible_metrics):
             active = value == self.selected_value()
@@ -847,14 +1054,28 @@ class Dashboard(QWidget):
                 "No providers enabled. Choose them in Settings.")
         self.menu_button.setToolTip(self.status.text())
         self.update_tooltip()
+        if self.reset_provider is not None:
+            entry = self.reset_entry(self.reset_provider)
+            if entry is None:
+                self.reset_provider = None
+                self.pages.setCurrentWidget(self.scroll)
+            else:
+                name = self.reset_provider[0]
+                self.credits_view.update_provider(name, entry, self.entry_name(name, entry))
 
     def fit_content(self):
-        content = self.scroll.widget()
+        content = self.pages.currentWidget().widget()
         content.ensurePolished()
         content.layout().activate()
-        natural_height = content.sizeHint().height() + 57
+        height = content.heightForWidth(self.width() - 2) if content.hasHeightForWidth() else content.sizeHint().height()
+        height = max(height, content.minimumSizeHint().height())
+        natural_height = height + 57
         screen = self.screen().availableGeometry()
+        bottom = self.geometry().bottom()
         self.resize(self.width(), min(max(180, natural_height), 720, max(180, screen.height() - 32)))
+        if self.isVisible():
+            self.move(self.x(), max(screen.top(), min(bottom - self.height() + 1,
+                                                    screen.bottom() - self.height() + 1)))
 
 
 def smoke_test():
