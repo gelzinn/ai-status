@@ -37,23 +37,90 @@ SHOW_MODEL="true"
 SHOW_METRIC="false"
 SHOW_PCT="true"
 CONFIGURE_WAYBAR=""
+CONFIGURE_BAR=""
+BAR="auto"
+BAR_EXPLICIT=false
+DISPLAY_FLAGS=""
 NON_INTERACTIVE=false
 SKIP_CHECK=false
 
 # ── parse flags ───────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --icon-mode)        ICON_MODE="$2"; shift 2 ;;
-        --show-provider)    SHOW_PROVIDER="$2"; shift 2 ;;
-        --show-model)       SHOW_MODEL="$2"; shift 2 ;;
-        --show-metric)      SHOW_METRIC="$2"; shift 2 ;;
-        --show-pct)         SHOW_PCT="$2"; shift 2 ;;
+        --icon-mode|--show-provider|--show-model|--show-metric|--show-pct|--configure-waybar|--configure-bar|--bar)
+            [ $# -ge 2 ] || { echo "Missing value for $1" >&2; exit 1; } ;;
+    esac
+    case "$1" in
+        --icon-mode)        ICON_MODE="$2"; DISPLAY_FLAGS+=" icon_mode"; shift 2 ;;
+        --show-provider)    SHOW_PROVIDER="$2"; DISPLAY_FLAGS+=" show_provider"; shift 2 ;;
+        --show-model)       SHOW_MODEL="$2"; DISPLAY_FLAGS+=" show_model"; shift 2 ;;
+        --show-metric)      SHOW_METRIC="$2"; DISPLAY_FLAGS+=" show_metric"; shift 2 ;;
+        --show-pct)         SHOW_PCT="$2"; DISPLAY_FLAGS+=" show_pct"; shift 2 ;;
         --configure-waybar) CONFIGURE_WAYBAR="$2"; shift 2 ;;
+        --configure-bar)    CONFIGURE_BAR="$2"; shift 2 ;;
+        --bar)              BAR="$2"; [ "$BAR" = auto ] || BAR_EXPLICIT=true; shift 2 ;;
         --no-interactive)   NON_INTERACTIVE=true; shift ;;
         --skip-check)       SKIP_CHECK=true; shift ;;
         *) echo "Unknown flag: $1"; exit 1 ;;
     esac
 done
+
+case "$BAR" in auto|waybar|quickshell) ;; *) echo "Invalid --bar: $BAR" >&2; exit 1 ;; esac
+if [ -n "$CONFIGURE_WAYBAR" ]; then
+    [ "$BAR" != quickshell ] || { echo "--configure-waybar cannot be used with --bar quickshell" >&2; exit 1; }
+    [ -z "$CONFIGURE_BAR" ] || [ "$CONFIGURE_BAR" = "$CONFIGURE_WAYBAR" ] || { echo "Conflicting configuration flags" >&2; exit 1; }
+    BAR="waybar"
+    BAR_EXPLICIT=true
+    CONFIGURE_BAR="$CONFIGURE_WAYBAR"
+fi
+validate_options() {
+    case "$ICON_MODE" in bot|logo|off) ;; *) echo "Invalid --icon-mode: $ICON_MODE" >&2; exit 1 ;; esac
+    local option value
+    for option in SHOW_PROVIDER SHOW_MODEL SHOW_METRIC SHOW_PCT CONFIGURE_BAR; do
+        value="${!option}"
+        case "$value" in true|false) ;; "") [ "$option" = CONFIGURE_BAR ] || exit 1 ;; *) echo "Invalid $option: $value" >&2; exit 1 ;; esac
+    done
+}
+validate_options
+
+quickshell_available() {
+    command -v omarchy >/dev/null 2>&1 && command -v omarchy-shell >/dev/null 2>&1 &&
+        { command -v qs >/dev/null 2>&1 || command -v quickshell >/dev/null 2>&1; }
+}
+if [ "$BAR" = auto ]; then
+    if quickshell_available && OMARCHY_SHELL_IPC_TIMEOUT=2 omarchy-shell shell ping >/dev/null 2>&1; then
+        BAR="quickshell"
+    elif pgrep -x waybar >/dev/null 2>&1 || command -v waybar >/dev/null 2>&1; then
+        BAR="waybar"
+    elif quickshell_available; then
+        BAR="quickshell"
+    else
+        echo "No supported bar found. Install Waybar or the Omarchy Quickshell shell." >&2
+        exit 1
+    fi
+fi
+
+# Preserve existing preferences unless flags (or the wizard) replace them.
+if command -v python3 >/dev/null 2>&1; then
+    eval "$(python3 - "$DISPLAY_FLAGS" <<'PY'
+import json, pathlib, shlex, sys
+path = pathlib.Path.home() / '.config/ai-status/selected.json'
+if not path.exists():
+    path = pathlib.Path.home() / '.config/waybar-ai-status/selected.json'
+try:
+    data = json.loads(path.read_text())
+except (OSError, ValueError):
+    data = {}
+for key in ('icon_mode', 'show_provider', 'show_model', 'show_metric', 'show_pct'):
+    if key in data and key not in sys.argv[1].split():
+        value = data[key]
+        if key == 'icon_mode' and value in ('bot', 'logo', 'off'):
+            print(f'{key.upper()}={shlex.quote(value)}')
+        elif key != 'icon_mode' and isinstance(value, bool):
+            print(f'{key.upper()}={str(value).lower()}')
+PY
+)"
+fi
 
 # ═══════════════════════════════════════════════════════════
 # INSTALL / UPDATE
@@ -113,19 +180,12 @@ else
     trap - EXIT
 fi
 
-# Check requirements
-CHECK_SCRIPT="$INSTALL_DIR/packages/lib/check.sh"
-[ "$USE_LOCAL_LIB" = true ] && CHECK_SCRIPT="$SCRIPT_DIR/check.sh"
-if [ "$SKIP_CHECK" = false ]; then
-    bash "$CHECK_SCRIPT"
-fi
-
 # ═══════════════════════════════════════════════════════════
 # CONFIGURATION WIZARD
 # ═══════════════════════════════════════════════════════════
 
 if [ "$NON_INTERACTIVE" = false ]; then
-    if [ -n "$CONFIGURE_WAYBAR" ]; then
+    if [ -n "$CONFIGURE_BAR" ]; then
         echo -e "  ${C_DIM}flags detected — skipping interactive setup${C_RESET}"
     elif { true >/dev/tty; } 2>/dev/null; then
         # A terminal is attached — run the wizard reading from /dev/tty. This
@@ -134,35 +194,51 @@ if [ "$NON_INTERACTIVE" = false ]; then
         WIZARD_SCRIPT="$INSTALL_DIR/packages/lib/install-wizard.py"
         [ "$USE_LOCAL_LIB" = true ] && WIZARD_SCRIPT="$SCRIPT_DIR/install-wizard.py"
         [ ! -f "$WIZARD_SCRIPT" ] && WIZARD_SCRIPT="$SCRIPT_DIR/install-wizard.py"
-        WIZARD_OUT="/tmp/ai-status-wizard.json"
+        WIZARD_OUT="$(mktemp)"
         # If the user cancels the wizard (Ctrl-C -> exit 1), don't let `set -e`
         # abort mid-install and leave a half-state — finish with defaults.
-        if python3 "$WIZARD_SCRIPT" "$WIZARD_OUT"; then
-            eval "$(python3 -c "
-import json
-with open('$WIZARD_OUT') as f:
-    d = json.load(f)
-for k, v in d.items():
-    print(f'{k}={v}')
-")"
+        if python3 "$WIZARD_SCRIPT" "$WIZARD_OUT" "$BAR" "$BAR_EXPLICIT"; then
+            eval "$(python3 - "$WIZARD_OUT" <<'PY'
+import json, shlex, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+for key in ('BAR', 'ICON_MODE', 'SHOW_PROVIDER', 'SHOW_MODEL', 'SHOW_METRIC', 'SHOW_PCT', 'CONFIGURE_BAR'):
+    if key in data:
+        print(f'{key}={shlex.quote(str(data[key]))}')
+PY
+)"
         else
             echo -e "  ${C_DIM}setup cancelled — installing with defaults (run 'ai-status config' to change)${C_RESET}"
         fi
+        rm -f "$WIZARD_OUT"
     else
         # Truly no terminal (cron/CI/headless) — configure with defaults instead
         # of leaving a half-install where waybar never gets the module.
         echo -e "  ${C_DIM}no terminal — configuring with defaults${C_RESET}"
-        CONFIGURE_WAYBAR="true"
+        CONFIGURE_BAR="true"
     fi
 fi
 
 # ── validate ───────────────────────────────────────────────
-case "$ICON_MODE" in bot|logo|off) ;; *) echo "Invalid --icon-mode: $ICON_MODE"; exit 1 ;; esac
-for f in SHOW_PROVIDER SHOW_MODEL SHOW_METRIC SHOW_PCT; do
-    val="${!f}"
-    case "$val" in true|false) ;; *) echo "Invalid --$f: $val"; exit 1 ;; esac
-done
-[ -z "$CONFIGURE_WAYBAR" ] && CONFIGURE_WAYBAR="false"
+validate_options
+[ -z "$CONFIGURE_BAR" ] && CONFIGURE_BAR="false"
+CHECK_SCRIPT="$INSTALL_DIR/packages/lib/check.sh"
+[ "$USE_LOCAL_LIB" = true ] && CHECK_SCRIPT="$SCRIPT_DIR/check.sh"
+if [ "$SKIP_CHECK" = false ]; then
+    bash "$CHECK_SCRIPT" "$BAR"
+fi
+if [ "$BAR" = quickshell ]; then
+    if ! OMARCHY_SHELL_IPC_TIMEOUT=2 omarchy-shell shell ping >/dev/null 2>&1; then
+        echo "Start the Omarchy shell, then re-run the installer to install the plugin." >&2
+        exit 1
+    fi
+    PLUGIN_ID="io.github.gelzinn.ai-status"
+    PLUGIN_DIR="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
+    if [ -e "$PLUGIN_DIR" ] && [ ! -d "$PLUGIN_DIR/.git" ]; then
+        echo "Existing plugin is not managed by Git: $PLUGIN_DIR. Leaving it untouched." >&2
+        exit 1
+    fi
+fi
 
 echo ""
 echo -e "  ${C_PURPLE}icon${C_RESET}          ${C_DIM}>${C_RESET} ${C_CYAN}$ICON_MODE${C_RESET}"
@@ -170,7 +246,8 @@ echo -e "  ${C_PURPLE}show provider${C_RESET} ${C_DIM}>${C_RESET} $(bool_color "
 echo -e "  ${C_PURPLE}show model${C_RESET}    ${C_DIM}>${C_RESET} $(bool_color "$SHOW_MODEL")$SHOW_MODEL${C_RESET}"
 echo -e "  ${C_PURPLE}show metric${C_RESET}   ${C_DIM}>${C_RESET} $(bool_color "$SHOW_METRIC")$SHOW_METRIC${C_RESET}"
 echo -e "  ${C_PURPLE}show %${C_RESET}        ${C_DIM}>${C_RESET} $(bool_color "$SHOW_PCT")$SHOW_PCT${C_RESET}"
-echo -e "  ${C_PURPLE}waybar config${C_RESET} ${C_DIM}>${C_RESET} $(bool_color "$CONFIGURE_WAYBAR")$CONFIGURE_WAYBAR${C_RESET}"
+echo -e "  ${C_PURPLE}bar${C_RESET}           ${C_DIM}>${C_RESET} ${C_CYAN}$BAR${C_RESET}"
+echo -e "  ${C_PURPLE}bar config${C_RESET}    ${C_DIM}>${C_RESET} $(bool_color "$CONFIGURE_BAR")$CONFIGURE_BAR${C_RESET}"
 echo ""
 
 # ═══════════════════════════════════════════════════════════
@@ -188,15 +265,12 @@ ln -sf "$BIN_DIR/ai-status" "$BIN_DIR/waybar-ai-status"
 CONFIG_DIR="$HOME/.config/ai-status"
 mkdir -p "$CONFIG_DIR"
 
-python3 -c "
-import json, os
+python3 - "$CONFIG_DIR/selected.json" "$ICON_MODE" "$SHOW_PROVIDER" "$SHOW_MODEL" "$SHOW_METRIC" "$SHOW_PCT" <<'PY'
+import json, os, sys
 
-path = os.path.expanduser('$CONFIG_DIR/selected.json')
-icon = '$ICON_MODE'
-sp = '$SHOW_PROVIDER'.lower() == 'true'
-sm = '$SHOW_MODEL'.lower() == 'true'
-smt = '$SHOW_METRIC'.lower() == 'true'
-pct = '$SHOW_PCT'.lower() == 'true'
+path = sys.argv[1]
+icon = sys.argv[2]
+sp, sm, smt, pct = (value == 'true' for value in sys.argv[3:])
 
 existing = {}
 if os.path.exists(path):
@@ -221,13 +295,13 @@ if 'metric' not in existing:
 with open(path, 'w') as f:
     json.dump(existing, f, indent=2)
 print(f'  \033[2msaved display preferences to {path}\033[0m')
-"
+PY
 
 # ═══════════════════════════════════════════════════════════
 # WAYBAR CONFIGURATION
 # ═══════════════════════════════════════════════════════════
 
-if [ "$CONFIGURE_WAYBAR" = true ] && command -v waybar &>/dev/null; then
+if [ "$BAR" = waybar ] && [ "$CONFIGURE_BAR" = true ] && command -v waybar &>/dev/null; then
     echo ""
     echo -e "  ${C_PURPLE}${C_DIM}waybar modules${C_RESET}"
 
@@ -445,7 +519,7 @@ PYEOF
     echo ""
     echo -e "  ${C_DIM}Your original Waybar config was backed up. If anything looks off,${C_RESET}"
     echo -e "  ${C_DIM}run${C_RESET} ${C_CYAN}ai-status revert${C_RESET} ${C_DIM}to restore it.${C_RESET}"
-elif command -v waybar &>/dev/null; then
+elif [ "$BAR" = waybar ] && command -v waybar &>/dev/null; then
     # Manual mode — the user chose to add the modules themselves. Print the
     # blocks to copy (same as the docs / landing page). Nothing is touched, so
     # there's no backup to worry about.
@@ -492,7 +566,22 @@ fi
 
 # ═══════════════════════════════════════════════════════════
 
-if command -v waybar &>/dev/null; then
+if [ "$BAR" = quickshell ]; then
+    if [ -d "$PLUGIN_DIR/.git" ]; then
+        omarchy plugin update "$PLUGIN_ID" --yes
+    else
+        # Local development installs the checkout being tested, rather than main.
+        PLUGIN_SOURCE="$REPO_URL"
+        [ "$USE_LOCAL_LIB" = true ] && PLUGIN_SOURCE="$REPO_ROOT"
+        omarchy plugin add "$PLUGIN_SOURCE" --yes
+    fi
+    if [ "$CONFIGURE_BAR" = true ]; then
+        # Empty placement preserves an existing position; first enable uses right.
+        omarchy plugin enable "$PLUGIN_ID"
+    else
+        echo "Enable when ready: omarchy plugin enable $PLUGIN_ID"
+    fi
+elif command -v waybar &>/dev/null; then
     echo ""
     echo -e "  ${C_DIM}> restarting waybar...${C_RESET}"
     pkill -SIGUSR2 waybar 2>/dev/null || true

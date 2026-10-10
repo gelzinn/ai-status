@@ -28,11 +28,19 @@ same command covers every case:
 | Local checkout | Extracts from your working tree, local edits included |
 | Older full-repo install | Replaced with the lean copy automatically |
 
-After updating, the script restarts Waybar automatically to apply changes.
+After updating, the script reloads only the selected bar. Waybar receives its existing reload signal; Quickshell uses Omarchy's plugin add/update mechanism and hot reload. Use `--bar waybar` or `--bar quickshell` to choose explicitly. Existing display preferences are preserved unless changed in the wizard or by flags.
+
+For a plugin installed directly through Omarchy, update only AI Status with:
+
+```bash
+omarchy plugin update io.github.gelzinn.ai-status
+```
+
+Omarchy keeps the plugin's bar placement and refuses updates it cannot fast-forward. Shared preferences and provider credentials remain outside the plugin checkout.
 
 ## Checking Your Version
 
-The current version is shown at the top of the Waybar tooltip. You can also check:
+The current version appears at the top of the Waybar tooltip or Quickshell details panel. For the CLI installation, you can also check:
 
 ```bash
 cat ~/.local/share/ai-status/packages/lib/VERSION

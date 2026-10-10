@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import argparse
 from . import daemon
 from . import state
 from . import tui
@@ -29,7 +30,7 @@ def _first_metric_for(cache, dir_name, idx):
     keys = _provider_metric_keys(cache, dir_name, idx)
     return keys[0] if keys else "rolling"
 
-def _scroll(direction):
+def _scroll(direction, frontend="waybar"):
     providers = cfgmod.enabled_order()
     if not providers:
         return
@@ -38,7 +39,7 @@ def _scroll(direction):
     items = []
     seen = set()
     for p in cache:
-        if p.get("metrics"):
+        if p.get("metrics") and p.get("_dir") in providers:
             key = (p.get("_dir"), p.get("_idx", 0))
             if key not in seen:
                 seen.add(key)
@@ -64,13 +65,14 @@ def _scroll(direction):
     selected["metric"] = new_metric
 
     state.save_selected(selected)
-    logos.update_current(selected)
+    if frontend == "waybar":
+        logos.update_current(selected)
 
-def scroll_up():
-    _scroll(-1)
+def scroll_up(frontend="waybar"):
+    _scroll(-1, frontend)
 
-def scroll_down():
-    _scroll(1)
+def scroll_down(frontend="waybar"):
+    _scroll(1, frontend)
 
 def cycle_metric():
     selected = state.load_selected() or {}
@@ -159,29 +161,34 @@ def revert_waybar():
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == "refresh":
+    parser = argparse.ArgumentParser(prog="ai-status")
+    parser.add_argument("command", choices=["daemon", "refresh", "config", "scroll-up", "scroll-down", "cycle-metric", "logo", "revert"])
+    parser.add_argument("--format", choices=["waybar", "quickshell"], default="waybar")
+    parser.add_argument("--frontend", choices=["waybar", "quickshell"], default="waybar")
+    args = parser.parse_args()
+    if args.format != "waybar" and args.command != "daemon":
+        parser.error("--format is only supported by daemon")
+    if args.command == "refresh":
         state.trigger_refresh()
-    elif len(sys.argv) > 1 and sys.argv[1] == "daemon":
-        sys.stderr = open('/tmp/ai-status-error.log', 'w')
-        daemon.run()
-    elif len(sys.argv) > 1 and sys.argv[1] == "config":
+    elif args.command == "daemon":
+        if args.format == "waybar":
+            sys.stderr = open('/tmp/ai-status-error.log', 'w')
+        daemon.run(output_format=args.format)
+    elif args.command == "config":
         if not sys.stdout.isatty():
             for term in TERMINALS:
                 if subprocess.run(["which", term], capture_output=True).returncode == 0:
-                    subprocess.Popen([term, "-e", sys.argv[0], "config"])
+                    subprocess.Popen([term, "-e", sys.executable, os.path.realpath(sys.argv[0]), "config"])
                     break
             return
         tui.run()
-    elif len(sys.argv) > 1 and sys.argv[1] == "scroll-up":
-        scroll_up()
-    elif len(sys.argv) > 1 and sys.argv[1] == "scroll-down":
-        scroll_down()
-    elif len(sys.argv) > 1 and sys.argv[1] == "cycle-metric":
+    elif args.command == "scroll-up":
+        scroll_up(args.frontend)
+    elif args.command == "scroll-down":
+        scroll_down(args.frontend)
+    elif args.command == "cycle-metric":
         cycle_metric()
-    elif len(sys.argv) > 1 and sys.argv[1] == "logo":
+    elif args.command == "logo":
         print_logo()
-    elif len(sys.argv) > 1 and sys.argv[1] == "revert":
+    elif args.command == "revert":
         revert_waybar()
-    else:
-        print("Usage: ai-status [daemon|refresh|config|scroll-up|scroll-down|cycle-metric|logo|revert]")
-        sys.exit(1)

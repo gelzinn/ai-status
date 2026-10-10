@@ -17,7 +17,7 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: `${site.name} | Waybar Module`,
+  title: `${site.name} | Waybar & Omarchy Quickshell`,
   description,
   icons: {
     icon: "/favicon.svg",

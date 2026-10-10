@@ -1,6 +1,8 @@
 import os
 import json
 import time
+import fcntl
+import tempfile
 
 CACHE_FILE = os.path.expanduser("~/.cache/ai-status.json")
 SELECTED_FILE = os.path.expanduser("~/.config/ai-status/selected.json")
@@ -27,11 +29,23 @@ def load_cache():
             pass
     return []
 
+def _save_json(path, data):
+    """Atomic publication for frontends reading shared state concurrently."""
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory, delete=False) as f:
+            temporary = f.name
+            json.dump(data, f)
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
+
 def save_cache(data):
     try:
-        os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
-        with open(CACHE_FILE, "w") as f:
-            json.dump(data, f)
+        _save_json(CACHE_FILE, data)
     except Exception:
         pass
 
@@ -54,29 +68,36 @@ def release_lock():
     except Exception:
         pass
 
-def register_pid():
-    pids = []
-    if os.path.exists(PID_FILE):
-        try:
-            with open(PID_FILE, "r") as f:
-                for line in f:
-                    try:
-                        pid = int(line.strip())
-                        os.kill(pid, 0)
-                        pids.append(pid)
-                    except (ValueError, OSError):
-                        pass
-        except Exception:
-            pass
-    my_pid = os.getpid()
-    if my_pid not in pids:
-        pids.append(my_pid)
+def _update_pids(register):
+    # A widget disappearing must not remove another frontend's refresh target.
     try:
-        with open(PID_FILE, "w") as f:
-            for pid in pids:
-                f.write(f"{pid}\n")
-    except Exception:
+        with open(PID_FILE, "a+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            f.seek(0)
+            pids = set()
+            for line in f:
+                try:
+                    pid = int(line.strip())
+                    os.kill(pid, 0)
+                    pids.add(pid)
+                except (ValueError, OSError):
+                    pass
+            if register:
+                pids.add(os.getpid())
+            else:
+                pids.discard(os.getpid())
+            f.seek(0)
+            f.truncate()
+            f.write("".join(f"{pid}\n" for pid in sorted(pids)))
+    except OSError:
         pass
+
+def register_pid():
+    _update_pids(register=True)
+
+def unregister_pid():
+    """Remove this daemon's refresh target when its frontend is unloaded."""
+    _update_pids(register=False)
 
 def load_selected():
     if os.path.exists(SELECTED_FILE):
@@ -89,9 +110,7 @@ def load_selected():
 
 def save_selected(data):
     try:
-        os.makedirs(os.path.dirname(SELECTED_FILE), exist_ok=True)
-        with open(SELECTED_FILE, "w") as f:
-            json.dump(data, f)
+        _save_json(SELECTED_FILE, data)
     except Exception:
         pass
 
@@ -99,11 +118,13 @@ def trigger_refresh():
     if os.path.exists(PID_FILE):
         try:
             with open(PID_FILE, "r") as f:
-                for line in f:
-                    try:
-                        pid = int(line.strip())
-                        os.kill(pid, 10) # SIGUSR1
-                    except (ValueError, OSError):
-                        pass
+                fcntl.flock(f, fcntl.LOCK_SH)
+                lines = f.readlines()
+            for line in lines:
+                try:
+                    pid = int(line.strip())
+                    os.kill(pid, 10) # SIGUSR1
+                except (ValueError, OSError):
+                    pass
         except Exception:
             pass

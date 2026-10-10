@@ -149,7 +149,7 @@ def get_version_info():
         "has_update": _latest_version is not None and _latest_version != __version__,
     }
 
-def fetch_all_data(on_result=None):
+def fetch_all_data(on_result=None, include_errors=False):
     repo_dir = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "providers"
     )
@@ -186,6 +186,8 @@ def fetch_all_data(on_result=None):
             providers = None
             try:
                 data = future.result(timeout=18)
+                if include_errors and (not data or isinstance(data, dict) and "error" in data):
+                    data = {"provider": dir_name, "metrics": [], "_error": (data or {}).get("error", "No usage data available")}
                 if data and "error" not in data:
                     providers = data if isinstance(data, list) else [data]
                     for idx, p in enumerate(providers):

@@ -61,6 +61,40 @@ export default async function Homepage() {
           <section className="flex flex-col gap-8">
             <div className="flex flex-col gap-3">
               <h2 className="font-heading text-2xl font-semibold tracking-tight">
+                Omarchy Quickshell
+              </h2>
+              <p className="max-w-xl text-muted-foreground">
+                On the new Omarchy desktop, AI Status is a native bar widget.
+                Click to open a usage panel with all your providers, limits,
+                reset timers, and a refresh button.
+              </p>
+            </div>
+            <HighlightedCodeBlock
+              code={`omarchy plugin add ${repo.url}.git --enable`}
+              lang="bash"
+              label="Install directly with Omarchy"
+            />
+            <p className="text-sm text-muted-foreground">
+              The plugin includes its Python backend and uses your existing
+              provider logins. No separate AI Status install is required.
+              Right-click to configure providers, scroll to switch provider,
+              and middle-click to cycle through limits.
+            </p>
+            <HighlightedCodeBlock
+              code={`curl -fsSL ${site.installUrl} | bash -s -- --bar quickshell --configure-bar true --no-interactive`}
+              lang="bash"
+              label="Install with the AI Status CLI"
+            />
+            <p className="text-sm text-muted-foreground">
+              The regular installer detects your active bar. You can also select
+              Waybar or Quickshell in the wizard, or pass <code>--bar waybar</code>
+              {" "}or <code>--bar quickshell</code>. It configures only the bar you choose.
+            </p>
+          </section>
+
+          <section className="flex flex-col gap-8">
+            <div className="flex flex-col gap-3">
+              <h2 className="font-heading text-2xl font-semibold tracking-tight">
                 Waybar Configuration
               </h2>
               <p className="max-w-xl text-muted-foreground">
@@ -192,7 +226,7 @@ export default async function Homepage() {
                     {
                       title: "Multi-Provider",
                       description:
-                        "Tracks API usage limits across seven AI services simultaneously.",
+                        `Tracks usage limits across ${SUPPORTED_PROVIDERS.length} AI services simultaneously.`,
                       visual: FeatureVisuals.MultiProvider,
                     },
                     {
@@ -202,9 +236,9 @@ export default async function Homepage() {
                       visual: FeatureVisuals.LiveUpdates,
                     },
                     {
-                      title: "Tooltip Detail",
+                      title: "Usage Details",
                       description:
-                        "Per-provider breakdown with progress bars, percentages, and reset timers.",
+                        "Provider limits, progress bars, and reset timers in a Waybar tooltip or native Quickshell panel.",
                       visual: FeatureVisuals.TooltipDetail,
                     },
                     {

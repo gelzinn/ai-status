@@ -2,7 +2,7 @@
 
 **Bug reports, feature requests, and pull requests are welcome.**
 
-This project targets Linux and Waybar, but the core logic in `src/core/` and the provider scripts in `src/providers/` are platform-independent and can be adapted to other status bars or operating systems.
+This project targets Linux, Waybar, and the Omarchy Quickshell shell. The shared Python backend lives in `packages/lib/src/core/`, providers in `packages/lib/src/providers/`, and the native Omarchy plugin in `packages/lib/quickshell/`.
 
 ## Adding a New Provider
 
@@ -25,10 +25,10 @@ Steps:
 
 ## Adding Support for Other Platforms
 
-The visual formatting lives in `src/core/render.py` using Pango markup (Waybar's format). To support another status bar or OS:
+Waybar formatting lives in `packages/lib/src/core/render.py` using Pango markup. The Quickshell adapter emits structured snapshots from `packages/lib/src/core/quickshell.py`; QML owns its presentation. Keep new frontends separate so existing Waybar output remains compatible. To support another status bar or OS:
 
 1. Fork the repository on GitHub
-2. Modify `src/core/render.py` to output the appropriate format for your target
+2. Add an output adapter for your target and reuse the existing queries and state
 3. Update `install.sh` and `check.sh` for the new environment
 4. Open a pull request
 
@@ -41,3 +41,5 @@ The visual formatting lives in `src/core/render.py` using Pango markup (Waybar's
 | 3 | Run `./install.sh` to test locally |
 | 4 | Verify the daemon runs: `ai-status daemon` |
 | 5 | Open a pull request describing what you changed and why |
+
+Run `python3 -m unittest discover -s packages/lib/tests -v` for adapter and isolated installer tests. For native plugin validation and desktop acceptance checks, see [INSTALL.md](packages/lib/INSTALL.md#development-validation).

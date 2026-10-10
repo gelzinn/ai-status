@@ -52,7 +52,9 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           echo "$VERSION" > packages/lib/VERSION
-          git add packages/lib/VERSION
+          jq --arg version "$VERSION" '.version = $version' manifest.json > manifest.json.tmp
+          mv manifest.json.tmp manifest.json
+          git add packages/lib/VERSION manifest.json
           git commit -m "chore: release v${VERSION}"
 
           git push origin --delete "$BRANCH" 2>/dev/null || true

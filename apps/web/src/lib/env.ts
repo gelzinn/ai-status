@@ -15,7 +15,7 @@ const REPO_SLUG = `gelzinn/${LIB_NAME}`;
 /** The public website. */
 export const site = {
 	name: "AI Status",
-	description: "Monitor your AI API limits directly from your status bar.",
+	description: "Monitor your AI usage limits in Waybar and Omarchy Quickshell.",
 	url: SITE_ORIGIN,
 	/** Short install URL — the /install route serves packages/lib/install.sh. */
 	installUrl: `${SITE_ORIGIN}/install`,
