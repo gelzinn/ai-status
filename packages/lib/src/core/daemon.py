@@ -96,8 +96,9 @@ def _run(output_format="waybar"):
     def emit(data, selected, frame=None):
         nonlocal last_snapshot
         if output_format == "quickshell":
-            logo = logo_cache.get(selected.get("provider")) if state.get_icon_mode(selected) == "logo" else ""
-            output = quickshell.build_snapshot(data, selected, pending=_pending.copy(), logo_path=logo)
+            logo_paths = {name: logo_cache.get(name) for name in cfgmod.enabled_order()}
+            logo = logo_paths.get(selected.get("provider"), "") if state.get_icon_mode(selected) == "logo" else ""
+            output = quickshell.build_snapshot(data, selected, pending=_pending.copy(), logo_path=logo, logo_paths=logo_paths)
             serialized = json.dumps(output, ensure_ascii=False, allow_nan=False)
             if serialized != last_snapshot:
                 print(serialized, flush=True)

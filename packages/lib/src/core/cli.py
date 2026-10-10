@@ -2,12 +2,14 @@ import os
 import sys
 import subprocess
 import argparse
+import json
 from . import daemon
 from . import state
 from . import tui
 from . import logos
 from . import render
 from . import config as cfgmod
+from . import quickshell
 
 TERMINALS = ["foot", "alacritty", "kitty", "ghostty", "wezterm", "xterm"]
 
@@ -162,13 +164,24 @@ def revert_waybar():
 
 def main():
     parser = argparse.ArgumentParser(prog="ai-status")
-    parser.add_argument("command", choices=["daemon", "refresh", "config", "scroll-up", "scroll-down", "cycle-metric", "logo", "revert"])
+    parser.add_argument("command", choices=["daemon", "refresh", "config", "save-settings", "scroll-up", "scroll-down", "cycle-metric", "logo", "revert"])
     parser.add_argument("--format", choices=["waybar", "quickshell"], default="waybar")
     parser.add_argument("--frontend", choices=["waybar", "quickshell"], default="waybar")
+    parser.add_argument("--settings-json")
     args = parser.parse_args()
     if args.format != "waybar" and args.command != "daemon":
         parser.error("--format is only supported by daemon")
-    if args.command == "refresh":
+    if args.settings_json is not None and args.command != "save-settings":
+        parser.error("--settings-json is only supported by save-settings")
+    if args.command == "save-settings":
+        if args.frontend != "quickshell" or args.settings_json is None:
+            parser.error("save-settings requires --frontend quickshell and --settings-json")
+        try:
+            quickshell.save_settings(json.loads(args.settings_json))
+        except (ValueError, OSError) as error:
+            print(str(error), file=sys.stderr)
+            return 1
+    elif args.command == "refresh":
         state.trigger_refresh()
     elif args.command == "daemon":
         if args.format == "waybar":

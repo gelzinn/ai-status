@@ -12,7 +12,7 @@ Monitor AI provider usage limits in **Waybar and the Omarchy Quickshell bar** �
 | **Multi-Provider** | Tracks API usage limits across eight AI services simultaneously |
 | **Live Updates** | Auto-refreshes every 5 minutes with animated loading states |
 | **Usage Details** | Per-provider progress bars, percentages, and resets in a Waybar tooltip or Quickshell panel |
-| **Configurable** | Enable, disable, or reorder providers via an interactive TUI (right-click) |
+| **Configurable** | Native settings page on Quickshell; interactive TUI on Waybar (right-click) |
 | **Self-Updating** | One command installs and keeps the module up to date |
 | **Lightweight** | Python and Bash backend, native QML UI on Quickshell; no Node or NPM needed on your desktop |
 
@@ -52,7 +52,7 @@ On the new Omarchy desktop, you can also install directly:
 omarchy plugin add https://github.com/gelzinn/ai-status.git --enable
 ```
 
-The plugin includes its Python backend, so a separate CLI installation is unnecessary. It uses the same provider credentials, preferences, and cache as Waybar. Left-click opens a native details panel with **Refresh** and **Configure** buttons; right-click opens the configuration TUI, scroll switches providers, and middle-click cycles metrics. Escape closes the panel.
+The plugin includes its Python backend, so a separate CLI installation is unnecessary. It uses the same provider credentials, preferences, and cache as Waybar. Left-click opens a native details panel with provider logos, aligned percentages, progress bars, and reset details. The header keeps **Refresh** and **Configure** available while scrolling. **Configure** or right-click switches to a native settings page: choose the active provider and limit, change bar display options, enable/disable providers, and reorder them. **Save** applies the changes; **Cancel** or Escape returns to usage. Scroll the bar to switch providers; middle-click cycles metrics. Escape from the usage page closes the panel.
 
 ```bash
 omarchy plugin update io.github.gelzinn.ai-status
@@ -97,7 +97,7 @@ Then reference it in whichever bar section you use — a module that's defined b
 
 **Want the provider's logo too?** Install with `--icon-mode logo` (or add it by hand — see [INSTALL.md](packages/lib/INSTALL.md)). It adds an `image#ai-status` module next to the text that shows the same tooltip on hover; just remember to list `"image#ai-status"` in `modules-right` alongside `"custom/ai-status"`.
 
-The status bar shows the usage percentage of the active provider. Scroll up/down to switch providers, middle-click to cycle through the active provider's limits (rolling, weekly, monthly — including per-model ones, like Claude's Fable weekly). Right-click opens the provider configuration TUI -- toggle providers on or off and reorder them. Hover to see all providers with full details (the active one is marked with →).
+The status bar shows the usage percentage of the active provider. Scroll up/down to switch providers, middle-click to cycle through the active provider's limits (rolling, weekly, monthly — including per-model ones, like Claude's Fable weekly). Right-click opens settings: a native page on Quickshell or the provider configuration TUI on Waybar. Toggle providers on or off and reorder them. Hover the Waybar module or click the Quickshell widget to see all providers with full details (the active one is marked with →).
 
 ## How It Works
 

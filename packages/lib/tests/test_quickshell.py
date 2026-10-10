@@ -58,6 +58,21 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["text"], "62%")
         self.assertEqual(snapshot["logoPath"], "/tmp/provider.svg")
 
+    def test_panel_logos_are_independent_of_bar_icon_preference(self):
+        data = DATA + [dict(DATA[0], _idx=1, provider="Claude (Max)")]
+        snapshot = quickshell.build_snapshot(data, SELECTED, logo_paths={"claude": "/tmp/claude.svg", "codex": "/tmp/codex.svg"})
+        self.assertEqual(snapshot["iconMode"], "off")
+        self.assertEqual(snapshot["logoPath"], "")
+        self.assertEqual([p["logoPath"] for p in snapshot["providers"]], ["/tmp/claude.svg", "/tmp/claude.svg", "/tmp/codex.svg"])
+
+    def test_settings_include_disabled_providers_and_display_defaults(self):
+        with patch("core.config.available_providers", return_value=["claude", "codex", "kiro"]):
+            snapshot = quickshell.build_snapshot(DATA, SELECTED)
+        settings = snapshot["settings"]
+        self.assertEqual(settings["order"], ["claude", "codex", "kiro"])
+        self.assertEqual(settings["enabled"], ["claude", "codex"])
+        self.assertEqual(settings["display"], dict(show_provider=True, show_model=True, show_metric=False, show_pct=True))
+
     def test_non_finite_percentage_is_valid_json(self):
         data = [{"_dir": "claude", "metrics": [{"type": "rolling", "percentage": float("nan")}]}]
         snapshot = quickshell.build_snapshot(data, dict(SELECTED, provider="missing"))
@@ -114,6 +129,7 @@ class SnapshotTests(unittest.TestCase):
             stack.enter_context(patch.object(state, "load_cache", return_value=DATA))
             stack.enter_context(patch.object(state, "load_selected", side_effect=lambda: selection.copy()))
             stack.enter_context(patch.object(fetch, "check_for_updates"))
+            cache = stack.enter_context(patch.object(quickshell.LogoCache, "get", side_effect=lambda name: "/tmp/" + name + ".svg"))
             stack.enter_context(patch.object(daemon.threading, "Thread", PendingThread))
             stack.enter_context(patch.object(daemon.time, "sleep", side_effect=advance))
             logo = stack.enter_context(patch.object(daemon.logos, "update_current"))
@@ -124,6 +140,7 @@ class SnapshotTests(unittest.TestCase):
             logo.assert_not_called()
             signal.assert_not_called()
             tooltip.assert_not_called()
+            self.assertTrue(any(call.args == ("codex",) for call in cache.call_args_list))
         snapshots = [json.loads(line) for line in output.getvalue().splitlines()]
         self.assertTrue(all(s["schemaVersion"] == 1 for s in snapshots))
         self.assertTrue(any(s["loading"] and s["selected"]["provider"] == "codex" for s in snapshots))
@@ -182,7 +199,7 @@ class SnapshotTests(unittest.TestCase):
             script = '''
 import json, pathlib, sys
 sys.path.insert(0, sys.argv[1])
-from core import cli, config, fetch, state
+from core import cli, config, fetch, quickshell, state
 directory = pathlib.Path(sys.argv[2])
 state.PID_FILE = str(directory / 'pids')
 state.LOCK_FILE = str(directory / 'query-lock')
@@ -194,6 +211,7 @@ data = json.loads(sys.argv[3])
 state.save_cache(data)
 state.save_selected(json.loads(sys.argv[4]))
 fetch.check_for_updates = lambda: None
+quickshell.LogoCache.get = lambda self, provider: ''
 def query(on_result=None, include_errors=False):
     if on_result: on_result('claude', data)
     return data
@@ -214,6 +232,76 @@ cli.main()
             output, errors = process.communicate(timeout=5)
             self.assertEqual(process.returncode, 0, errors)
             self.assertNotIn(str(process.pid), (Path(directory) / "pids").read_text())
+
+
+class NativeSettingsTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.config_file = Path(temporary.name) / "config/providers.json"
+        self.selected_file = Path(temporary.name) / "config/selected.json"
+        for replacement in (
+            patch("core.config.CONFIG_FILE", str(self.config_file)),
+            patch("core.state.SELECTED_FILE", str(self.selected_file)),
+            patch("core.config.available_providers", return_value=["claude", "codex"]),
+        ):
+            replacement.start()
+            self.addCleanup(replacement.stop)
+        refresh_patch = patch.object(state, "trigger_refresh")
+        self.refresh = refresh_patch.start()
+        self.addCleanup(refresh_patch.stop)
+        self.payload = {
+            "enabled": ["codex", "claude"],
+            "display": dict(show_provider=True, show_model=False, show_metric=True, show_pct=True),
+            "iconMode": "logo",
+            "selected": dict(provider="claude", idx=0, metric="weekly:Fable"),
+        }
+
+    def test_native_save_persists_order_selection_and_display_without_waybar_side_effects(self):
+        state._save_json(str(self.selected_file), dict(SELECTED, legacy_field="preserved"))
+        with patch("core.logos.update_current") as logo, patch("core.logos.signal_waybar") as signal:
+            quickshell.save_settings(self.payload)
+            logo.assert_not_called()
+            signal.assert_not_called()
+        self.assertEqual(json.loads(self.config_file.read_text()), ["codex", "claude"])
+        selected = json.loads(self.selected_file.read_text())
+        self.assertEqual(selected["metric"], "weekly:Fable")
+        self.assertEqual(selected["legacy_field"], "preserved")
+        self.assertFalse(selected["show_model"])
+        self.assertEqual(selected["icon_mode"], "logo")
+        self.refresh.assert_called_once()
+
+    def test_invalid_settings_do_not_write_or_refresh(self):
+        invalid = [None, [], {},
+            dict(self.payload, enabled=[]),
+            dict(self.payload, enabled=["claude", "claude"]),
+            dict(self.payload, enabled=["unknown"]),
+            dict(self.payload, enabled=[{}]),
+            dict(self.payload, display=dict.fromkeys(self.payload["display"], False)),
+            dict(self.payload, display=dict(self.payload["display"], show_pct="yes")),
+            dict(self.payload, iconMode="invalid"),
+            dict(self.payload, selected=dict(provider="disabled", idx=0, metric="rolling")),
+            dict(self.payload, selected=dict(provider="claude", idx=-1, metric="rolling")),
+            dict(self.payload, selected=dict(provider="claude", idx=0, metric="")),
+        ]
+        for payload in invalid:
+            with self.subTest(payload=payload), self.assertRaises(ValueError):
+                quickshell.save_settings(payload)
+            self.assertFalse(self.config_file.exists())
+            self.assertFalse(self.selected_file.exists())
+        self.refresh.assert_not_called()
+
+    def test_cli_reports_save_validation_and_disk_errors(self):
+        for payload, error in (({}, None), (self.payload, OSError("Disk full"))):
+            with patch.object(sys, "argv", ["ai-status", "save-settings", "--frontend", "quickshell", "--settings-json", json.dumps(payload)]), patch.object(sys, "stderr", io.StringIO()) as stderr, patch.object(state, "_save_json", side_effect=error):
+                self.assertEqual(cli.main(), 1)
+                self.assertTrue(stderr.getvalue().strip())
+        self.refresh.assert_not_called()
+
+    def test_waybar_config_retains_terminal_tui(self):
+        with patch.object(sys, "argv", ["ai-status", "config"]), patch.object(sys.stdout, "isatty", return_value=True), patch("core.tui.run") as tui:
+            cli.main()
+            tui.assert_called_once()
 
 
 if __name__ == "__main__":

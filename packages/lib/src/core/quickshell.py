@@ -77,9 +77,58 @@ class LogoCache:
             pass  # The widget still works with text when a logo is unavailable.
 
 
-def build_snapshot(data, selected=None, pending=None, logo_path=""):
+def settings_snapshot(selected):
+    available = config.available_providers()
+    enabled = [name for name in config.enabled_order() if name in available]
+    return {
+        "available": available,
+        "order": enabled + [name for name in available if name not in enabled],
+        "enabled": enabled,
+        "display": {key: selected.get(key, default) for key, default in (
+            ("show_provider", True), ("show_model", True),
+            ("show_metric", False), ("show_pct", True),
+        )},
+        "iconMode": state.get_icon_mode(selected),
+    }
+
+
+def save_settings(payload):
+    """Validate a native form before publishing shared preferences atomically."""
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid settings")
+    available = config.available_providers()
+    enabled = payload.get("enabled")
+    if (not isinstance(enabled, list) or not enabled
+            or any(not isinstance(name, str) or name not in available for name in enabled)
+            or len(set(enabled)) != len(enabled)):
+        raise ValueError("Enable at least one available provider, without duplicates")
+    display = payload.get("display")
+    fields = ("show_provider", "show_model", "show_metric", "show_pct")
+    if not isinstance(display, dict) or any(type(display.get(key)) is not bool for key in fields):
+        raise ValueError("Invalid display settings")
+    if not any(display[key] for key in fields):
+        raise ValueError("Show at least one text field in the bar")
+    icon_mode = payload.get("iconMode")
+    if icon_mode not in state.ICON_MODES:
+        raise ValueError("Invalid provider icon")
+    choice = payload.get("selected")
+    if (not isinstance(choice, dict) or choice.get("provider") not in enabled
+            or type(choice.get("idx")) is not int or choice["idx"] < 0
+            or not isinstance(choice.get("metric"), str) or not choice["metric"]):
+        raise ValueError("Choose an enabled provider and limit")
+    selected = dict(state.load_selected() or {})
+    selected.update({key: choice[key] for key in ("provider", "idx", "metric")})
+    selected.update({key: display[key] for key in fields}, icon_mode=icon_mode)
+    # Report I/O errors to the form instead of using the best-effort wrappers.
+    state._save_json(config.CONFIG_FILE, enabled)
+    state._save_json(state.SELECTED_FILE, selected)
+    state.trigger_refresh()
+
+
+def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=None):
     selected = dict(selected or {})
     pending = set(pending or ())
+    logo_paths = logo_paths or {}
     order = config.enabled_order()
     providers = []
     for name in order:
@@ -110,6 +159,7 @@ def build_snapshot(data, selected=None, pending=None, logo_path=""):
                 "id": name,
                 "idx": entry.get("_idx", 0),
                 "name": entry.get("provider", name),
+                "logoPath": logo_paths.get(name, ""),
                 "loading": name in pending,
                 "cached": bool(entry.get("_cached")),
                 "error": plain_text(entry.get("_error") or ("No usage data available" if not metrics and name not in pending else "")),
@@ -137,4 +187,5 @@ def build_snapshot(data, selected=None, pending=None, logo_path=""):
         "logoPath": logo_path,
         "loading": bool(pending),
         "providers": providers,
+        "settings": settings_snapshot(selected),
     }

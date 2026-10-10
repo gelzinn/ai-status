@@ -12,6 +12,7 @@ Ui.BarWidget {
     function open() { if (panelLoader.item) panelLoader.item.open() }
     function close() { if (panelLoader.item) panelLoader.item.close() }
     function toggle() { if (panelLoader.item) panelLoader.item.toggle() }
+    function configure() { if (panelLoader.item) panelLoader.item.configure() }
     function closeForPopoutSwitch() { if (panelLoader.item) panelLoader.item.closeForPopoutSwitch() }
     function injectPanel() {
         if (!panelLoader.item) return
@@ -45,10 +46,10 @@ Ui.BarWidget {
         fixedHeight: root.height
         labelVisible: false
         hasVisualContent: true
-        tooltipText: Plugin.Model.errorMessage || "AI Status — click for usage details"
+        tooltipText: Plugin.Model.errorMessage || "AI Status · click for usage · right-click for settings · scroll to switch provider · middle-click to switch limit"
         onPressed: buttonCode => {
             if (buttonCode === Qt.LeftButton) root.toggle()
-            else if (buttonCode === Qt.RightButton) Plugin.Model.action("config")
+            else if (buttonCode === Qt.RightButton) root.configure()
             else if (buttonCode === Qt.MiddleButton) Plugin.Model.action("cycle-metric")
         }
         onWheelMoved: delta => {

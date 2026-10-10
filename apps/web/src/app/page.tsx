@@ -77,7 +77,7 @@ export default async function Homepage() {
             <p className="text-sm text-muted-foreground">
               The plugin includes its Python backend and uses your existing
               provider logins. No separate AI Status install is required.
-              Right-click to configure providers, scroll to switch provider,
+              Right-click to open settings inside the panel, scroll to switch provider,
               and middle-click to cycle through limits.
             </p>
             <HighlightedCodeBlock
@@ -244,7 +244,7 @@ export default async function Homepage() {
                     {
                       title: "Configurable",
                       description:
-                        "Enable, disable, or reorder providers via an interactive TUI (right-click).",
+                        "Enable, disable, or reorder providers from Quickshell settings or the Waybar TUI (right-click).",
                       visual: FeatureVisuals.Configurable,
                     },
                     {

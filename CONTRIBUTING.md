@@ -43,3 +43,5 @@ Waybar formatting lives in `packages/lib/src/core/render.py` using Pango markup.
 | 5 | Open a pull request describing what you changed and why |
 
 Run `python3 -m unittest discover -s packages/lib/tests -v` for adapter and isolated installer tests. For native plugin validation and desktop acceptance checks, see [INSTALL.md](packages/lib/INSTALL.md#development-validation).
+
+Run `python3 packages/lib/tests/run_qml_tests.py` for native settings and usage page tests. These use the production QML pages with a fake daemon and theme, via Qt Quick Test's offscreen renderer. Install `qt6-declarative-dev-tools`, `qml6-module-qtquick`, `qml6-module-qtquick-window`, `qml6-module-qtqml-workerscript`, `qml6-module-qttest`, and `qt6-qpa-plugins`. They do not replace an Omarchy desktop smoke test.

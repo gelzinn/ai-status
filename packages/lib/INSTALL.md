@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/gelzinn/ai-status/main/packages/lib
   --no-interactive
 ```
 
-If you prefer no logo (text-only), swap `--icon-mode logo` for `--icon-mode off`. All preferences can be changed later via the config TUI (right-click the module).
+If you prefer no logo (text-only), swap `--icon-mode logo` for `--icon-mode off`. Right-click the module to change preferences later: Quickshell has a native settings page and Waybar uses the config TUI.
 
 Use `--bar waybar` or `--bar quickshell` to select explicitly. Automatic detection prefers a running Omarchy shell, then Waybar; when neither is running it uses the only available integration, or Waybar if both are installed. The installer configures and reloads only the selected bar. Existing `--configure-waybar true|false` flags still work and select Waybar; combining them with `--bar quickshell` is an error.
 
@@ -32,9 +32,11 @@ omarchy plugin add https://github.com/gelzinn/ai-status.git --enable
 
 The repository contains the plugin manifest, native QML UI, Python backend, and provider scripts. Direct plugin installation needs no previous AI Status CLI install, no Node, and no NPM. It creates a Git checkout under `~/.config/omarchy/plugins/io.github.gelzinn.ai-status/`. This includes repository source but no website dependencies or build artifacts; the shell executes the bundled Python backend.
 
-Dependencies: Linux, the compatible Omarchy Quickshell shell and its plugin CLI, `python3`, `jq`, `curl`, and `git`. Provider-specific authentication and optional CLIs are documented in [PROVIDERS.md](PROVIDERS.md). The configuration TUI needs an available terminal (`foot`, `alacritty`, `kitty`, `ghostty`, `wezterm`, or `xterm`). Qt renders original SVG/raster logos, so no image rasterizer is required. Logos are downloaded from the URLs in the shared provider metadata and cached under `~/.cache/ai-status/quickshell-logos/`; failed images fall back to text.
+Dependencies: Linux, the compatible Omarchy Quickshell shell and its plugin CLI, `python3`, `jq`, `curl`, and `git`. Provider-specific authentication and optional CLIs are documented in [PROVIDERS.md](PROVIDERS.md). Quickshell settings run inside the panel without a terminal. The optional CLI configuration TUI (`ai-status config`) needs an available terminal (`foot`, `alacritty`, `kitty`, `ghostty`, `wezterm`, or `xterm`). Qt renders original SVG/raster logos, so no image rasterizer is required. Logos are downloaded from the URLs in the shared provider metadata and cached under `~/.cache/ai-status/quickshell-logos/`; failed images fall back to a placeholder. Provider logos in the panel are independent of the bar's icon preference.
 
-The widget runs inside the existing shell process, using a single Python daemon for all monitors. It shares `~/.config/ai-status/` and provider caches with Waybar. The panel shows loading and error states, cached results, percentages, reset details, and the installed version. Right-click opens configuration; scroll switches providers; middle-click switches metrics. Left-click opens/closes the panel, where **Refresh** updates data. Escape closes it; `r` refreshes, `c` configures, and Up/Down scroll the panel.
+The widget runs inside the existing shell process, using a single Python daemon for all monitors. It shares `~/.config/ai-status/` and provider caches with Waybar. The panel shows loading and error states, cached results, provider logos, percentages beside progress bars, reset details, and the installed version. Left-click opens/closes the panel. Its fixed header has **Refresh** and **Configure** icons. Right-click or **Configure** switches to the native settings page, where you choose the active provider/limit, toggle display fields and icon mode, and enable/disable or reorder providers. **Save** applies preferences; **Cancel**, Back, or Escape discards the draft and returns to usage. Saving errors stay in the form. Provider authentication remains documented in [PROVIDERS.md](PROVIDERS.md).
+
+Scroll the bar to switch providers; middle-click switches metrics. Escape on the usage page closes the panel; `r` refreshes, `c` opens settings, and Up/Down scroll. In settings, Tab focuses the form controls; Space or Enter activates the focused control. Preferences are saved only when you press **Save**.
 
 ```bash
 # Place the widget (defaults to right on first enable):
@@ -140,7 +142,7 @@ This copies the backup back (saving the current one as `.pre-revert` first) and 
 | Action | Behavior |
 |---|---|
 | Left-click | Refresh in Waybar; open/close the details panel in Quickshell |
-| Right-click | Open provider configuration TUI |
+| Right-click | Native settings page in Quickshell; provider configuration TUI in Waybar |
 | Scroll up/down | Switch between providers |
 | Middle-click | Cycle through the provider's limits (rolling → weekly → monthly, and per-model ones like Claude's Fable weekly) |
 

@@ -1,7 +1,6 @@
 pragma Singleton
 
 import QtQuick
-import Quickshell
 import Quickshell.Io
 
 Item {
@@ -12,6 +11,9 @@ Item {
     property string errorMessage: ""
     property var snapshot: ({text: "AI Status …", providers: [], selected: {}, loading: true})
     property var actions: []
+    property bool settingsSaving: false
+    property string settingsError: ""
+    signal settingsSaved()
     property int frame: 0
     readonly property string spinner: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][frame % 10]
     readonly property string cliPath: decodeURIComponent(Qt.resolvedUrl("../src/bin/ai-status").toString().replace(/^file:\/\//, ""))
@@ -28,6 +30,7 @@ Item {
             backend.running = false
             actions = []
             actionProcess.running = false
+            settingsProcess.running = false
         }
     }
 
@@ -45,12 +48,17 @@ Item {
     }
 
     function action(command) {
-        if (command === "config") {
-            Quickshell.execDetached(["python3", cliPath, "config"])
-        } else if (["refresh", "scroll-up", "scroll-down", "cycle-metric"].indexOf(command) !== -1) {
+        if (["refresh", "scroll-up", "scroll-down", "cycle-metric"].indexOf(command) !== -1) {
             actions = actions.concat([command])
             drain()
         }
+    }
+
+    function saveSettings(settings) {
+        if (settingsSaving || consumers === 0) return
+        settingsError = ""
+        settingsSaving = true
+        settingsProcess.exec(["python3", cliPath, "save-settings", "--frontend", "quickshell", "--settings-json", JSON.stringify(settings)])
     }
 
     function drain() {
@@ -76,6 +84,28 @@ Item {
     Process {
         id: actionProcess
         onRunningChanged: if (!running) Qt.callLater(root.drain)
+    }
+
+    Process {
+        id: settingsProcess
+        stderr: SplitParser { onRead: data => root.settingsError = data }
+        onExited: (exitCode, exitStatus) => {
+            root.settingsSaving = false
+            if (exitCode === 0 && exitStatus === 0) {
+                root.settingsError = ""
+                root.settingsSaved()
+            } else if (!root.settingsError) {
+                root.settingsError = "Could not save settings. Try again."
+            }
+        }
+        onRunningChanged: {
+            if (!running) Qt.callLater(() => {
+                if (root.settingsSaving) {
+                    root.settingsSaving = false
+                    root.settingsError = root.settingsError || "Could not start the settings writer."
+                }
+            })
+        }
     }
 
     Timer {
