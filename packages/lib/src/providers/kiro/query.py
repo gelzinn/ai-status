@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -22,7 +23,8 @@ def _credentials(path):
                 raise ValueError
             credentials = value.get("token") if isinstance(value.get("token"), dict) else value
             return {**credentials, "profile_arn": value.get("profile_arn") or (value.get("profile") or {}).get("arn") or credentials.get("profile_arn", "")}
-        with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as connection:
+        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+            connection.execute("BEGIN")
             row = connection.execute("SELECT value FROM auth_kv WHERE key=?", ("kirocli:odic:token",)).fetchone()
             credentials = json.loads(row[0]) if row else {}
             if not isinstance(credentials, dict):

@@ -27,25 +27,36 @@ NAMES = {'deepseek': 'DeepSeek', 'deepinfra': 'DeepInfra', 'kimi': 'Kimi',
          'modelstudio': 'Alibaba Model Studio', 'devin': 'Devin'}
 
 
+def _auth_path(default):
+    """Resolve discovery paths only when no explicit credential file was given."""
+    override = os.environ.get('AI_STATUS_AUTH_FILE')
+    return auth_path(override or (default() if callable(default) else default))
+
+
 def _read(default):
     if os.environ.get('AI_STATUS_ACCOUNT_ID') and not os.environ.get('AI_STATUS_AUTH_FILE'):
         return {}
     try:
-        path = auth_path(default)
+        path = _auth_path(default)
         if path.stat().st_size > 1024*1024:
             return {}
         value = json.loads(path.read_text(encoding='utf-8-sig'))
         return value if isinstance(value, dict) else {}
-    except (OSError, ValueError):
+    except (OSError, ValueError, RuntimeError):
         return {}
+
+
+def _env_root(variable, default):
+    value = os.environ.get(variable)
+    return Path(value) if value else default()
 
 
 def _config_root():
     if os.name == 'nt':
-        return Path(os.environ.get('APPDATA', Path.home() / 'AppData/Roaming'))
+        return _env_root('APPDATA', lambda: Path.home() / 'AppData/Roaming')
     if sys.platform == 'darwin':
         return Path.home() / 'Library/Application Support'
-    return Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config'))
+    return _env_root('XDG_CONFIG_HOME', lambda: Path.home() / '.config')
 
 
 def _key(name, variable=None, fallback=None):
@@ -336,13 +347,13 @@ def collect(name):
         return {'usage': json_request('https://api.orcarouter.ai/v1/dashboard/billing/usage', headers),
                 'subscription': json_request('https://api.orcarouter.ai/v1/dashboard/billing/subscription', headers)}
     if name == 'kimi':
-        credentials = _read(Path.home() / '.kimi-code/credentials/kimi-code.json')
+        credentials = _read(lambda: Path.home() / '.kimi-code/credentials/kimi-code.json')
         token = _key(name, fallback=credentials.get('access_token'))
         region = cfg.get('region')
-        if not region:
+        if not region and not (os.environ.get('AI_STATUS_AUTH_FILE') or os.environ.get('AI_STATUS_ACCOUNT_ID')):
             try:
                 region = (Path.home() / '.kimi-code/region').read_text().strip()
-            except OSError:
+            except (OSError, RuntimeError):
                 region = 'cn'
         host = 'api.kimi.ai' if region == 'global' else 'api.kimi.com'
         return json_request(f'https://{host}/coding/v1/usages', _bearer(token))
@@ -357,7 +368,7 @@ def collect(name):
             raise QueryError('Set team_id for an organization-scoped xAI Management key.')
         return json_request('https://management-api.x.ai/v1/billing/teams/'+urllib.parse.quote(str(team), safe='')+'/prepaid/balance', headers)
     if name == 'supergrok':
-        credentials = _read(Path(os.environ.get('GROK_HOME', Path.home() / '.grok')) / 'auth.json')
+        credentials = _read(lambda: _env_root('GROK_HOME', lambda: Path.home() / '.grok') / 'auth.json')
         fallback = next((row.get('key') for row in credentials.values() if isinstance(row, dict) and row.get('key')), None)
         token = _key(name, 'SUPERGROK_ACCESS_TOKEN', fallback)
         return json_request('https://cli-chat-proxy.grok.com/v1/billing', _bearer(token, {'X-XAI-Token-Auth': 'xai-grok-cli'}), {'format': 'credits'})
@@ -365,7 +376,7 @@ def collect(name):
         token = _access('CURSOR_ACCESS_TOKEN')
         override = os.environ.get('AI_STATUS_AUTH_FILE')
         if not token and (override or not os.environ.get('AI_STATUS_ACCOUNT_ID')):
-            database = auth_path(_config_root() / 'Cursor/User/globalStorage/state.vscdb')
+            database = _auth_path(lambda: _config_root() / 'Cursor/User/globalStorage/state.vscdb')
             if database.suffix == '.json':
                 token = _read(database).get('accessToken')
             elif database.is_file():
@@ -398,17 +409,19 @@ def collect(name):
                 raise QueryError('Configure an account auth_file or GROK_BOT_ACCESS_TOKEN environment reference.')
             try:
                 from .oscrypt import grok_bot_tokens
-                token, _ = grok_bot_tokens(auth_path(_config_root() / 'Grok Bot/sand-secrets.json'))
-            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                token, _ = grok_bot_tokens(_auth_path(lambda: _config_root() / 'Grok Bot/sand-secrets.json'))
+            except (OSError, ValueError, KeyError, TypeError, AttributeError, RuntimeError):
                 raise QueryError('Sign in to the Grok Bot desktop app or set GROK_BOT_ACCESS_TOKEN.') from None
         return json_request('https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus', _bearer(token, {'Connect-Protocol-Version': '1', 'x-cursor-client-type': 'sand', 'x-cursor-client-version': '0.1.0', 'x-sand-box-namespace': 'prod', 'x-ghost-mode': 'true'}), method='POST', data={})
     if name == 'nous':
-        credentials = _read(_config_root() / 'ai-usagebar/credentials.json')
-        token = _access('NOUS_ACCESS_TOKEN') or (credentials.get('nous') or credentials).get('access_token')
+        token = _access('NOUS_ACCESS_TOKEN')
+        if not token:
+            credentials = _read(lambda: _config_root() / 'ai-usagebar/credentials.json')
+            token = (credentials.get('nous') or credentials).get('access_token')
         require_token(token, 'Configure NOUS_ACCESS_TOKEN or an existing Nous OAuth credential file.')
         return json_request('https://portal.nousresearch.com/api/oauth/account', _bearer(token))
     if name == 'modelstudio':
-        credentials = _read(Path.home() / '.bailian/config.json')
+        credentials = _read(lambda: Path.home() / '.bailian/config.json')
         token = _access('MODELSTUDIO_ACCESS_TOKEN') or credentials.get('access_token') or credentials.get('accessToken')
         require_token(token, 'Run bl auth login --console or configure an account console token.')
         region = cfg.get('region') or credentials.get('console_region') or 'cn-beijing'
@@ -421,12 +434,11 @@ def collect(name):
         body = urllib.parse.urlencode({'region': region, 'params': json.dumps(params, separators=(',', ':'))})
         return json_request(f'https://{host}/cli/api.json', _bearer(token, {'Content-Type': 'application/x-www-form-urlencoded'}), {'action': action, 'product': 'sfm_bailian', 'api': api}, 'POST', body)
     if name == 'devin':
-        default = _config_root() / 'devin/credentials.toml' if os.name == 'nt' else Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'devin/credentials.toml'
         reference = cfg.get('api_key_env')
         token = (os.environ.get(reference) if isinstance(reference, str) else None) or os.environ.get('DEVIN_API_KEY')
         if not token and (os.environ.get('AI_STATUS_AUTH_FILE') or not os.environ.get('AI_STATUS_ACCOUNT_ID')):
             try:
-                raw = auth_path(default).read_text(encoding='utf-8')
+                raw = _auth_path(lambda: (_config_root() if os.name == 'nt' else _env_root('XDG_DATA_HOME', lambda: Path.home() / '.local/share')) / 'devin/credentials.toml').read_text(encoding='utf-8')
                 # Read only this top-level TOML field, never other credentials.
                 for line in raw.splitlines():
                     if line.lstrip().startswith('['):
@@ -436,17 +448,17 @@ def collect(name):
                         quoted = match.group(1)
                         token = json.loads(quoted) if quoted.startswith('"') else quoted[1:-1]
                         break
-            except (OSError, ValueError):
+            except (OSError, ValueError, RuntimeError):
                 pass
         require_token(token, 'Sign in with the official Devin CLI or configure DEVIN_API_KEY.')
         version = '0.0.0'
-        cache = Path(os.environ.get('LOCALAPPDATA', Path.home() / '.cache')) if os.name == 'nt' else Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache'))
         try:
+            cache = _env_root('LOCALAPPDATA' if os.name == 'nt' else 'XDG_CACHE_HOME', lambda: Path.home() / '.cache')
             record = json.loads((cache / 'devin/cli/cached_version.json').read_text())
             candidate = record.get('latest') if isinstance(record, dict) else record
             if re.fullmatch(r'\d+\.\d+\.\d+', str(candidate)):
                 version = candidate
-        except (OSError, ValueError):
+        except (OSError, ValueError, RuntimeError):
             pass
         metadata = {'apiKey': token, 'ideName': 'devin', 'ideVersion': version, 'extensionVersion': version, 'locale': 'en'}
         return json_request('https://server.codeium.com/exa.seat_management_pb.SeatManagementService/GetUserStatus', {'Accept': 'application/json', 'Connect-Protocol-Version': '1'}, method='POST', data={'metadata': metadata})

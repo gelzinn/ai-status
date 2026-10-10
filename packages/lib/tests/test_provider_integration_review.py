@@ -52,23 +52,42 @@ class ProviderIntegrationReview(unittest.TestCase):
     def test_codex_direct_account_token_omits_default_file_account_header(self):
         query = load("codex", "query")
         with patch.dict(os.environ, {"AI_STATUS_ACCOUNT_ID": "second", "CODEX_ACCESS_TOKEN": "second-token"}, clear=True), \
+                patch.object(query.Path, "home", side_effect=AssertionError("Direct tokens must not resolve the user's home")) as home, \
                 patch.object(query, "read_json", return_value={"tokens": {"account_id": "primary-id"}}) as read, \
                 patch.object(query, "request", return_value='{"rate_limit":{}}') as request:
             query.query()
         read.assert_not_called()
+        home.assert_not_called()
         self.assertEqual(request.call_args.args[1], {"Authorization": "Bearer second-token"})
 
     def test_claude_direct_account_token_omits_default_file_subscription(self):
         query = load("claude", "query")
         with patch.dict(os.environ, {"AI_STATUS_ACCOUNT_ID": "second", "CLAUDE_ACCESS_TOKEN": "second-token"}, clear=True), \
+                patch.object(query.Path, "home", side_effect=AssertionError("Direct tokens must not resolve the user's home")) as home, \
                 patch.object(query, "read_json", return_value={"claudeAiOauth": {"subscriptionType": "primary-plan", "expiresAt": 1}}) as read, \
                 patch.object(query, "request", return_value='{"five_hour":{"utilization":0}}') as request:
             result = query.query()
         read.assert_not_called()
+        home.assert_not_called()
         self.assertEqual(result["plan"], "")
         self.assertEqual(request.call_args.args[1]["Authorization"], "Bearer second-token")
         self.assertEqual(request.call_args.args[0], "https://api.anthropic.com/api/oauth/usage?cedar_ember=1")
         self.assertEqual(request.call_args.args[1]["User-Agent"], "claude-cli/2.1.281 (external, cli)")
+
+    def test_explicit_auth_paths_and_directories_do_not_resolve_home(self):
+        for provider, variable, filename, credentials, response in (
+                ("codex", "CODEX_HOME", "auth.json", {"tokens": {"access_token": "saved-token"}}, '{}'),
+                ("claude", "CLAUDE_CONFIG_DIR", ".credentials.json", {"claudeAiOauth": {"accessToken": "saved-token"}}, '{"five_hour":{"utilization":0}}')):
+            query = load(provider, "query")
+            for override in ({variable: "/configured"}, {"AI_STATUS_AUTH_FILE": "/configured/saved.json"}):
+                with self.subTest(provider=provider, override=override), \
+                        patch.dict(os.environ, {"AI_STATUS_ACCOUNT_ID": "second", **override}, clear=True), \
+                        patch.object(query.Path, "home", side_effect=AssertionError("Configured paths must not resolve home")) as home, \
+                        patch.object(query, "read_json", return_value=credentials) as read, \
+                        patch.object(query, "request", return_value=response):
+                    query.query()
+                home.assert_not_called()
+                self.assertEqual(Path(read.call_args.args[0]), Path(override.get("AI_STATUS_AUTH_FILE") or Path("/configured") / filename))
 
     def test_saved_anthropic_key_does_not_inherit_default_admin_oauth(self):
         record = accounts.connection(accounts.normalize({"id": "second", "provider": "anthropic-api",

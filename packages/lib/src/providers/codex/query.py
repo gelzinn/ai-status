@@ -10,12 +10,18 @@ RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credi
 
 
 def query():
-    root = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
     if os.environ.get("AI_STATUS_ACCOUNT_ID") and not any(os.environ.get(key) for key in ("AI_STATUS_AUTH_FILE", "CODEX_HOME", "CODEX_ACCESS_TOKEN")):
         raise QueryError("Set auth_file, CODEX_HOME or CODEX_ACCESS_TOKEN for this Codex account.")
     direct = os.environ.get("CODEX_ACCESS_TOKEN")
     use_file = not direct or os.environ.get("AI_STATUS_AUTH_FILE") or os.environ.get("CODEX_HOME")
-    tokens = (read_json(os.environ.get("AI_STATUS_AUTH_FILE") or root / "auth.json").get("tokens") or {}) if use_file else {}
+    tokens = {}
+    if use_file:
+        path = os.environ.get("AI_STATUS_AUTH_FILE")
+        if not path:
+            configured_root = os.environ.get("CODEX_HOME")
+            root = Path(configured_root) if configured_root else Path.home() / ".codex"
+            path = root / "auth.json"
+        tokens = read_json(path).get("tokens") or {}
     token = require_token(os.environ.get("CODEX_ACCESS_TOKEN") or tokens.get("access_token"), "Sign in to Codex with your ChatGPT account.")
     headers = {"Authorization": f"Bearer {token}"}
     account_id = os.environ.get("CODEX_ACCOUNT_ID") or tokens.get("account_id")

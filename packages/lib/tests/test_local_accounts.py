@@ -1,4 +1,5 @@
 import importlib.util
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -46,17 +47,23 @@ class LocalAccountTests(unittest.TestCase):
 
     def test_kiro_sqlite_account_is_read_only_and_fingerprints_live_wal(self):
         database = self.root / "data.sqlite3"
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection:
             connection.execute("CREATE TABLE auth_kv (key TEXT, value TEXT)")
             connection.execute("CREATE TABLE state (key TEXT, value TEXT)")
             connection.execute("INSERT INTO auth_kv VALUES (?, ?)", ("kirocli:odic:token", json.dumps({"access_token": "saved-kiro-token", "region": "us-east-1"})))
             connection.execute("INSERT INTO state VALUES (?, ?)", ("api.codewhisperer.profile", '{"arn":"selected-profile"}'))
+            connection.commit()
         before = database.read_bytes()
         module = provider("kiro")
         with patch.dict(os.environ, {"AI_STATUS_AUTH_FILE": str(database)}), patch.object(module, "json_request", return_value={}) as request:
             module.query()
         self.assertEqual(database.read_bytes(), before)
         self.assertEqual(request.call_args.kwargs["data"]["profileArn"], "selected-profile")
+        # Windows refuses this rename if either the fixture or read-only
+        # credential query still owns a SQLite file handle.
+        moved = self.root / "closed-database.sqlite3"
+        database.rename(moved)
+        moved.rename(database)
         writer = sqlite3.connect(database)
         self.addCleanup(writer.close)
         writer.execute("PRAGMA journal_mode=WAL")

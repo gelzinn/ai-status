@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -121,7 +122,15 @@ class ProviderCollectors(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.env = patch.dict(os.environ, {'AI_STATUS_ACCOUNT_OPTIONS': '{}'}, clear=True)
+        self.env = patch.dict(os.environ, {
+            'AI_STATUS_ACCOUNT_OPTIONS': '{}',
+            'HOME': str(self.root), 'USERPROFILE': str(self.root),
+            'APPDATA': str(self.root / 'AppData/Roaming'),
+            'LOCALAPPDATA': str(self.root / 'AppData/Local'),
+            'XDG_CONFIG_HOME': str(self.root / '.config'),
+            'XDG_DATA_HOME': str(self.root / '.local/share'),
+            'XDG_CACHE_HOME': str(self.root / '.cache'),
+        }, clear=True)
         self.env.start()
         self.addCleanup(self.env.stop)
 
@@ -156,7 +165,7 @@ class ProviderCollectors(unittest.TestCase):
                 path = self.root / (name+'.json')
                 content = json.dumps(credentials)
                 path.write_text(content)
-                with patch.dict(os.environ, {'AI_STATUS_AUTH_FILE': str(path)}), patch.object(p, 'json_request', return_value={}) as api:
+                with patch.dict(os.environ, {'AI_STATUS_AUTH_FILE': str(path)}), patch.object(Path, 'home', side_effect=AssertionError('Explicit auth must not discover a home')), patch.object(p, 'json_request', return_value={}) as api:
                     p.collect(name)
                     self.assertEqual(api.call_args.args[1]['Authorization'], 'Bearer synthetic-credential')
                     if name == 'modelstudio':
@@ -172,7 +181,7 @@ class ProviderCollectors(unittest.TestCase):
             db.execute('INSERT INTO ItemTable VALUES (?, ?)', ('cursorAuth/accessToken', token))
             db.commit()
         before = path.read_bytes()
-        with patch.dict(os.environ, {'AI_STATUS_AUTH_FILE': str(path)}), patch.object(p, 'json_request', return_value=FIXTURES['cursor']) as api:
+        with patch.dict(os.environ, {'AI_STATUS_AUTH_FILE': str(path)}), patch.object(Path, 'home', side_effect=AssertionError('Explicit auth must not discover a home')), patch.object(p, 'json_request', return_value=FIXTURES['cursor']) as api:
             self.assertEqual(p.collect('cursor'), FIXTURES['cursor'])
             self.assertEqual(api.call_args.args[1]['Cookie'], 'WorkosCursorSessionToken=user1%3A%3A'+token)
         self.assertEqual(path.read_bytes(), before)
@@ -185,7 +194,7 @@ class ProviderCollectors(unittest.TestCase):
         path = self.root / 'credentials.toml'
         content = 'windsurf_api_key = "synthetic-credential"\napi_server_url = "https://attacker.invalid"\n'
         path.write_text(content)
-        with patch.dict(os.environ, {'AI_STATUS_AUTH_FILE': str(path)}), patch.object(p, 'json_request', return_value={}) as api:
+        with patch.dict(os.environ, {'AI_STATUS_AUTH_FILE': str(path)}), patch.object(Path, 'home', side_effect=RuntimeError('Could not determine home directory.')), patch.dict(os.environ, {'LOCALAPPDATA': '', 'XDG_CACHE_HOME': ''}), patch.object(p, 'json_request', return_value={}) as api:
             p.collect('devin')
             self.assertTrue(api.call_args.args[0].startswith('https://server.codeium.com/'))
             self.assertEqual(api.call_args.kwargs['data']['metadata']['apiKey'], 'synthetic-credential')
@@ -193,7 +202,7 @@ class ProviderCollectors(unittest.TestCase):
 
     def test_explicit_accounts_do_not_discover_global_credentials(self):
         for name in ('kimi', 'supergrok', 'nous', 'modelstudio', 'cursor', 'grok-bot', 'devin'):
-            with self.subTest(name=name), patch.dict(os.environ, {'AI_STATUS_ACCOUNT_ID': 'second-account'}), patch.object(p, 'json_request') as api:
+            with self.subTest(name=name), patch.dict(os.environ, {'AI_STATUS_ACCOUNT_ID': 'second-account'}), patch.object(Path, 'home', side_effect=AssertionError('Explicit accounts must not discover a home')), patch.object(p, 'json_request') as api:
                 with self.assertRaises(QueryError):
                     p.collect(name)
                 api.assert_not_called()
@@ -202,9 +211,12 @@ class ProviderCollectors(unittest.TestCase):
         with patch.dict(os.environ, {'AI_STATUS_ACCOUNT_OPTIONS': '{"api_key_env":"MY_DEEPSEEK_KEY"}', 'MY_DEEPSEEK_KEY': 'synthetic-credential'}), patch.object(p, 'json_request', return_value={}) as api:
             p.collect('deepseek')
             self.assertEqual(api.call_args.args[1]['Authorization'], 'Bearer synthetic-credential')
-        with patch.dict(os.environ, {'AI_STATUS_ACCOUNT_OPTIONS': '{"access_token_env":"MY_NOUS_TOKEN"}', 'MY_NOUS_TOKEN': 'synthetic-credential'}), patch.object(p, 'json_request', return_value={}) as api:
+        with patch.dict(os.environ, {'AI_STATUS_ACCOUNT_OPTIONS': '{"access_token_env":"MY_NOUS_TOKEN"}', 'MY_NOUS_TOKEN': 'synthetic-credential'}), patch.object(Path, 'home', side_effect=AssertionError('Explicit tokens must not discover a home')), patch.object(p, 'json_request', return_value={}) as api:
             p.collect('nous')
             self.assertEqual(api.call_args.args[1]['Authorization'], 'Bearer synthetic-credential')
+        for platform, os_name, variable in [('linux', 'posix', 'XDG_CONFIG_HOME'), ('win32', 'nt', 'APPDATA')]:
+            with self.subTest(platform=platform), patch.object(p, 'os', SimpleNamespace(name=os_name, environ={variable: str(self.root)})), patch.object(p, 'sys', SimpleNamespace(platform=platform)), patch.object(Path, 'home', side_effect=AssertionError('Configured roots must not discover a home')):
+                self.assertEqual(p._config_root(), self.root)
 
 
 class EncryptionReader(unittest.TestCase):
@@ -238,8 +250,11 @@ class EncryptionReader(unittest.TestCase):
             path = Path(root) / 'sand-secrets.json'
             content = json.dumps(data)
             path.write_text(content)
-            with patch.object(oscrypt, '_secret', return_value=None), patch.object(oscrypt.sys, 'platform', 'linux'):
+            with patch.object(oscrypt, '_secret', return_value=None), patch.object(oscrypt, 'os', SimpleNamespace(name='posix')), patch.object(oscrypt, 'sys', SimpleNamespace(platform='linux')):
                 self.assertEqual(oscrypt.grok_bot_tokens(path), ('test-access', 'test-refresh'))
+                with patch.dict(os.environ, {'AI_STATUS_AUTH_FILE': str(path)}, clear=True), patch.object(Path, 'home', side_effect=AssertionError('Explicit auth must not discover a home')), patch.object(p, 'json_request', return_value={}) as api:
+                    p.collect('grok-bot')
+                    self.assertEqual(api.call_args.args[1]['Authorization'], 'Bearer test-access')
             self.assertEqual(path.read_text(), content)
 
 
