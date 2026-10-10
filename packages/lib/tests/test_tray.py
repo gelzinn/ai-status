@@ -1,6 +1,7 @@
 import sys
 import types
 import time
+from pathlib import Path
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -40,6 +41,7 @@ class DesktopTests(IsolatedState):
         self.dashboard.active.setCurrentIndex(1)
         self.assertEqual(state.load_selected()["metric"], "weekly")
         self.assertIn("10%", self.dashboard.tray.toolTip())
+        self.assertIn("cached", self.dashboard.tray.toolTip())
         labels = [item.text() for item in self.dashboard.scroll.widget().findChildren(QLabel)]
         self.assertTrue(any("Cached data" in text for text in labels))
 
@@ -85,7 +87,7 @@ class DesktopTests(IsolatedState):
                 self.app.processEvents()
                 time.sleep(0.01)
         self.assertFalse(self.dashboard.busy)
-        self.assertFalse(paths.Path(state.LOCK_FILE).exists())
+        self.assertFalse(Path(state.LOCK_FILE).exists())
         self.assertIn("42%", self.dashboard.tray.toolTip())
         self.assertEqual(state.load_selected()["provider"], "codex")
 

@@ -323,7 +323,9 @@ class Dashboard(QWidget):
                     detail = metric.get("detail") or ""
                     value = (name, entry.get("_idx", 0), render.metric_key(metric))
                     pct = float(metric.get("percentage", 0))
-                    self.active.addItem(f"{entry.get('provider', name)} · {title} · {pct:.0f}%" + (f" · {detail}" if detail else ""), value)
+                    self.active.addItem(f"{entry.get('provider', name)} · {title} · {pct:.0f}%"
+                                        + (" · cached" if entry.get("_cached") else "")
+                                        + (f" · {detail}" if detail else ""), value)
                     if value == (self.selected.get("provider"), self.selected.get("idx", 0), self.selected.get("metric")):
                         selected_index = self.active.count() - 1
                     bar = QProgressBar()

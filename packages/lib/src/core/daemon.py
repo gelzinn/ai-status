@@ -49,9 +49,8 @@ def update_task():
                     _pending.discard(dir_name)
 
                 data = fetch.fetch_all_data(on_result=on_result)
-                if data:
-                    latest_data = data
-                    state.save_cache(data)
+                latest_data = data
+                state.save_cache(data)
             finally:
                 state.release_lock()
         else:

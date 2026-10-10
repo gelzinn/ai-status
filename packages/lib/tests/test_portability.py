@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
-from core import cli, config, fetch, paths, render, state
+from core import cli, config, daemon, fetch, paths, render, state
 from core.provider_http import QueryError, output, request
 
 
@@ -161,6 +161,14 @@ class PlatformTests(IsolatedState):
     def test_internal_query_rejects_path_traversal(self):
         with self.assertRaises(ValueError):
             fetch.run_query("../../core/cli")
+
+    def test_daemon_clears_usage_when_all_providers_are_disabled(self):
+        config.save_config([])
+        old = [{"provider": "Codex", "metrics": [{"percentage": 50}]}]
+        with patch.object(daemon, "latest_data", old):
+            daemon.update_task()
+            self.assertEqual(daemon.latest_data, [])
+        self.assertEqual(state.load_cache(), [])
 
 
 class CollectorTests(IsolatedState):
