@@ -179,8 +179,10 @@ def main():
             app = QApplication.instance() or QApplication([])
             info["desktop"] = not tray.status_icon().isNull()
             if paths.IS_WINDOWS:
-                from winpty import Backend, PtyProcess
-                info["conpty"] = hasattr(Backend, "ConPTY") and callable(PtyProcess.spawn)
+                from .windows_console import available
+                info["conpty"] = available()
+            if "--smoke" in sys.argv:
+                info.update(tray.smoke_test())
         except ImportError:
             pass
         print(json.dumps(info, ensure_ascii=False))

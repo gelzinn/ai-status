@@ -14,15 +14,21 @@ user; installation does not require administrator access. Launch **AI Status**
 from the Start menu. A portable ZIP is also built: extract the entire folder
 and open `ai-status.exe`. Keep `ai-status-cli.exe` and `_internal` beside it.
 
-- Click the tray icon to open the dashboard. Windows may initially put it in
+- Click the selected provider's tray logo to toggle the usage panel. Windows may initially put it in
   the hidden-icons menu; move it beside the clock using Windows settings.
-- Use the dropdown to choose the provider and metric shown in the tooltip.
+- Click a provider or a metric to select it; the arrow/bullet marks the active
+  selection, matching the landing-page preview. The tray logo and short usage
+  tooltip follow that selection. Up/Down cycles metrics; Escape closes the panel.
+- The panel only lists providers with usable metrics. Failed/unconnected providers
+  do not occupy rows. The square **⋯** menu and tray context menu contain
+  **Refresh**, **Settings**, **Connection details**, update/log actions and **Exit**.
 - **Settings** enables/disables providers and lets you drag to reorder them.
   Starting at sign-in is optional and disabled by default.
 - **Refresh** updates immediately; background updates run every five minutes.
   A failed provider shows a diagnostic. If recent usage is cached, it is
-  explicitly labeled as cached and includes the reason it could not refresh.
-- Closing the dashboard keeps the tray app running. Use **Exit** in its menu
+  explicitly labeled as cached. Its reason is available on hover and in
+  **Connection details**, along with authentication failures for hidden providers.
+- Clicking outside the panel or closing it keeps the tray app running. Use **Exit** in its menu
   to stop it. An active query finishes before exit so child processes close.
 - The tray menu opens the latest release for updates. Run the new installer
   to upgrade; configuration is preserved. There is no unattended executable
@@ -32,6 +38,12 @@ The installer and app contain their own runtime. Provider applications and
 authenticated sessions are separate prerequisites; their CLIs are not bundled
 or installed automatically. Uninstalling removes the sign-in entry and keeps
 your AI Status settings/cache. It never deletes provider credentials.
+
+Before a release includes Windows assets, use the **Windows package** workflow's
+separate **windows-installer** or **windows-portable** artifact. The installer and
+portable payload are no longer combined in one download. The UI uses the app's
+favicon for its executable/installer identity, bundled provider logos, and the
+same Geist Mono font as the landing-page preview, all available offline.
 
 ## Authentication and provider compatibility
 
@@ -60,7 +72,8 @@ support. AI Status attempts the native command and reports installation,
 sign-in or incompatible-output failures; there is no WSL fallback.
 
 [Antigravity provides a native Windows CLI](https://www.antigravity.google/docs/cli/install/).
-Its collector still depends on the CLI's interactive `/usage` output. CLI/API
+Its collector uses Windows' built-in ConPTY API directly and still depends on the
+CLI's interactive `/usage` output. No pywinpty/WinPTY runtime is shipped. CLI/API
 changes can require a collector/parser update. HTTP-backed providers likewise
 retain the same usage endpoints and account requirements as the Linux module.
 
@@ -112,3 +125,9 @@ the existing versioned GitHub release. Hosted Windows runners do not replace
 interactive testing on Windows 10/11: validate tray interaction, scaling,
 Explorer restart, suspend/resume, upgrade and authenticated usage on both OSes
 before announcing full provider compatibility.
+
+The package ships only raster widgets and the required Windows/offscreen Qt
+platform plugins. OpenGL software emulation, QML/Quick, QtNetwork/QtSvg, unused
+image/TLS plugins and translations are excluded. Python's SSL support remains
+for provider HTTPS requests. CI renders the packaged widgets/logos, runs real
+ConPTY input/output checks and enforces installed/download size budgets.

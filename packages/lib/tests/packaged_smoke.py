@@ -13,9 +13,14 @@ def run(*args):
     return json.loads(result.stdout)
 
 
-info = run("doctor")
+info = run("doctor", "--smoke")
 assert info["desktop"], info
 assert info["conpty"], info
+assert info["widget_render"] and info["provider_icons"] and info["native_console"], info
+runtime = Path(exe).parent / "_internal"
+assert not (runtime / "PySide6/opengl32sw.dll").exists()
+assert not (runtime / "PySide6/Qt6Network.dll").exists()
+assert not (runtime / "winpty").exists()
 assert len(info["providers"]) == 8, info
 for name in ("claude", "codex", "copilot", "zai", "opencode", "commandcode"):
     diagnostic = run("--query", name)

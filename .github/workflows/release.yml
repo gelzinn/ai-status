@@ -72,7 +72,7 @@ jobs:
       - uses: actions/download-artifact@v4
         if: steps.version.outputs.found == 'true'
         with:
-          name: windows-x64
+          name: windows-release
           path: windows-release
 
       - name: Attach Windows packages

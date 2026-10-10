@@ -8,8 +8,8 @@ the entire folder when distributing or upgrading the application.
 | Python | PSF License | https://www.python.org/downloads/source/ |
 | PySide6 / Qt | LGPLv3 (open-source distribution) | https://code.qt.io/cgit/pyside/pyside-setup.git/ and https://code.qt.io/cgit/qt/ |
 | Shiboken6 | LGPLv3 | https://code.qt.io/cgit/pyside/pyside-setup.git/ |
-| pywinpty | MIT | https://github.com/andfoy/pywinpty |
 | PyInstaller bootloader | GPL with distribution exception | https://github.com/pyinstaller/pyinstaller |
+| Geist Mono | SIL Open Font License 1.1 | https://github.com/vercel/geist-font |
 
 Full dependency license texts are shipped in `THIRD_PARTY_LICENSES.txt`. Qt
 remains dynamically linked so users can replace its libraries. This project is

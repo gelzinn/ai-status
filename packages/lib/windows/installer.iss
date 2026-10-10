@@ -18,12 +18,15 @@ MinVersion=10.0.17763
 OutputDir=..\..\..\dist
 OutputBaseFilename=ai-status-{#AppVersion}-windows-x64-setup
 Compression=lzma2
+LZMAUseSeparateProcess=yes
+LZMANumBlockThreads=2
 SolidCompression=yes
 CloseApplications=yes
 RestartApplications=no
 UninstallDisplayIcon={app}\ai-status.exe
 LicenseFile=..\..\..\LICENSE
 WizardStyle=modern
+SetupIconFile=..\..\..\build\windows-app.ico
 
 [Tasks]
 Name: "autostart"; Description: "Start AI Status when I sign in to Windows"; Flags: unchecked

@@ -37,7 +37,6 @@ jobs:
           $root = Join-Path $env:RUNNER_TEMP "ai-status-clean-profile"
           New-Item -ItemType Directory -Force $root | Out-Null
           $env:USERPROFILE = $root
-          $env:HOME = $root
           $env:APPDATA = Join-Path $root "Roaming"
           $env:LOCALAPPDATA = Join-Path $root "Local"
           $env:CODEX_HOME = Join-Path $root "codex"
@@ -57,10 +56,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Installed CLI smoke test failed" }
           $result = Start-Process -FilePath "$installed/unins000.exe" -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
           if ($result.ExitCode -ne 0) { throw "Silent uninstall failed" }
+      - name: Check package size
+        run: python packages/lib/windows/size_report.py
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-x64
+          name: windows-portable
+          path: dist/ai-status/
+          compression-level: 9
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/*-windows-x64-setup.exe
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push'
+        with:
+          name: windows-release
           path: |
             dist/*-windows-x64.zip
             dist/*-windows-x64-setup.exe
+          compression-level: 0
           if-no-files-found: error

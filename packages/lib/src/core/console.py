@@ -1,6 +1,5 @@
 """Windows ConPTY interaction for terminal-only usage commands."""
 import re
-import select
 import time
 from .provider_http import QueryError, cli_path
 
@@ -8,22 +7,21 @@ ANSI_ESCAPE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|
 
 
 def query_antigravity():
-    from winpty import Backend, PtyProcess
+    from .windows_console import PtyProcess
 
     executable = cli_path("agy")
-    proc = PtyProcess.spawn([executable], dimensions=(80, 120), backend=Backend.ConPTY)
+    proc = PtyProcess.spawn([executable], dimensions=(80, 120))
     deadline = time.monotonic() + 15
     text = ""
     sent = False
     try:
         while time.monotonic() < deadline:
-            ready, _, _ = select.select([proc.fileobj], [], [], 0.1)
-            if not ready:
+            try:
+                text += proc.read(timeout=0.1)
+            except TimeoutError:
                 if not proc.isalive():
                     break
                 continue
-            try:
-                text += proc.read(4096)
             except EOFError:
                 break
             clean = ANSI_ESCAPE.sub("", text).replace("\r", "")

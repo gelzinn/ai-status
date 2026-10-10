@@ -31,6 +31,7 @@ class IsolatedState(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.patches = []
         for module, key, value in (
+            (paths, "RUNTIME_DIR", self.root / "runtime"),
             (config, "CONFIG_FILE", str(self.root / "providers.json")),
             (config, "CONFIG_DIR", str(self.root)),
             (state, "CACHE_FILE", str(self.root / "usage.json")),
