@@ -3,80 +3,75 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
 
 jobs:
-  windows-package:
-    uses: ./.github/workflows/windows.yml
+  checks:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
 
   release:
-    needs: windows-package
+    needs: checks
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pending.outputs.tag }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v7
+      # BOT_TOKEN also lets CI run on the generated release PR. PRs created
+      # with GITHUB_TOKEN would not trigger pull_request workflows.
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.BOT_TOKEN }}
+          target-branch: main
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-
-      - name: Check for release commit
-        id: version
+      - name: Find the pending stable draft
+        id: pending
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
         run: |
-          for COMMIT_JSON in $(echo '${{ toJson(github.event.commits) }}' | jq -r '.[] | @base64'); do
-            _jq() { echo "$COMMIT_JSON" | base64 -d | jq -r "$1"; }
-
-            MSG=$(_jq '.message')
-            ID=$(_jq '.id')
-
-            if echo "$MSG" | grep -q '^chore: release v'; then
-              VERIFIED=$(gh api repos/${{ github.repository }}/commits/$ID --jq '.commit.verification.verified')
-              if [ "$VERIFIED" != "true" ]; then
-                echo "Ignoring unverified commit: $ID"
-                continue
-              fi
-              VERSION=$(echo "$MSG" | head -1 | sed 's/^chore: release v//; s/ .*//')
-              echo "new=$VERSION" >> $GITHUB_OUTPUT
-              echo "found=true" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-          done
-          echo "found=false" >> $GITHUB_OUTPUT
-
-      - name: Create tag
-        if: steps.version.outputs.found == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api repos/${{ github.repository }}/git/refs \
-            --field ref="refs/tags/v${{ steps.version.outputs.new }}" \
-            --field sha="${{ github.sha }}"
-
-      - name: Create GitHub Release
-        if: steps.version.outputs.found == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="v${{ steps.version.outputs.new }}"
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes ""
-          else
-            gh release create "$TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "$TAG" \
-              --generate-notes \
-              --latest
+          tag="v$(cat packages/lib/VERSION)"
+          draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease --jq '.isDraft and (.isPrerelease | not)')
+          if [ "$draft" = true ]; then
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
           fi
 
+  windows-package:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    uses: ./.github/workflows/windows.yml
+    with:
+      ref: ${{ needs.release.outputs.tag }}
+
+  publish:
+    needs: [release, windows-package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
-        if: steps.version.outputs.found == 'true'
         with:
           name: windows-release
           path: windows-release
-
-      - name: Attach Windows packages
-        if: steps.version.outputs.found == 'true'
+      - name: Build, verify, and publish the pending draft release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "v${{ steps.version.outputs.new }}" windows-release/* --clobber --repo "$GITHUB_REPOSITORY"
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          WINDOWS_ASSET_DIR: windows-release
+        run: bash .github/scripts/publish_release.sh

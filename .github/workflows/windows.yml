@@ -5,6 +5,12 @@ on:
     branches: [main]
   workflow_dispatch:
   workflow_call:
+    inputs:
+      ref:
+        description: Exact release tag to package; omitted for PR previews
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -14,6 +20,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -98,7 +106,7 @@ jobs:
           compression-level: 0
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
-        if: github.event_name == 'push'
+        if: inputs.ref != ''
         with:
           name: windows-release
           path: |
