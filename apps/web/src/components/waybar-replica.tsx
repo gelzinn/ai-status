@@ -1,11 +1,12 @@
 "use client";
 
-import { Bot, Wifi, Bluetooth } from "lucide-react";
+import { Bot, Wifi, Bluetooth, ChevronUp, Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useId } from "react";
 import { PROVIDERS } from "@ai-status/shared";
 import { site } from "@/lib/env";
 import { useInstallPlatform } from "@/components/install-platform";
+import { WindowsIcon } from "@/components/os-icons";
 
 type Stat = {
   label: string;
@@ -88,6 +89,9 @@ const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', 
 
 export function WaybarReplica({ version }: { version: string }) {
   const { activeOs } = useInstallPlatform();
+  const isWindows = activeOs === "Windows";
+  const panelId = useId();
+  const tooltipId = useId();
   const [mounted, setMounted] = useState(false);
 
   const [activeIdx, setActiveIdx] = useState(0);
@@ -102,15 +106,16 @@ export function WaybarReplica({ version }: { version: string }) {
   );
 
   const cardRef = useRef<HTMLDivElement>(null);
-  const topbarRef = useRef<HTMLDivElement>(null);
+  const trayRef = useRef<HTMLButtonElement>(null);
 
   const activeProvider = WAYBAR_DATA[activeIdx];
   const primaryStat =
     activeProvider.stats[activeStatIdx] || activeProvider.stats[0];
+  const trayLabel = `${activeProvider.provider} ${isRefreshing ? SPINNER_FRAMES[spinnerFrame] : `${primaryStat.percent}%`}`;
 
   // Prevent page scroll and navigate stats/providers
   useEffect(() => {
-    const el = topbarRef.current;
+    const el = trayRef.current;
     if (!el) return;
 
     const handleWheel = (e: WheelEvent) => {
@@ -189,7 +194,7 @@ export function WaybarReplica({ version }: { version: string }) {
       ref={cardRef}
       className={cn(
         "relative w-full h-full rounded-2xl border border-border bg-black bg-no-repeat bg-center shadow-[0_0_60px_rgba(0,0,0,0.6)] font-mono text-xs flex flex-col overflow-hidden transition-all duration-300 ease-out group",
-        activeOs === "Windows"
+        isWindows
           ? "bg-[url('/windows-11-wallpaper.webp')] bg-cover"
           : "bg-[url('/omarchy-wallpaper.jpeg')] bg-contain",
       )}
@@ -197,64 +202,142 @@ export function WaybarReplica({ version }: { version: string }) {
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
-      {/* Fake Waybar Full Width */}
-      <div className="relative w-full shrink-0 h-10 bg-card backdrop-blur-md border-b border-border flex items-center justify-between px-4 z-20">
-        {/* Left Workspaces */}
-        <div className="flex items-center gap-3 opacity-50">
-          {Array.from({ length: 6 }).map((_, idx) => (
+      <div
+        role="group"
+        aria-label={isWindows ? "Windows taskbar preview" : "Waybar preview"}
+        className={cn(
+          "relative w-full shrink-0 flex items-center border-border z-20",
+          isWindows
+            ? "order-last h-12 justify-end border-t bg-card/90 backdrop-blur-2xl px-3"
+            : "h-10 justify-between border-b bg-card backdrop-blur-md px-4",
+        )}
+      >
+        {isWindows ? (
+          <div aria-hidden="true" className="absolute left-1/2 -translate-x-1/2">
+            <WindowsIcon alt="" className="size-5" />
+          </div>
+        ) : (
+          <div aria-hidden="true" className="flex items-center gap-3 opacity-50">
+            {Array.from({ length: 6 }).map((_, idx) => (
+              <div
+                key={idx}
+                className="w-3 h-3 rounded-full bg-muted-foreground/30"
+              />
+            ))}
+          </div>
+        )}
+
+        <div className={cn("flex items-center", isWindows ? "gap-1" : "gap-4")}>
+          {isWindows && (
             <div
-              key={idx}
-              className="w-3 h-3 rounded-full bg-muted-foreground/30"
-            />
-          ))}
-        </div>
-
-        {/* Right Tray */}
-        <div className="flex items-center gap-4">
-          {/* AI Status Module (Top bar part) */}
-          <div
-            ref={topbarRef}
-            className="relative flex items-center gap-2 cursor-pointer hover:bg-foreground/10 px-2 py-1 -mx-2 rounded-md transition-colors select-none"
-            onClick={() => setIsOpen(!isOpen)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              if (isRefreshing) return;
-              setIsRefreshing(true);
-              setTimeout(() => setIsRefreshing(false), 2000);
-            }}
-          >
-            <div className="relative flex items-center justify-center">
-              {activeProvider.logo ? (
-                <img
-                  src={activeProvider.logo}
-                  alt=""
-                  className="size-3.5 object-contain filter brightness-110"
-                />
-              ) : (
-                <Bot className="size-3.5 text-foreground transition-colors duration-300" />
-              )}
+              aria-hidden="true"
+              className="flex size-8 items-center justify-center text-foreground"
+            >
+              <ChevronUp className="size-4" />
             </div>
+          )}
 
-            <span className="text-foreground font-medium">
-              {activeProvider.provider} {isRefreshing ? SPINNER_FRAMES[spinnerFrame] : `${primaryStat.percent}%`}
-            </span>
+          <div className="relative group/tray">
+            <button
+              ref={trayRef}
+              type="button"
+              aria-label={`${site.name}: ${trayLabel}`}
+              aria-expanded={isOpen}
+              aria-controls={panelId}
+              aria-describedby={isWindows ? tooltipId : undefined}
+              className={cn(
+                "relative flex items-center justify-center gap-2 hover:bg-foreground/10 rounded-md transition-colors select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/40",
+                isWindows ? "size-8" : "px-2 py-1 -mx-2",
+              )}
+              onClick={() => setIsOpen((open) => !open)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setIsOpen(false);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                if (isRefreshing) return;
+                setIsRefreshing(true);
+                setTimeout(() => setIsRefreshing(false), 2000);
+              }}
+            >
+              <div className="relative flex items-center justify-center">
+                {activeProvider.logo ? (
+                  <img
+                    src={activeProvider.logo}
+                    alt=""
+                    className={cn(
+                      "object-contain filter brightness-110",
+                      isWindows ? "size-4" : "size-3.5",
+                    )}
+                  />
+                ) : (
+                  <Bot
+                    className={cn(
+                      "text-foreground transition-colors duration-300",
+                      isWindows ? "size-4" : "size-3.5",
+                    )}
+                  />
+                )}
+              </div>
+
+              {!isWindows && (
+                <span className="text-foreground font-medium">{trayLabel}</span>
+              )}
+            </button>
+
+            {isWindows && (
+              <span
+                id={tooltipId}
+                role="tooltip"
+                className="pointer-events-none absolute right-0 bottom-full mb-2 whitespace-nowrap rounded-md border border-border bg-popover px-2.5 py-1.5 font-sans text-xs text-popover-foreground shadow-lg invisible opacity-0 transition-opacity group-hover/tray:visible group-hover/tray:opacity-100 group-focus-within/tray:visible group-focus-within/tray:opacity-100"
+              >
+                {trayLabel}
+              </span>
+            )}
           </div>
 
-          {/* Other icons */}
-          <div className="flex items-center gap-2 opacity-50 text-muted-foreground">
+          <div
+            aria-hidden="true"
+            className={cn(
+              "flex items-center gap-2 text-muted-foreground",
+              isWindows ? "px-2" : "opacity-50",
+            )}
+          >
             <Wifi className="size-3.5" />
-            <Bluetooth className="size-3.5" />
+            {isWindows ? (
+              <Volume2 className="size-3.5" />
+            ) : (
+              <Bluetooth className="size-3.5" />
+            )}
           </div>
+          {isWindows && (
+            <span
+              aria-hidden="true"
+              className="pl-1 font-sans text-[11px] tabular-nums text-foreground"
+            >
+              11:23
+            </span>
+          )}
         </div>
       </div>
 
       {/* Desktop Body Container */}
-      <div className="relative flex-1 flex justify-end p-4 z-10 overflow-hidden">
-        {/* AI Status Tooltip Dropdown */}
+      <div
+        className={cn(
+          "relative min-h-0 flex-1 flex justify-end z-10 overflow-hidden",
+          isWindows ? "items-end px-3 pt-4 pb-2" : "p-4",
+        )}
+      >
+        {/* AI Status Usage Panel */}
         <div
+          id={panelId}
+          aria-hidden={!isOpen}
+          inert={!isOpen}
           className={cn(
-            "relative w-[65%] h-full rounded-xl bg-card/95 backdrop-blur-2xl border border-border shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden transition-all duration-350 ease-[cubic-bezier(0.16,1,0.3,1)] origin-top-right",
-            !isOpen && "opacity-0 scale-95 pointer-events-none -translate-y-2",
+            "relative w-[65%] h-full rounded-xl bg-card/95 backdrop-blur-2xl border border-border shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden transition-all duration-350 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            isWindows ? "origin-bottom-right motion-safe:animate-fade-up" : "origin-top-right",
+            !isOpen && "opacity-0 scale-95 pointer-events-none",
+            !isOpen && (isWindows ? "translate-y-2" : "-translate-y-2"),
           )}
         >
           <div className="flex flex-col overflow-hidden select-none">
