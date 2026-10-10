@@ -1369,6 +1369,7 @@ class Dashboard(QWidget):
                     button.bullet = bullet
                     title_row.addWidget(bullet)
                     button.title = plain_label(title + ":", color)
+                    button.title.setWordWrap(True)
                     title_row.addWidget(button.title, 1)
                     metric_layout.addLayout(title_row)
                     bar_row = QHBoxLayout()

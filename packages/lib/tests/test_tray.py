@@ -279,6 +279,26 @@ class DesktopTests(IsolatedState):
         button.click()
         self.assertEqual(state.load_selected()["provider"], "account:work")
 
+    def test_long_metric_names_keep_percentages_and_amounts_in_the_viewport(self):
+        config.save_config(["openai-api"])
+        self.dashboard.on_result("openai-api", [{"provider": "OpenAI API", "metrics": [
+            {"type": "monthly", "name": "Reported month costs / configured budget (USD)",
+             "percentage": 38.75},
+            {"type": "balance", "name": "Available organization prepaid credit balance (USD)",
+             "percentage": None, "amount": 12345.67, "unit": "USD"},
+        ]}])
+        self.dashboard.show()
+        self.app.processEvents()
+        viewport = self.dashboard.scroll.viewport()
+        self.assertLessEqual(self.dashboard.scroll.widget().width(), viewport.width())
+        self.assertEqual([button.percentage.text() for button in self.dashboard.metric_buttons],
+                         ["39%", "$12345.67"])
+        for button in self.dashboard.metric_buttons:
+            value = button.percentage
+            right = value.mapTo(viewport, tray.QPoint(value.width(), 0)).x()
+            self.assertLessEqual(right, viewport.width())
+            self.assertGreaterEqual(value.width(), value.fontMetrics().horizontalAdvance(value.text()))
+
     def test_refresh_keeps_rows_and_geometry_while_providers_finish_independently(self):
         from core import fetch
         self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
