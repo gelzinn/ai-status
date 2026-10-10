@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timezone
+from core import reset_credits
 
 GROUP_TYPES = {
     "session": "rolling",
@@ -126,4 +127,4 @@ def parse(raw_output):
     if not metrics:
         metrics = _metrics_from_windows(usage)
 
-    return {"provider": provider, "metrics": metrics}
+    return {"provider": provider, "metrics": metrics, "reset_credits": reset_credits.from_claude(usage)}

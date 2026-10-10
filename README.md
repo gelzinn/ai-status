@@ -12,6 +12,7 @@ Monitor AI provider usage limits in **Waybar and the Omarchy Quickshell bar** â€
 | **Multi-Provider** | Tracks API usage limits across eight AI services simultaneously |
 | **Live Updates** | Auto-refreshes every 5 minutes with animated loading states |
 | **Usage Details** | Per-provider progress bars, percentages, and resets in a Waybar tooltip or Quickshell panel |
+| **Reset Credits** | Available Claude and Codex manual resets, with labels and expiration dates when reported |
 | **Configurable** | Native settings page on Quickshell; interactive TUI on Waybar (right-click) |
 | **Self-Updating** | One command installs and keeps the module up to date |
 | **Lightweight** | Python and Bash backend, native QML UI on Quickshell; no Node or NPM needed on your desktop |

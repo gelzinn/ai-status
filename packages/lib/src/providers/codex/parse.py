@@ -1,4 +1,5 @@
 import json
+from core import reset_credits
 
 
 def _window_type(seconds):
@@ -44,4 +45,5 @@ def parse(raw_output):
     return {
         "provider": f"Codex ({plan.capitalize()})",
         "metrics": metrics,
+        "reset_credits": reset_credits.from_codex(data),
     }

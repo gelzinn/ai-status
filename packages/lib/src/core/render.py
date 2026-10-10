@@ -1,7 +1,9 @@
 import re
 import math
+from html import escape
 from . import fetch
 from . import state
+from . import reset_credits
 
 TYPE_NAMES = {
     "rolling": "Rolling Usage",
@@ -187,12 +189,20 @@ def format_reset_time(seconds, mtype):
     return f"Resets in {minutes}m"
 
 
+def _reset_credit_lines(provider_data):
+    credits = reset_credits.presentation(provider_data.get("reset_credits"))
+    if not credits:
+        return []
+    return ["    " + _dim(escape(text), DIM_RESET) for text in
+            ["Reset credits: " + credits["summary"]] + credits["details"]] + [""]
+
+
 def format_provider_block(
     provider_data, selected_dir=None, selected_idx=None, selected_metric=None
 ):
     provider = provider_data.get("provider", "AI Provider")
     metrics = provider_data.get("metrics", [])
-    if not metrics:
+    if not metrics and not _reset_credit_lines(provider_data):
         return ""
 
     is_selected = (
@@ -235,6 +245,7 @@ def format_provider_block(
         if detail:
             lines.append("    " + _dim(detail, recede if recede else DIM_RESET))
         lines.append("")
+    lines.extend(_reset_credit_lines(provider_data))
     return "\n".join(lines)
 
 
@@ -243,7 +254,7 @@ def format_loading_provider_block(
 ):
     provider = provider_data.get("provider", "AI Provider")
     metrics = provider_data.get("metrics", [])
-    if not metrics:
+    if not metrics and not _reset_credit_lines(provider_data):
         return ""
 
     # Identical layout to format_provider_block (prefix arrow, active bullet,
@@ -286,6 +297,7 @@ def format_loading_provider_block(
         if detail:
             lines.append("    " + _dim(detail, recede if recede else DIM_RESET))
         lines.append("")
+    lines.extend(_reset_credit_lines(provider_data))
     return "\n".join(lines)
 
 

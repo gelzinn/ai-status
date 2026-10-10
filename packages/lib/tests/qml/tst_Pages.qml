@@ -24,6 +24,8 @@ Item {
         function init() {
             Plugin.Model.reset()
             settings.begin()
+            usage.visible = false
+            settings.visible = true
         }
         function test_draft_is_isolated_and_cancel_reloads_saved_settings() {
             settings.toggleProvider("kiro")
@@ -106,6 +108,26 @@ Item {
             compare(rightEdges.length, 5)
             for (const edge of rightEdges)
                 verify(Math.abs(edge - usage.width) < 0.1)
+        }
+        function test_reset_credits_show_only_with_available_inventory() {
+            settings.visible = false
+            usage.visible = true
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.providers[0].resetCredits = {
+                available: 1,
+                summary: "1 reset available",
+                details: ["Launch reset · Expires Oct 22 13:00 UTC"]
+            }
+            Plugin.Model.snapshot = snapshot
+            const block = findChild(usage, "reset-credits-claude-0")
+            verify(block !== null)
+            verify(block.visible)
+            verify(block.implicitHeight > 0)
+            compare(Plugin.Model.snapshot.providers[0].metrics.length, 3)
+            const cleared = JSON.parse(JSON.stringify(snapshot))
+            cleared.providers[0].resetCredits = null
+            Plugin.Model.snapshot = cleared
+            verify(!findChild(usage, "reset-credits-claude-0").visible)
         }
     }
 }

@@ -10,7 +10,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import config, fetch, render, state
+from . import config, fetch, render, state, reset_credits
 
 
 class _PlainText(HTMLParser):
@@ -164,6 +164,7 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
                 "cached": bool(entry.get("_cached")),
                 "error": plain_text(entry.get("_error") or ("No usage data available" if not metrics and name not in pending else "")),
                 "metrics": metrics,
+                "resetCredits": reset_credits.presentation(entry.get("reset_credits")),
             })
     current = next((p for p in providers if p["id"] == selected.get("provider") and p["idx"] == selected.get("idx", 0)), None)
     if current is None and providers:

@@ -135,6 +135,36 @@ Column {
                     }
                 }
             }
+            Column {
+                objectName: "reset-credits-" + provider.modelData.id + "-" + provider.modelData.idx
+                x: Style.space(24)
+                width: Math.max(0, parent.width - x)
+                visible: !!provider.modelData.resetCredits && provider.modelData.resetCredits.available > 0
+                spacing: Style.space(6)
+                Label {
+                    width: parent.width
+                    text: "Reset credits"
+                    opacity: provider.selected ? 0.85 : 0.55
+                    wrapMode: Text.WordWrap
+                }
+                Label {
+                    width: parent.width
+                    text: provider.modelData.resetCredits ? provider.modelData.resetCredits.summary : ""
+                    opacity: provider.selected ? 0.85 : 0.55
+                    wrapMode: Text.WordWrap
+                }
+                Repeater {
+                    model: provider.modelData.resetCredits ? provider.modelData.resetCredits.details : []
+                    delegate: Label {
+                        required property string modelData
+                        width: parent.width
+                        text: modelData
+                        opacity: 0.5
+                        font.pixelSize: Style.font.caption
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
         }
     }
 }

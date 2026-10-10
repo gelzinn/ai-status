@@ -38,6 +38,8 @@ The widget runs inside the existing shell process, using a single Python daemon 
 
 Scroll the bar to switch providers; middle-click switches metrics. Escape on the usage page closes the panel; `r` refreshes, `c` opens settings, and Up/Down scroll. In settings, Tab focuses the form controls; Space or Enter activates the focused control. Preferences are saved only when you press **Save**.
 
+The header uses monochrome Lucide vector icons for refresh, configuration, and back, matching the landing page's icon family and following the shell's foreground color. Claude and Codex show a separate **Reset credits** section when the provider reports available manual resets, including labels and expiration details. The same inventory appears in the Waybar tooltip; see [PROVIDERS.md](PROVIDERS.md) for endpoint behavior.
+
 ```bash
 # Place the widget (defaults to right on first enable):
 omarchy bar move io.github.gelzinn.ai-status --section right
