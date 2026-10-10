@@ -56,8 +56,10 @@ jobs:
           $installer = Join-Path $PWD "dist/ai-status-$version-windows-x64-setup.exe"
           $identity = (Get-Item $installer).VersionInfo
           $identity | Select-Object OriginalFilename, ProductName, CompanyName, FileDescription, ProductVersion | ConvertTo-Json -Compress | Write-Host
-          if ($identity.OriginalFilename -ne "ai-status-$version-windows-x64-setup.exe" -or
-              $identity.ProductName -ne "AI Status" -or $identity.CompanyName -ne "gelzinn") {
+          # Inno Setup pads its version-resource strings with trailing spaces.
+          if (([string]$identity.OriginalFilename).Trim() -ne "ai-status-$version-windows-x64-setup.exe" -or
+              ([string]$identity.ProductName).Trim() -ne "AI Status" -or
+              ([string]$identity.CompanyName).Trim() -ne "gelzinn") {
             throw "Installer product identity does not match its versioned filename"
           }
           $installed = Join-Path $env:RUNNER_TEMP "AI Status instalado — teste"
