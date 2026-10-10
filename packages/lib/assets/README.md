@@ -8,7 +8,9 @@ Provider artwork uses the URLs in `packages/shared/providers/providers.json`,
 the same sources as the landing page. SVG sources are retained beside 96px PNG
 renders; OpenCode's redundant outer SVG wrapper is removed for compatibility.
 PNG rendering uses resvg-js, so masks/filters (including Antigravity) match the
-browser and the runtime does not need QtSvg. Kiro and Command Code sources are
+browser and the runtime does not need QtSvg. Antigravity's black alpha-mask fill
+is rendered as white for compatibility with renderers that treat masks as
+luminance; the resulting silhouette is unchanged. Kiro and Command Code sources are
 already raster favicons. Provider logos belong to their respective owners.
 
 The unmodified Geist Mono regular/medium fonts come from the project's Geist

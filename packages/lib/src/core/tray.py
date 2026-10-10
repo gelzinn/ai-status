@@ -83,6 +83,11 @@ def provider_icon(name):
     return status_icon()
 
 
+def icon_has_pixels(icon):
+    image = icon.pixmap(32, 32).toImage()
+    return not image.isNull() and any(image.pixelColor(x, y).alpha() for y in range(image.height()) for x in range(image.width()))
+
+
 def startup_enabled():
     if not paths.IS_WINDOWS:
         return False
@@ -662,7 +667,7 @@ def smoke_test():
     widget.ensurePolished()
     image = widget.grab().toImage()
     result = {"widget_render": not image.isNull(),
-              "provider_icons": len(PROVIDERS) == 8 and all(not provider_icon(name).pixmap(32, 32).isNull() for name in PROVIDERS),
+              "provider_icons": len(PROVIDERS) == 8 and all(icon_has_pixels(provider_icon(name)) for name in PROVIDERS),
               "font_family": panel_font().family(), "native_console": False}
     widget.deleteLater()
     if paths.IS_WINDOWS:

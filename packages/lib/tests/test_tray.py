@@ -71,6 +71,10 @@ class DesktopTests(IsolatedState):
         self.assertIn("•", labels)
         self.assertIn("→", labels)
 
+    def test_all_bundled_provider_logos_have_visible_pixels(self):
+        for name in config.available_providers():
+            self.assertTrue(tray.icon_has_pixels(tray.provider_icon(name)), name)
+
     def test_provider_settings_save_disabled_providers(self):
         settings = tray.ProviderSettings(self.dashboard)
         self.addCleanup(settings.deleteLater)
