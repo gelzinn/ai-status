@@ -35,7 +35,7 @@ else
 fi
 
 # Utilities Check
-for cmd in python3 jq curl git; do
+for cmd in python3 jq curl; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         ERR_MSG+="  ${RED}✖${RESET} $cmd not found\n"
         MISSING_DEPS=1
