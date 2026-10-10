@@ -79,11 +79,6 @@ Ui.Panel {
     })
     onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; resetProvider = null }
 
-    Connections {
-        target: Plugin.Model
-        function onSettingsSaved() { root.configurationPage = false }
-    }
-
     Ui.KeyboardPanel {
         id: panel
         anchorItem: root.anchorItem
@@ -118,8 +113,21 @@ Ui.Panel {
                 id: header
                 width: parent.width
                 height: Style.space(32)
-                Text {
+                IconButton {
+                    id: backButton
+                    objectName: "panel-back"
                     anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: root.configurationPage
+                    iconName: "arrow-left"
+                    tooltipText: "Back to usage (Esc)"
+                    enabled: !Plugin.Model.settingsSaving
+                    onPressed: button => { if (button === Qt.LeftButton) root.showUsage() }
+                }
+                Text {
+                    objectName: "panel-title"
+                    anchors.left: parent.left
+                    anchors.leftMargin: backButton.visible ? backButton.width + Style.space(8) : 0
                     anchors.right: controls.left
                     anchors.rightMargin: Style.space(8)
                     anchors.verticalCenter: parent.verticalCenter
@@ -147,6 +155,7 @@ Ui.Panel {
                         rightPadding: Style.space(8)
                     }
                     IconButton {
+                        objectName: "panel-refresh"
                         visible: !root.configurationPage
                         enabled: !Plugin.Model.snapshot.loading
                         iconName: "refresh-cw"
@@ -154,13 +163,14 @@ Ui.Panel {
                         onPressed: button => { if (button === Qt.LeftButton) Plugin.Model.action("refresh") }
                     }
                     IconButton {
-                        iconName: root.configurationPage || root.resetProvider ? "arrow-left" : "settings"
-                        tooltipText: root.configurationPage || root.resetProvider ? "Back to usage (Esc)" : "Configure (C)"
+                        objectName: "panel-settings"
+                        visible: !root.configurationPage && !root.resetProvider
+                        iconName: "settings"
+                        tooltipText: "Configure (C)"
                         enabled: !Plugin.Model.settingsSaving && !!Plugin.Model.snapshot.settings
                         onPressed: button => {
                             if (button === Qt.LeftButton) {
-                                if (root.configurationPage || root.resetProvider) root.showUsage()
-                                else root.configure()
+                                root.configure()
                             }
                         }
                     }
@@ -222,6 +232,7 @@ Ui.Panel {
                     }
                     Plugin.SettingsPage {
                         id: settings
+                        objectName: "panel-settings-page"
                         width: parent.width
                         visible: root.configurationPage
                         foreground: root.barForeground
@@ -235,7 +246,16 @@ Ui.Panel {
                 anchors.right: parent.right
                 spacing: Style.space(8)
                 visible: root.configurationPage
+                Text {
+                    visible: settings.saved
+                    text: "Saved"
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: root.barForeground
+                    font.family: root.panelFont
+                    font.pixelSize: Style.font.caption
+                }
                 Plugin.PanelButton {
+                    objectName: "settings-cancel"
                     text: "Cancel"
                     foreground: root.barForeground
                     fontFamily: root.panelFont
@@ -243,6 +263,7 @@ Ui.Panel {
                     onClicked: root.showUsage()
                 }
                 Plugin.PanelButton {
+                    objectName: "settings-save"
                     text: Plugin.Model.settingsSaving ? "Saving…" : "Save"
                     foreground: root.barForeground
                     fontFamily: root.panelFont

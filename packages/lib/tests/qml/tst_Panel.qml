@@ -63,5 +63,48 @@ Item {
             keyClick(Qt.Key_Escape)
             verify(!panel.opened)
         }
+        function test_header_back_is_before_settings_title() {
+            const configure = findChild(panel, "panel-settings")
+            verify(configure.visible)
+            mouseClick(configure)
+            verify(panel.configurationPage)
+            wait(20)
+            const back = findChild(panel, "panel-back")
+            const title = findChild(panel, "panel-title")
+            verify(back.visible)
+            verify(back.x + back.width < title.x)
+            compare(title.text, "Settings")
+            verify(!configure.visible)
+            verify(!findChild(panel, "panel-refresh").visible)
+            mouseClick(back)
+            verify(!panel.configurationPage)
+            verify(panel.opened)
+            verify(configure.visible)
+        }
+        function test_save_keeps_settings_open_after_backend_completion() {
+            panel.configure()
+            wait(20)
+            const settings = findChild(panel, "panel-settings-page")
+            settings.toggleProvider("kiro")
+            settings.moveProvider(1, -1)
+            const order = JSON.stringify(settings.order)
+            mouseClick(findChild(panel, "settings-save"))
+            compare(Plugin.Model.saved.enabled[0], "codex")
+            verify(panel.configurationPage)
+            Plugin.Model.settingsSaved()
+            verify(panel.configurationPage)
+            verify(panel.opened)
+            verify(settings.saved)
+            compare(JSON.stringify(settings.order), order)
+            // A second edit/save remains possible without leaving the page.
+            settings.toggleProvider("kiro")
+            verify(!settings.saved)
+            mouseClick(findChild(panel, "settings-save"))
+            compare(Plugin.Model.saved.enabled.length, 2)
+            Plugin.Model.settingsSaved()
+            verify(panel.configurationPage)
+            mouseClick(findChild(panel, "panel-back"))
+            verify(!panel.configurationPage)
+        }
     }
 }

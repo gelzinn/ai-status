@@ -13,6 +13,7 @@ Column {
     property string iconMode: "bot"
     property var selected: ({})
     property bool selectionOpen: false
+    property bool saved: false
     readonly property var choices: {
         const items = []
         for (const name of enabledProviders) {
@@ -37,6 +38,16 @@ Column {
     readonly property bool valid: enabledProviders.length > 0 && Object.keys(display).some(key => display[key]) && choices.some(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric)
     spacing: Style.space(22)
     enabled: !Plugin.Model.settingsSaving
+    onOrderChanged: saved = false
+    onEnabledProvidersChanged: saved = false
+    onDisplayChanged: saved = false
+    onIconModeChanged: saved = false
+    onSelectedChanged: saved = false
+
+    Connections {
+        target: Plugin.Model
+        function onSettingsSaved() { root.saved = true }
+    }
 
     function begin() {
         const settings = Plugin.Model.snapshot.settings || {}
@@ -46,6 +57,7 @@ Column {
         iconMode = settings.iconMode || "bot"
         selected = Object.assign({}, Plugin.Model.snapshot.selected)
         selectionOpen = false
+        saved = false
         Plugin.Model.settingsError = ""
     }
 
@@ -73,6 +85,7 @@ Column {
 
     function save() {
         if (!valid) return
+        saved = false
         Plugin.Model.saveSettings({
             enabled: order.filter(name => enabledProviders.indexOf(name) !== -1),
             display: display,
