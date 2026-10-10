@@ -16,3 +16,7 @@ already raster favicons. Provider logos belong to their respective owners.
 The unmodified Geist Mono regular/medium fonts come from the project's Geist
 package (1.7.2), the same family as the landing-page preview. Their SIL Open Font
 License and copyright are in `fonts/OFL.txt` and the Windows license bundle.
+
+Windows paints its refresh, settings, back and reorder controls as monochrome
+Lucide vectors, matching Quickshell without a QtSvg runtime dependency. Their
+copyright and license are in `quickshell/LUCIDE-LICENSE` and the Windows license bundle.

@@ -22,9 +22,14 @@ settings/cache live in your user profile.
   selection, matching the landing-page preview. The tray logo and short usage
   tooltip follow that selection. Up/Down cycles metrics; Escape closes the panel.
 - The panel only lists providers with usable metrics. Failed/unconnected providers
-  do not occupy rows. The square **⋯** menu and tray context menu contain
-  **Refresh**, **Settings**, **Connection details**, update/log actions and **Exit**.
-- **Settings** enables/disables providers and lets you drag to reorder them.
+  do not occupy rows. The header has **Refresh** and **Settings** icons, matching
+  Quickshell. The tray context menu also contains **Connection details**,
+  update/log actions and **Exit**. R refreshes usage and C opens settings.
+- **Settings** opens inside the panel, with the back arrow before the title.
+  Choose the active provider/limit, display fields and icon, enable/disable
+  providers, and reorder them with drag and drop, the per-row arrows, or
+  Alt+Up/Down. **Save** applies changes and keeps settings open; the back arrow,
+  Escape or **Cancel** returns to usage and discards any remaining unsaved edits.
   Starting at sign-in is optional and disabled by default.
 - **Refresh** updates immediately; background updates run every five minutes.
   A failed provider shows a diagnostic. If recent usage is cached, it is
