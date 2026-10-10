@@ -33,7 +33,8 @@ def needed(entry):
         if "/platforms/" in dest:
             return name in platforms
         return False
-    if name == "opengl32sw.dll":
+    if name in {"opengl32sw.dll", "qt6network.dll", "qt6svg.dll",
+                "libcrypto-3-x64.dll", "libssl-3-x64.dll"}:
         return False
     if dest.startswith("lib/assets/") and name.endswith(".svg"):
         return False

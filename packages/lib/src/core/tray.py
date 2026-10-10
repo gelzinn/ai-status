@@ -48,7 +48,7 @@ QScrollBar::handle:vertical { background: #303030; border-radius: 2px; min-heigh
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 QPushButton { padding: 6px 8px; }
-QPushButton#actions { background: #1c1c1c; padding: 0; border-radius: 6px; }
+QPushButton#actions { background: #1c1c1c; padding: 0; border-radius: 6px; text-align: center; }
 QPushButton#actions:hover { background: #252525; }
 QMenu { background: #111111; border: 1px solid #303030; padding: 5px; }
 QMenu::item { padding: 8px 16px; }
