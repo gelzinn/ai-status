@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   lint:
@@ -27,3 +31,22 @@ jobs:
         run: |
           python -m py_compile packages/lib/src/core/*.py
           python -m py_compile packages/lib/src/providers/**/*.py
+
+  installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test stable installs and updates
+        run: python3 -m unittest discover -s tests -v
+
+  release-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install release validation tools
+        run: npm install --prefix "$RUNNER_TEMP/release-validation" --no-audit --no-fund release-please@17.3.0 ajv@8.17.1
+      - name: Test versioning and release notes without publishing
+        run: NODE_PATH="$RUNNER_TEMP/release-validation/node_modules" node tests/test_release_config.cjs

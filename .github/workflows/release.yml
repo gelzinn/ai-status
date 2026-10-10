@@ -3,64 +3,33 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
 
 jobs:
+  checks:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+
   release:
+    needs: checks
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v7
+      # BOT_TOKEN also lets CI run on the generated release PR. PRs created
+      # with GITHUB_TOKEN would not trigger pull_request workflows.
+      - uses: googleapis/release-please-action@v4
         with:
-          fetch-depth: 0
-
-      - name: Check for release commit
-        id: version
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          for COMMIT_JSON in $(echo '${{ toJson(github.event.commits) }}' | jq -r '.[] | @base64'); do
-            _jq() { echo "$COMMIT_JSON" | base64 -d | jq -r "$1"; }
-
-            MSG=$(_jq '.message')
-            ID=$(_jq '.id')
-
-            if echo "$MSG" | grep -q '^chore: release v'; then
-              VERIFIED=$(gh api repos/${{ github.repository }}/commits/$ID --jq '.commit.verification.verified')
-              if [ "$VERIFIED" != "true" ]; then
-                echo "Ignoring unverified commit: $ID"
-                continue
-              fi
-              VERSION=$(echo "$MSG" | head -1 | sed 's/^chore: release v//; s/ .*//')
-              echo "new=$VERSION" >> $GITHUB_OUTPUT
-              echo "found=true" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-          done
-          echo "found=false" >> $GITHUB_OUTPUT
-
-      - name: Create tag
-        if: steps.version.outputs.found == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api repos/${{ github.repository }}/git/refs \
-            --field ref="refs/tags/v${{ steps.version.outputs.new }}" \
-            --field sha="${{ github.sha }}"
-
-      - name: Create GitHub Release
-        if: steps.version.outputs.found == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="v${{ steps.version.outputs.new }}"
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes ""
-          else
-            gh release create "$TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "$TAG" \
-              --generate-notes \
-              --latest
-          fi
+          token: ${{ secrets.BOT_TOKEN }}
+          target-branch: main
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -eo pipefail
 
 export TERM=xterm-256color
 
@@ -12,7 +12,11 @@ C_RESET=$'\033[0m'
 bool_color() { [ "$1" = "true" ] && echo "$C_GREEN" || echo "$C_DIM"; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -f "$SCRIPT_DIR/config.sh" ]; then
+# With curl | bash, $0 is bash and SCRIPT_DIR is the caller's working
+# directory. Only a directly invoked install.sh may use checkout metadata.
+SCRIPT_IS_FILE=false
+case "$0" in */install.sh|install.sh) SCRIPT_IS_FILE=true ;; esac
+if [ "$SCRIPT_IS_FILE" = true ] && [ -f "$SCRIPT_DIR/config.sh" ]; then
     # shellcheck source=./config.sh
     source "$SCRIPT_DIR/config.sh"
 fi
@@ -26,7 +30,7 @@ WAYBAR_CONFIG="$HOME/.config/waybar/config.jsonc"
 # install-wizard.py so local edits are actually exercised instead of
 # silently falling back to whatever is already installed.
 USE_LOCAL_LIB=false
-if [ "$SCRIPT_DIR" != "$INSTALL_DIR/packages/lib" ] && git -C "$SCRIPT_DIR" rev-parse --git-dir > /dev/null 2>&1; then
+if [ "$SCRIPT_IS_FILE" = true ] && [ "$SCRIPT_DIR" != "$INSTALL_DIR/packages/lib" ] && git -C "$SCRIPT_DIR" rev-parse --git-dir > /dev/null 2>&1; then
     USE_LOCAL_LIB=true
 fi
 
@@ -39,6 +43,7 @@ SHOW_PCT="true"
 CONFIGURE_WAYBAR=""
 NON_INTERACTIVE=false
 SKIP_CHECK=false
+RELEASE_TAG=""
 
 # ── parse flags ───────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -51,9 +56,19 @@ while [[ $# -gt 0 ]]; do
         --configure-waybar) CONFIGURE_WAYBAR="$2"; shift 2 ;;
         --no-interactive)   NON_INTERACTIVE=true; shift ;;
         --skip-check)       SKIP_CHECK=true; shift ;;
+        --version)          [ $# -ge 2 ] && [ -n "$2" ] || { echo "Missing value for --version" >&2; exit 1; }
+                           RELEASE_TAG="$2"; shift 2 ;;
         *) echo "Unknown flag: $1"; exit 1 ;;
     esac
 done
+
+# Only stable version tags may be requested. Never treat a branch (main) as
+# an installable release; local checkouts remain available for development.
+if [ -n "$RELEASE_TAG" ]; then
+    RELEASE_TAG="v${RELEASE_TAG#v}"
+    [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid --version: expected a stable version like v0.9.0" >&2; exit 1; }
+    [ "$USE_LOCAL_LIB" = false ] || { echo "--version requires the remote installer, not a local checkout" >&2; exit 1; }
+fi
 
 # ═══════════════════════════════════════════════════════════
 # INSTALL / UPDATE
@@ -74,7 +89,9 @@ mkdir -p "$(dirname "$INSTALL_DIR")"
 # Never nuke the directory we're running from (an installed copy) or an empty
 # path — both would be destructive with the rm -rf inside lean_extract.
 RUNNING_FROM_INSTALL=false
-case "$SCRIPT_DIR/" in "$INSTALL_DIR"/*) RUNNING_FROM_INSTALL=true ;; esac
+if [ "$SCRIPT_IS_FILE" = true ]; then
+    case "$SCRIPT_DIR/" in "$INSTALL_DIR"/*) RUNNING_FROM_INSTALL=true ;; esac
+fi
 
 # Install/update by extracting ONLY the lib (packages/lib + packages/shared)
 # into INSTALL_DIR. The module needs nothing else from the monorepo, so
@@ -92,6 +109,7 @@ lean_extract() {
 }
 
 if [ "$RUNNING_FROM_INSTALL" = true ]; then
+    [ -z "$RELEASE_TAG" ] || { echo "Use the remote installer to install a specific version" >&2; exit 1; }
     echo -e "  ${C_DIM}> running from the installed copy — nothing to extract${C_RESET}"
 elif [ "$USE_LOCAL_LIB" = true ]; then
     # Dev checkout: extract straight from the local tree so local edits ship.
@@ -99,15 +117,36 @@ elif [ "$USE_LOCAL_LIB" = true ]; then
     REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
     lean_extract "$REPO_ROOT"
 else
-    # curl | bash: shallow-clone to a temp dir, extract the lib, drop the clone.
-    echo -e "  ${C_DIM}> installing...${C_RESET}"
+    # Resolve latest once, then pin the download to its immutable version tag.
+    # If the API is unavailable or there is no stable release, keep the current
+    # installation untouched instead of falling back to unreleased main code.
+    if [ -z "$RELEASE_TAG" ]; then
+        REPO_SLUG="${REPO_URL#https://github.com/}"
+        REPO_SLUG="${REPO_SLUG%/}"
+        REPO_SLUG="${REPO_SLUG%.git}"
+        [[ "$REPO_URL" == https://github.com/* && "$REPO_SLUG" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]] || { echo "Cannot resolve latest release for $REPO_URL; use --version" >&2; exit 1; }
+        RELEASE_TAG="$(curl --fail --silent --show-error --location --max-time 15 \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$REPO_SLUG/releases/latest" | python3 -c '
+import json, re, sys
+release = json.load(sys.stdin)
+tag = release.get("tag_name", "")
+if release.get("draft") or release.get("prerelease") or not isinstance(tag, str) or not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
+    sys.exit("No valid stable release found; installation left unchanged")
+print(tag)
+')"
+    fi
+    echo -e "  ${C_DIM}> installing $RELEASE_TAG...${C_RESET}"
     TMP_CLONE="$(mktemp -d)"
     trap 'rm -rf "$TMP_CLONE"' EXIT
-    git clone --depth 1 "$REPO_URL" "$TMP_CLONE/repo" 2>&1 | while IFS= read -r line; do echo -e "  ${C_DIM}${line}${C_RESET}"; done
+    git clone --depth 1 --branch "$RELEASE_TAG" -- "$REPO_URL" "$TMP_CLONE/repo" 2>&1 | while IFS= read -r line; do echo -e "  ${C_DIM}${line}${C_RESET}"; done
     # Validate the clone BEFORE lean_extract's rm -rf runs: a failed/offline
     # clone exits here with the existing install untouched. Never reorder the
     # nuke ahead of a proven-present source.
     [ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
+    [ -d "$TMP_CLONE/repo/packages/shared" ] || { echo "Release is missing packages/shared; installation left unchanged" >&2; exit 1; }
+    [ -f "$TMP_CLONE/repo/packages/lib/VERSION" ] || { echo "Release is missing VERSION; installation left unchanged" >&2; exit 1; }
+    [ "$(cat "$TMP_CLONE/repo/packages/lib/VERSION")" = "${RELEASE_TAG#v}" ] || { echo "Release tag and VERSION disagree; installation left unchanged" >&2; exit 1; }
     lean_extract "$TMP_CLONE/repo"
     rm -rf "$TMP_CLONE"
     trap - EXIT

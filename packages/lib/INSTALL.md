@@ -17,6 +17,10 @@ curl -fsSL https://raw.githubusercontent.com/gelzinn/ai-status/main/packages/lib
 
 If you prefer no logo (text-only), swap `--icon-mode logo` for `--icon-mode off`. All preferences can be changed later via the config TUI (right-click the module).
 
+The script downloads the latest published stable release, even when `main`
+has newer commits. Add `--version v0.9.0` to select a specific compatible
+release. See [Updating AI Status](UPDATES.md) for details and rollback.
+
 ## Interactive install
 
 Prefer to choose each option manually? Run the wizard:
