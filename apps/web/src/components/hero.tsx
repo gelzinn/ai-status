@@ -14,7 +14,7 @@ export function Hero() {
 				Monitor your AI usage on your desktop
 			</h1>
 			<p className="max-w-xl text-lg text-muted-foreground motion-safe:animate-fade-up [animation-delay:100ms]">
-				Track API usage limits across Claude, Copilot, Codex, Z.AI, Kiro, Antigravity, OpenCode, and Command Code in real time.
+				Track usage limits across Claude, Copilot, Codex, Z.AI, Kiro, Antigravity, OpenCode, and Command Code. Refreshes every five minutes.
       </p>
 
 			<InstallTabs

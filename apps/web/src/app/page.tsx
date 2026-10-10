@@ -11,39 +11,10 @@ import { ArrowRight, ArrowUpRight, Plus, ShieldCheck } from "lucide-react";
 
 import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
 import { site, repo } from "@/lib/env";
+import { getLatestVersion } from "@/lib/version";
 
 export default async function Homepage() {
-  let latestVersion = "v0.6.1";
-  let oldVersion = "v0.6.0";
-
-  try {
-    const res = await fetch(repo.apiUrl, {
-      next: { revalidate: 3600 },
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-
-      if (data.tag_name) {
-        latestVersion = data.tag_name;
-
-        const parts = data.tag_name.split(".");
-
-        if (parts.length > 0) {
-          const last = parseInt(parts[parts.length - 1]);
-
-          if (!isNaN(last) && last > 0) {
-            parts[parts.length - 1] = (last - 1).toString();
-            oldVersion = parts.join(".");
-          } else {
-            oldVersion = data.tag_name + "-old";
-          }
-        }
-      }
-    }
-  } catch (e) {
-    console.error("Failed to fetch github release:", e);
-  }
+  const latestVersion = await getLatestVersion();
 
   return (
     <InstallPlatformProvider>
@@ -54,12 +25,16 @@ export default async function Homepage() {
         <div className="flex min-w-0 flex-col gap-16 md:gap-32 lg:gap-48 lg:pb-32 relative z-10">
           <Hero />
 
+          <div role="region" aria-label="Interactive app preview" className="h-[420px] w-full sm:h-[480px] lg:hidden">
+            <WaybarReplica version={latestVersion} compact />
+          </div>
+
           <PlatformContent
             linux={<WaybarConfiguration />}
             windows={<WindowsConfiguration />}
           />
 
-          <Features latestVersion={latestVersion} oldVersion={oldVersion} />
+          <Features latestVersion={latestVersion} />
 
           <section className="flex flex-col gap-8 relative z-10">
             <div className="flex flex-col gap-3">
@@ -67,8 +42,7 @@ export default async function Homepage() {
                 Supported Providers
               </h2>
               <p className="max-w-xl text-muted-foreground">
-                Keep track of limits for the most popular AI services used
-                inside companies.
+                See which providers are supported and how to connect each one.
               </p>
             </div>
 

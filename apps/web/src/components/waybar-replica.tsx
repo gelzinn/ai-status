@@ -87,7 +87,7 @@ const WAYBAR_DATA: WaybarData[] = [
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
-export function WaybarReplica({ version }: { version: string }) {
+export function WaybarReplica({ version, compact = false }: { version: string; compact?: boolean }) {
   const { activeOs } = useInstallPlatform();
   const isWindows = activeOs === "Windows";
   const panelId = useId();
@@ -194,12 +194,13 @@ export function WaybarReplica({ version }: { version: string }) {
       ref={cardRef}
       className={cn(
         "relative w-full h-full rounded-2xl border border-border bg-black bg-no-repeat bg-center shadow-[0_0_60px_rgba(0,0,0,0.6)] font-mono text-xs flex flex-col overflow-hidden transition-all duration-300 ease-out group",
+        compact && "text-[11px] sm:text-xs",
         isWindows
           ? "bg-[url('/windows-11-wallpaper.webp')] bg-cover"
           : "bg-[url('/omarchy-wallpaper.jpeg')] bg-contain",
       )}
       style={{ transform, transformStyle: "preserve-3d" }}
-      onMouseMove={handleMouseMove}
+      onMouseMove={compact ? undefined : handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
       <div
@@ -210,6 +211,7 @@ export function WaybarReplica({ version }: { version: string }) {
           isWindows
             ? "order-last h-12 justify-between border-t bg-card/90 backdrop-blur-2xl px-3"
             : "h-10 justify-between border-b bg-card backdrop-blur-md px-4",
+          compact && "px-2 sm:px-3",
         )}
       >
         {isWindows ? (
@@ -217,11 +219,11 @@ export function WaybarReplica({ version }: { version: string }) {
             <WindowsIcon alt="" className="size-6" />
           </div>
         ) : (
-          <div aria-hidden="true" className="flex items-center gap-3 opacity-50">
-            {Array.from({ length: 6 }).map((_, idx) => (
+          <div aria-hidden="true" className={cn("flex items-center gap-3 opacity-50", compact && "gap-1.5")}>
+            {Array.from({ length: compact ? 3 : 6 }).map((_, idx) => (
               <div
                 key={idx}
-                className="w-3 h-3 rounded-full bg-muted-foreground/30"
+                className={cn("w-3 h-3 rounded-full bg-muted-foreground/30", compact && "size-2")}
               />
             ))}
           </div>
@@ -301,6 +303,7 @@ export function WaybarReplica({ version }: { version: string }) {
             className={cn(
               "flex items-center text-muted-foreground",
               !isWindows && "gap-2 opacity-50",
+              compact && "hidden sm:flex",
             )}
           >
             <span className={cn(isWindows && "flex size-8 items-center justify-center")}>
@@ -339,7 +342,8 @@ export function WaybarReplica({ version }: { version: string }) {
           aria-hidden={!isOpen}
           inert={!isOpen}
           className={cn(
-            "relative w-[65%] h-full rounded-xl bg-card/95 backdrop-blur-2xl border border-border shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden transition-all duration-350 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            "relative h-full rounded-xl bg-card/95 backdrop-blur-2xl border border-border shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden transition-all duration-350 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            compact ? "w-full max-w-sm sm:w-[80%]" : "w-[65%]",
             isWindows ? "origin-bottom-right motion-safe:animate-fade-up" : "origin-top-right",
             !isOpen && "opacity-0 scale-95 pointer-events-none",
             !isOpen && (isWindows ? "translate-y-2" : "-translate-y-2"),
@@ -347,7 +351,7 @@ export function WaybarReplica({ version }: { version: string }) {
         >
           <div className="flex flex-col overflow-hidden select-none">
             {/* Header */}
-            <div className="flex flex-col gap-2 p-4 border-b border-border/50">
+            <div className={cn("flex flex-col gap-2 p-4 border-b border-border/50", compact && "p-3")}>
               <div className="flex items-center justify-between text-muted-foreground">
                 <span className="font-semibold text-foreground">
                   {site.name}
@@ -364,13 +368,13 @@ export function WaybarReplica({ version }: { version: string }) {
                 return (
                   <div
                     key={idx}
-                    className="flex flex-col gap-4 cursor-pointer p-4 rounded-xl hover:bg-foreground/5"
+                    className={cn("flex flex-col gap-4 cursor-pointer p-4 rounded-xl hover:bg-foreground/5", compact && "gap-3 p-3")}
                     onClick={() => {
                       setActiveIdx(idx);
                       setActiveStatIdx(0);
                     }}
                   >
-                    <div className="flex items-center gap-2 relative pl-4">
+                    <div className="flex min-w-0 items-center gap-2 relative pl-4">
                       <span
                         className={cn(
                           "absolute left-0 font-medium transition-colors duration-300",
@@ -385,12 +389,13 @@ export function WaybarReplica({ version }: { version: string }) {
                       <img
                         src={item.logo}
                         alt={item.provider}
-                        className="size-3.5 object-contain opacity-80 filter brightness-110"
+                        className="size-3.5 shrink-0 object-contain opacity-80 filter brightness-110"
                       />
 
                       <span
                         className={cn(
                           "font-medium transition-colors duration-300",
+                          compact && "truncate",
                           isActive
                             ? "text-foreground"
                             : "text-muted-foreground",
@@ -400,7 +405,7 @@ export function WaybarReplica({ version }: { version: string }) {
                       </span>
                     </div>
 
-                    <div className="flex flex-col gap-4 px-4">
+                    <div className={cn("flex flex-col gap-4 px-4", compact && "gap-3 px-3")}>
                       {item.stats.map((stat, statIdx) => {
                         const isStatActive =
                           isActive && statIdx === activeStatIdx;

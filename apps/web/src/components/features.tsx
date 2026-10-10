@@ -4,7 +4,7 @@ import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
 import { FeatureVisuals } from "@/components/features-visuals";
 import { useInstallPlatform } from "@/components/install-platform";
 
-export function Features({ latestVersion, oldVersion }: { latestVersion: string; oldVersion: string }) {
+export function Features({ latestVersion }: { latestVersion: string }) {
   const { activeOs } = useInstallPlatform();
   const windows = activeOs === "Windows";
   const features = [
@@ -14,8 +14,8 @@ export function Features({ latestVersion, oldVersion }: { latestVersion: string;
       visual: <FeatureVisuals.MultiProvider />,
     },
     {
-      title: "Live Updates",
-      description: "Auto-refreshes every 5 minutes with animated loading states.",
+      title: "Usage Refresh",
+      description: "Usage refreshes every five minutes. Refresh manually whenever you need an update.",
       visual: <FeatureVisuals.LiveUpdates windows={windows} />,
     },
     {
@@ -33,18 +33,18 @@ export function Features({ latestVersion, oldVersion }: { latestVersion: string;
       visual: <FeatureVisuals.Configurable />,
     },
     {
-      title: windows ? "Update Checks" : "Self-Updating",
+      title: windows ? "Update Checks" : "Simple Updates",
       description: windows
         ? "Open the latest version from the app menu. Run the new installer to upgrade and keep your settings."
-        : "One command installs and keeps the module up to date automatically.",
-      visual: <FeatureVisuals.SelfUpdating latestVersion={latestVersion} oldVersion={oldVersion} automatic={!windows} />,
+        : "Run the install command again to update the module and keep your configuration.",
+      visual: <FeatureVisuals.Updates latestVersion={latestVersion} />,
     },
     {
-      title: windows ? "Standalone App" : "Zero Dependencies",
+      title: windows ? "Standalone App" : "Lightweight Runtime",
       description: windows
         ? "The installer includes the app runtime. No Python, Bash or WSL setup required."
-        : "Written in pure Python and Bash. No heavy runtimes required.",
-      visual: windows ? <FeatureVisuals.Standalone /> : <FeatureVisuals.ZeroDependencies />,
+        : "Runs with Python 3, Bash and Waybar. Connect providers through their apps or CLIs.",
+      visual: windows ? <FeatureVisuals.Standalone /> : <FeatureVisuals.Lightweight />,
     },
   ];
 
@@ -52,7 +52,7 @@ export function Features({ latestVersion, oldVersion }: { latestVersion: string;
     <section className="relative flex flex-col gap-8">
       <div className="relative z-10 flex flex-col gap-3">
         <h2 className="font-heading text-2xl font-semibold tracking-tight">Features</h2>
-        <p className="max-w-xl text-muted-foreground">Everything you need to keep track of your AI usage.</p>
+        <p className="max-w-xl text-muted-foreground">Usage limits, reset timers and provider settings on your desktop.</p>
       </div>
       <div className="relative z-10 grid grid-cols-1 gap-8 sm:grid-cols-2 sm:gap-4">
         {features.map((feature) => (

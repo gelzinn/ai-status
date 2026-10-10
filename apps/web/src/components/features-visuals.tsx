@@ -269,14 +269,10 @@ function Configurable() {
   );
 }
 
-function SelfUpdating({
+function Updates({
   latestVersion,
-  oldVersion,
-  automatic = true,
 }: {
   latestVersion: string;
-  oldVersion: string;
-  automatic?: boolean;
 }) {
   return (
     <VisualStage className="flex-col items-center justify-center">
@@ -287,7 +283,7 @@ function SelfUpdating({
           {/* Old Version */}
           <div className="relative z-10 flex items-center gap-2 transition-all duration-700 group-hover:opacity-40">
             <span className="font-mono text-[10px] font-medium text-muted-foreground">
-              {oldVersion}
+              Installed
             </span>
           </div>
 
@@ -309,14 +305,14 @@ function SelfUpdating({
       <div className="absolute bottom-6 flex translate-y-2 items-center gap-1.5 opacity-0 transition-all delay-100 duration-500 group-hover:translate-y-0 group-hover:opacity-100">
         <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
         <span className="text-[10px] font-medium text-muted-foreground">
-          {automatic ? "Auto-updated in background" : "Download the latest version"}
+          Install the latest version
         </span>
       </div>
     </VisualStage>
   );
 }
 
-function ZeroDependencies() {
+function Lightweight() {
   return (
     <VisualStage className="items-center justify-center perspective-[1000px]">
       <div className="relative flex items-center justify-center gap-6 px-4">
@@ -324,7 +320,7 @@ function ZeroDependencies() {
           front={
             <img src="https://svgl.app/library/python.svg" className="h-8 w-8" alt="Python" />
           }
-          back={<FlipLabel>ZERO</FlipLabel>}
+          back={<FlipLabel>Python</FlipLabel>}
         />
 
         {/* Center '+' */}
@@ -341,7 +337,7 @@ function ZeroDependencies() {
               alt="Bash"
             />
           }
-          back={<FlipLabel>DEPS</FlipLabel>}
+          back={<FlipLabel>Bash</FlipLabel>}
         />
       </div>
     </VisualStage>
@@ -367,7 +363,7 @@ export const FeatureVisuals = {
   LiveUpdates,
   TooltipDetail,
   Configurable,
-  SelfUpdating,
-  ZeroDependencies,
+  Updates,
+  Lightweight,
   Standalone,
 };

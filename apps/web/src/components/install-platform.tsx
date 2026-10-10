@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
 export type InstallPlatform = "Linux" | "macOS" | "Windows";
+const PLATFORM_STORAGE_KEY = "ai-status.install-platform";
 
 const InstallPlatformContext = createContext<{
   activeOs: InstallPlatform;
@@ -10,7 +11,34 @@ const InstallPlatformContext = createContext<{
 } | null>(null);
 
 export function InstallPlatformProvider({ children }: { children: ReactNode }) {
-  const [activeOs, setActiveOs] = useState<InstallPlatform>("Linux");
+  const [activeOs, updateActiveOs] = useState<InstallPlatform>("Linux");
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(PLATFORM_STORAGE_KEY);
+      if (saved === "Linux" || saved === "Windows") {
+        updateActiveOs(saved);
+        return;
+      }
+    } catch {
+      // OS detection and manual selection also work when storage is blocked.
+    }
+
+    const platform = (navigator as Navigator & { userAgentData?: { platform: string } }).userAgentData?.platform;
+    if (platform === "Windows" || /^Win/i.test(navigator.platform) || /Windows NT/i.test(navigator.userAgent)) {
+      updateActiveOs("Windows");
+    }
+  }, []);
+
+  function setActiveOs(platform: InstallPlatform) {
+    if (platform === "macOS") return;
+    updateActiveOs(platform);
+    try {
+      localStorage.setItem(PLATFORM_STORAGE_KEY, platform);
+    } catch {
+      // Keep the current choice usable without browser storage.
+    }
+  }
 
   return (
     <InstallPlatformContext.Provider value={{ activeOs, setActiveOs }}>
