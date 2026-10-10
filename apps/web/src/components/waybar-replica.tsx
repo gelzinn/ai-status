@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { useState, useEffect, useRef } from "react";
 import { PROVIDERS } from "@ai-status/shared";
 import { site } from "@/lib/env";
+import { useInstallPlatform } from "@/components/install-platform";
 
 type Stat = {
   label: string;
@@ -86,6 +87,7 @@ const WAYBAR_DATA: WaybarData[] = [
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 export function WaybarReplica({ version }: { version: string }) {
+  const { activeOs } = useInstallPlatform();
   const [mounted, setMounted] = useState(false);
 
   const [activeIdx, setActiveIdx] = useState(0);
@@ -185,7 +187,12 @@ export function WaybarReplica({ version }: { version: string }) {
   return (
     <div
       ref={cardRef}
-      className="relative w-full h-full rounded-2xl border border-border bg-black bg-[url('/omarchy-wallpaper.jpeg')] bg-contain bg-no-repeat bg-center shadow-[0_0_60px_rgba(0,0,0,0.6)] font-mono text-xs flex flex-col overflow-hidden transition-all duration-300 ease-out group"
+      className={cn(
+        "relative w-full h-full rounded-2xl border border-border bg-black bg-no-repeat bg-center shadow-[0_0_60px_rgba(0,0,0,0.6)] font-mono text-xs flex flex-col overflow-hidden transition-all duration-300 ease-out group",
+        activeOs === "Windows"
+          ? "bg-[url('/windows-11-wallpaper.webp')] bg-cover"
+          : "bg-[url('/omarchy-wallpaper.jpeg')] bg-contain",
+      )}
       style={{ transform, transformStyle: "preserve-3d" }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}

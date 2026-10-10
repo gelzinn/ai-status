@@ -6,6 +6,7 @@ import { CodeBlock } from "@/components/code-block";
 import { HighlightedCodeBlock } from "@/components/code-highlight";
 import { FeatureVisuals } from "@/components/features-visuals";
 import { WaybarReplica } from "@/components/waybar-replica";
+import { InstallPlatformProvider } from "@/components/install-platform";
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, Plus, ShieldCheck } from "lucide-react";
 
@@ -51,6 +52,7 @@ export default async function Homepage() {
   }
 
   return (
+    <InstallPlatformProvider>
     <div className="mx-auto flex max-w-7xl flex-col gap-8 sm:gap-16 p-6 sm:py-16">
       <Header />
 
@@ -344,5 +346,6 @@ export default async function Homepage() {
 
       <Footer />
     </div>
+    </InstallPlatformProvider>
   );
 }

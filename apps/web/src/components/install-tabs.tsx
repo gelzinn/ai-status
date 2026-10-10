@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { AppleIcon, LinuxIcon, WindowsIcon } from "@/components/os-icons";
+import { useInstallPlatform, type InstallPlatform } from "@/components/install-platform";
 
 import { cn } from "@/lib/utils";
 
@@ -16,9 +16,9 @@ export function InstallTabs({
 	win: React.ReactNode;
 	align?: "start" | "center";
 }) {
-	const [activeOs, setActiveOs] = useState("Linux");
+	const { activeOs, setActiveOs } = useInstallPlatform();
 
-	const platforms = [
+	const platforms: { name: string; available: boolean; id: InstallPlatform; icon: React.ReactNode }[] = [
 		{ name: "Linux", available: true, id: "Linux", icon: <LinuxIcon className="size-4" /> },
 		{ name: "macOS", available: false, id: "macOS", icon: <AppleIcon className="size-4" /> },
 		{ name: "Windows", available: true, id: "Windows", icon: <WindowsIcon className="size-4" /> },
