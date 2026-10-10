@@ -783,6 +783,17 @@ class Dashboard(QWidget):
                     button.description.setWordWrap(True)
                     metric_layout.addWidget(button.description)
                     group_layout.addWidget(button)
+                heading.credits = QWidget()
+                credits_layout = QVBoxLayout(heading.credits)
+                credits_layout.setContentsMargins(24, 0, 4, 4)
+                credits_layout.setSpacing(4)
+                heading.credits_title = plain_label("")
+                heading.credits_title.setWordWrap(True)
+                heading.credits_body = plain_label("", "#666666")
+                heading.credits_body.setWordWrap(True)
+                credits_layout.addWidget(heading.credits_title)
+                credits_layout.addWidget(heading.credits_body)
+                group_layout.addWidget(heading.credits)
                 layout.addWidget(group)
         if not self.metric_values:
             self.empty_message = plain_label("")
@@ -809,6 +820,10 @@ class Dashboard(QWidget):
             heading.setAccessibleName(self.entry_name(name, entry))
             heading.cached_label.setVisible(bool(entry.get("_cached")))
             heading.cached_label.setToolTip(entry.get("_error", "Unable to refresh"))
+            credits = render.reset_credit_lines(entry.get("reset_credits"))
+            heading.credits.setVisible(bool(credits))
+            heading.credits_title.setText(credits[0] if credits else "")
+            heading.credits_body.setText("\n".join(credits[1:]))
         group_indices = {key: index for index, key in enumerate(groups)}
         for button, (name, entry, metric, value) in zip(self.metric_buttons, self.visible_metrics):
             active = value == self.selected_value()

@@ -156,6 +156,21 @@ class DesktopTests(IsolatedState):
         self.app.processEvents()
         self.assertEqual(bar.shimmer.state(), tray.QVariantAnimation.State.Running)
 
+    def test_reset_credits_are_provider_details_and_never_selectable_metrics(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
+            {"type": "weekly", "percentage": 23}], "reset_credits": {"available": 2, "credits": [
+                {"count": 1, "title": "Full reset", "expires_at": "2099-10-22T16:00:00Z"}]}}])
+        heading = self.dashboard.provider_buttons[("codex", 0)]
+        self.assertEqual(heading.credits_title.text(), "Reset credits: 2 available")
+        self.assertIn("Full reset", heading.credits_body.text())
+        self.assertIn("Expires", heading.credits_body.text())
+        self.assertEqual(len(self.dashboard.metric_values), 1)
+        self.assertEqual(state.load_selected()["metric"], "weekly")
+        self.dashboard.data["codex"][0]["reset_credits"]["available"] = 0
+        self.dashboard.draw()
+        self.assertTrue(heading.credits.isHidden())
+        self.assertEqual(self.dashboard.tray.toolTip(), "Codex (Pro) 23%")
+
     def test_provider_settings_save_disabled_providers(self):
         settings = tray.ProviderSettings(self.dashboard)
         self.addCleanup(settings.deleteLater)

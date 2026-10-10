@@ -28,6 +28,10 @@ and open `ai-status.exe`. Keep `ai-status-cli.exe` and `_internal` beside it.
   A failed provider shows a diagnostic. If recent usage is cached, it is
   explicitly labeled as cached. Its reason is available on hover and in
   **Connection details**, along with authentication failures for hidden providers.
+- Claude and Codex show available **Reset credits** beneath their usage metrics,
+  with the provider's description and local expiry date when supplied. Expired,
+  paused or spent credits are excluded. Use the provider's own app to redeem a reset.
+  An unavailable optional expiry query leaves the usage and credit count visible.
 - Clicking outside the panel or closing it keeps the tray app running. Use **Exit** in its menu
   to stop it. An active query finishes before exit so child processes close.
 - The tray menu opens the latest release for updates. Run the new installer

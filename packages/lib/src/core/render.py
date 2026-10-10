@@ -1,7 +1,9 @@
 import re
 import math
+from html import escape
 from . import fetch
 from . import state
+from .reset_credits import display_lines as reset_credit_lines
 
 TYPE_NAMES = {
     "rolling": "Rolling Usage",
@@ -237,6 +239,8 @@ def format_provider_block(
         if detail:
             lines.append("    " + _dim(detail, recede if recede else DIM_RESET))
         lines.append("")
+    for line in reset_credit_lines(provider_data.get("reset_credits")):
+        lines.append("    " + _dim(escape(line), DIM_INACTIVE))
     return "\n".join(lines)
 
 
@@ -288,6 +292,8 @@ def format_loading_provider_block(
         if detail:
             lines.append("    " + _dim(detail, recede if recede else DIM_RESET))
         lines.append("")
+    for line in reset_credit_lines(provider_data.get("reset_credits")):
+        lines.append("    " + _dim(escape(line), DIM_INACTIVE))
     return "\n".join(lines)
 
 
