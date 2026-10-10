@@ -1,18 +1,22 @@
 import Link from "next/link";
 import { ArrowRight, Download } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { getWindowsDownload } from "@/lib/windows-download";
 
-export function WindowsInstall() {
+export async function WindowsInstall({ align = "start" }: { align?: "start" | "center" }) {
+	const download = await getWindowsDownload();
+	const centered = align === "center";
 	return (
-		<div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-4 text-left">
-			<div className="flex flex-col gap-1">
+		<div className={cn("flex flex-col gap-4 rounded-2xl border border-border bg-card p-4", centered ? "items-center text-center" : "text-left")}>
+			<div className={cn("flex flex-col gap-1", centered && "items-center")}>
 				<p className="text-sm font-medium text-foreground">Windows 10 &amp; 11 · x64</p>
-				<p className="text-sm leading-relaxed text-muted-foreground">
+				<p className={cn("text-sm leading-relaxed text-muted-foreground", centered && "max-w-md")}>
 					Install the app and monitor usage from your system tray. No terminal setup required.
 				</p>
 			</div>
-			<div className="flex flex-wrap items-center gap-4">
+			<div className={cn("flex flex-wrap items-center gap-4", centered && "justify-center")}>
 				<a
-					href="/download/windows"
+					href={download.href}
 					target="_blank"
 					rel="noreferrer"
 					className="inline-flex items-center justify-center gap-2 rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -24,9 +28,11 @@ export function WindowsInstall() {
 					Setup guide <ArrowRight className="size-3.5" />
 				</Link>
 			</div>
-			<p className="text-xs leading-relaxed text-muted-foreground">
-				Before the first Windows release, downloads open the preview builds. A GitHub account is required to download previews.
-			</p>
+			{download.kind === "preview" && (
+				<p className={cn("text-xs leading-relaxed text-muted-foreground", centered && "max-w-md")}>
+					Downloads currently open preview builds. A GitHub account is required to download previews.
+				</p>
+			)}
 		</div>
 	);
 }

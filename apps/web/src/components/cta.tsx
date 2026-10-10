@@ -59,7 +59,7 @@ export function Cta() {
 								className="w-full m-0!"
 							/>
 						}
-						win={<WindowsInstall />}
+						win={<WindowsInstall align="center" />}
 					/>
 				</div>
 

@@ -11,6 +11,7 @@ import { WindowsIcon } from "@/components/os-icons";
 import { InstallCtaProvider, HeroInstallCta, StickyInstallCta } from "@/components/install-cta";
 import { renderMarkdown } from "@/lib/markdown";
 import { repo, site } from "@/lib/env";
+import { getWindowsDownload } from "@/lib/windows-download";
 
 export const metadata: Metadata = {
   title: `Windows setup | ${site.name}`,
@@ -20,6 +21,7 @@ export const metadata: Metadata = {
 const guideSource = `${repo.url}/blob/main/packages/lib/WINDOWS.md`;
 
 export default async function WindowsPage() {
+  const download = await getWindowsDownload();
   const markdown = await readFile(path.resolve(process.cwd(), "../../packages/lib/WINDOWS.md"), "utf-8");
   const guide = await renderMarkdown(markdown.replace(/^# .+\r?\n\r?\n/, ""));
 
@@ -48,7 +50,7 @@ export default async function WindowsPage() {
                 <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground sm:text-2xl lg:text-3xl">Windows Setup</h1>
               </div>
               <div className="flex shrink-0 flex-col gap-2.5 sm:flex-row sm:items-center">
-                <HeroInstallCta href="/download/windows" label="Download for Windows" icon="download" />
+                <HeroInstallCta href={download.href} label="Download for Windows" icon="download" />
                 <a href={guideSource} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 rounded-full border border-border bg-background px-5 py-2.5 text-sm font-medium text-foreground transition-all hover:bg-muted">
                   <GithubIcon className="-ml-1 size-4" /> View source
                 </a>
@@ -63,7 +65,7 @@ export default async function WindowsPage() {
             </article>
 
             <aside className="flex flex-col gap-4 lg:sticky lg:top-8 lg:self-start">
-              <StickyInstallCta href="/download/windows" label="Download for Windows" icon="download" />
+              <StickyInstallCta href={download.href} label="Download for Windows" icon="download" />
 
               <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 <div className="flex flex-col gap-2 p-4">
@@ -76,15 +78,15 @@ export default async function WindowsPage() {
                 </footer>
               </div>
 
-              <div className="overflow-hidden rounded-2xl border border-border bg-card">
+              {download.kind === "preview" && <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 <div className="flex flex-col gap-2 p-4 text-sm">
                   <span className="font-medium text-foreground">Preview downloads</span>
-                  <p className="leading-relaxed text-muted-foreground">Until a release includes Windows assets, downloads open the preview builds. A GitHub account is required to download them.</p>
+                  <p className="leading-relaxed text-muted-foreground">Downloads currently open preview builds. A GitHub account is required to download them.</p>
                 </div>
                 <a href={`${repo.url}/actions/workflows/windows.yml`} target="_blank" rel="noreferrer" className="flex items-center justify-between gap-2 border-t border-border bg-muted p-4 text-xs text-muted-foreground transition-colors hover:text-foreground">
                   Installer and portable builds <ArrowUpRight className="size-3.5 shrink-0" />
                 </a>
-              </div>
+              </div>}
 
               <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 <Link href="/windows/llms.txt" className="flex items-center justify-between gap-2 p-4 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
