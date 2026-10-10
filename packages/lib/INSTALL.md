@@ -19,7 +19,9 @@ If you prefer no logo (text-only), swap `--icon-mode logo` for `--icon-mode off`
 
 The script downloads the latest published stable release, even when `main`
 has newer commits. Add `--version v0.9.0` to select a specific compatible
-release. See [Updating AI Status](UPDATES.md) for details and rollback.
+release. Packages are verified with SHA-256 and validated before activation;
+updates preserve existing preferences unless you pass flags to change them.
+See [Updating AI Status](UPDATES.md) for details and rollback.
 
 ## Interactive install
 
@@ -129,3 +131,5 @@ The config TUI lets you enable/disable providers, reorder with Shift+J/K, toggle
 | `--configure-waybar` | `true`, `false` |
 | `--no-interactive` | skip wizard |
 | `--skip-check` | skip dependency check |
+| `--version` | install a published `vX.Y.Z` version with the remote installer |
+| `--rollback` | restore the previous local installation, without a download |

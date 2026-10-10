@@ -33,3 +33,10 @@ jobs:
           target-branch: main
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Build, verify, and publish the pending draft release
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: bash .github/scripts/publish_release.sh

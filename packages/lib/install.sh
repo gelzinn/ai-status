@@ -40,10 +40,33 @@ SHOW_PROVIDER="true"
 SHOW_MODEL="true"
 SHOW_METRIC="false"
 SHOW_PCT="true"
+PREFS_FILE="$HOME/.config/ai-status/selected.json"
+[ -f "$PREFS_FILE" ] || PREFS_FILE="$HOME/.config/waybar-ai-status/selected.json"
+if [ -f "$PREFS_FILE" ]; then
+    # Load only known display settings. Provider selection and other settings
+    # remain in selected.json; explicit command-line flags below take precedence.
+    SAVED_PREFS="$(python3 - "$PREFS_FILE" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+if not isinstance(data, dict):
+    sys.exit("Display preferences must be a JSON object; refusing to reset them")
+mode = data.get("icon_mode", "bot" if data.get("show_icon", True) else "off")
+if mode in ("bot", "logo", "off"):
+    print("ICON_MODE=" + mode)
+for key in ("show_provider", "show_model", "show_metric", "show_pct"):
+    if isinstance(data.get(key), bool):
+        print(key.upper() + "=" + str(data[key]).lower())
+PY
+)"
+    while IFS='=' read -r key value; do
+        [ -z "$key" ] || printf -v "$key" '%s' "$value"
+    done <<< "$SAVED_PREFS"
+fi
 CONFIGURE_WAYBAR=""
 NON_INTERACTIVE=false
 SKIP_CHECK=false
 RELEASE_TAG=""
+ROLLBACK=false
 
 # ── parse flags ───────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -58,9 +81,17 @@ while [[ $# -gt 0 ]]; do
         --skip-check)       SKIP_CHECK=true; shift ;;
         --version)          [ $# -ge 2 ] && [ -n "$2" ] || { echo "Missing value for --version" >&2; exit 1; }
                            RELEASE_TAG="$2"; shift 2 ;;
+        --rollback)         ROLLBACK=true; shift ;;
         *) echo "Unknown flag: $1"; exit 1 ;;
     esac
 done
+
+[ "$ROLLBACK" = false ] || [ -z "$RELEASE_TAG" ] || { echo "Use either --rollback or --version" >&2; exit 1; }
+case "$ICON_MODE" in bot|logo|off) ;; *) echo "Invalid --icon-mode: $ICON_MODE" >&2; exit 1 ;; esac
+for flag in SHOW_PROVIDER SHOW_MODEL SHOW_METRIC SHOW_PCT; do
+    case "${!flag}" in true|false) ;; *) echo "Invalid --$flag: ${!flag}" >&2; exit 1 ;; esac
+done
+case "$CONFIGURE_WAYBAR" in true|false|"") ;; *) echo "Invalid --configure-waybar" >&2; exit 1 ;; esac
 
 # Only stable version tags may be requested. Never treat a branch (main) as
 # an installable release; local checkouts remain available for development.
@@ -74,57 +105,93 @@ fi
 # INSTALL / UPDATE
 # ═══════════════════════════════════════════════════════════
 
-# Migrate old config and cache from waybar-ai-status to ai-status
+# Stage on the same filesystem so activation uses renames, never a partial copy.
+mkdir -p "$(dirname "$INSTALL_DIR")"
+PREVIOUS_DIR="$INSTALL_DIR.previous"
+LOCK_DIR="$(dirname "$INSTALL_DIR")/.ai-status-update.lock"
+mkdir "$LOCK_DIR" 2>/dev/null || { echo "Another installation is running (lock: $LOCK_DIR)" >&2; exit 1; }
+WORK_DIR=""
+STAGE_DIR=""
+OLD_INSTALL_MOVED=false
+NEW_INSTALL_ACTIVE=false
+MIGRATED_LEGACY_CONFIG=false
+MIGRATED_LEGACY_INSTALL=false
+SNAPSHOT_PATHS=()
+
+cleanup() {
+    local status=$? index target
+    trap - EXIT
+    set +e
+    if [ "$status" -ne 0 ] && [ "$OLD_INSTALL_MOVED" = true ]; then
+        [ "$NEW_INSTALL_ACTIVE" = false ] || rm -rf -- "$INSTALL_DIR"
+        mv -- "$PREVIOUS_DIR" "$INSTALL_DIR" || echo "Could not restore $PREVIOUS_DIR; it remains available for recovery" >&2
+    elif [ "$status" -ne 0 ] && [ "$NEW_INSTALL_ACTIVE" = true ]; then
+        rm -rf -- "$INSTALL_DIR"
+    fi
+    if [ "$status" -ne 0 ]; then
+        for index in "${!SNAPSHOT_PATHS[@]}"; do
+            target="${SNAPSHOT_PATHS[$index]}"
+            rm -f -- "$target"
+            [ ! -e "$WORK_DIR/backups/$index" ] && [ ! -L "$WORK_DIR/backups/$index" ] ||
+                cp -a -- "$WORK_DIR/backups/$index" "$target"
+        done
+        if [ "$MIGRATED_LEGACY_CONFIG" = true ]; then
+            mv -- "$HOME/.config/ai-status" "$HOME/.config/waybar-ai-status"
+        fi
+        if [ "$MIGRATED_LEGACY_INSTALL" = true ]; then
+            mv -- "$INSTALL_DIR" "$HOME/.local/share/omarchy-ai-status"
+        fi
+        echo "Installation failed; the previous version and settings were preserved." >&2
+    fi
+    [ -z "$STAGE_DIR" ] || rm -rf -- "$STAGE_DIR"
+    [ -z "$WORK_DIR" ] || rm -rf -- "$WORK_DIR"
+    rmdir "$LOCK_DIR"
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+WORK_DIR="$(mktemp -d)"
+STAGE_DIR="$(mktemp -d "$(dirname "$INSTALL_DIR")/.ai-status-stage.XXXXXX")"
+
+# Keep legacy path migrations inside the lock and failure recovery as well.
 if [ -d "$HOME/.config/waybar-ai-status" ] && [ ! -d "$HOME/.config/ai-status" ]; then
     mv "$HOME/.config/waybar-ai-status" "$HOME/.config/ai-status"
+    MIGRATED_LEGACY_CONFIG=true
 fi
 if [ -d "$HOME/.local/share/omarchy-ai-status" ] && [ ! -d "$INSTALL_DIR" ]; then
     echo -e "  ${C_DIM}> migrating old installation directory...${C_RESET}"
     mv "$HOME/.local/share/omarchy-ai-status" "$INSTALL_DIR"
+    MIGRATED_LEGACY_INSTALL=true
 fi
 
-# Ensure the parent exists before cp/clone — a minimal $HOME may lack ~/.local/share.
-mkdir -p "$(dirname "$INSTALL_DIR")"
+copy_library() {
+    [ -d "$1/packages/lib" ] && [ -d "$1/packages/shared" ] || { echo "Source is missing the library or shared files" >&2; exit 1; }
+    mkdir -p "$STAGE_DIR/packages"
+    cp -a -- "$1/packages/lib" "$STAGE_DIR/packages/lib"
+    cp -a -- "$1/packages/shared" "$STAGE_DIR/packages/shared"
+}
 
-# Never nuke the directory we're running from (an installed copy) or an empty
-# path — both would be destructive with the rm -rf inside lean_extract.
 RUNNING_FROM_INSTALL=false
 if [ "$SCRIPT_IS_FILE" = true ]; then
     case "$SCRIPT_DIR/" in "$INSTALL_DIR"/*) RUNNING_FROM_INSTALL=true ;; esac
 fi
 
-# Install/update by extracting ONLY the lib (packages/lib + packages/shared)
-# into INSTALL_DIR. The module needs nothing else from the monorepo, so
-# apps/web, node_modules and build output never land on the user's disk. A
-# re-run is also the update — and the cleanup for older installs that copied
-# the whole 800M+ repo (including untracked node_modules a git pull can't drop).
-lean_extract() {
-    local src="$1"
-    [ -d "$src/packages/lib" ] || { echo -e "  ${C_DIM}error: packages/lib not found in $src${C_RESET}" >&2; exit 1; }
-    [ -n "$INSTALL_DIR" ] || { echo -e "  ${C_DIM}error: INSTALL_DIR is empty, refusing to remove${C_RESET}" >&2; exit 1; }
-    rm -rf "$INSTALL_DIR"
-    mkdir -p "$INSTALL_DIR/packages"
-    cp -r "$src/packages/lib" "$INSTALL_DIR/packages/lib"
-    cp -r "$src/packages/shared" "$INSTALL_DIR/packages/shared"
-}
-
-if [ "$RUNNING_FROM_INSTALL" = true ]; then
-    [ -z "$RELEASE_TAG" ] || { echo "Use the remote installer to install a specific version" >&2; exit 1; }
-    echo -e "  ${C_DIM}> running from the installed copy — nothing to extract${C_RESET}"
+if [ "$ROLLBACK" = true ]; then
+    [ -d "$PREVIOUS_DIR/packages/lib" ] || { echo "No previous installation is available for --rollback" >&2; exit 1; }
+    copy_library "$PREVIOUS_DIR"
+elif [ "$RUNNING_FROM_INSTALL" = true ]; then
+    [ -z "$RELEASE_TAG" ] || { echo "Use the public installer to install a specific version" >&2; exit 1; }
+    copy_library "$INSTALL_DIR"
 elif [ "$USE_LOCAL_LIB" = true ]; then
-    # Dev checkout: extract straight from the local tree so local edits ship.
-    echo -e "  ${C_DIM}> installing...${C_RESET}"
     REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-    lean_extract "$REPO_ROOT"
+    copy_library "$REPO_ROOT"
 else
-    # Resolve latest once, then pin the download to its immutable version tag.
-    # If the API is unavailable or there is no stable release, keep the current
-    # installation untouched instead of falling back to unreleased main code.
+    REPO_SLUG="${REPO_URL#https://github.com/}"
+    REPO_SLUG="${REPO_SLUG%/}"
+    REPO_SLUG="${REPO_SLUG%.git}"
+    [[ "$REPO_URL" == https://github.com/* && "$REPO_SLUG" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]] || { echo "Expected a GitHub repository URL" >&2; exit 1; }
     if [ -z "$RELEASE_TAG" ]; then
-        REPO_SLUG="${REPO_URL#https://github.com/}"
-        REPO_SLUG="${REPO_SLUG%/}"
-        REPO_SLUG="${REPO_SLUG%.git}"
-        [[ "$REPO_URL" == https://github.com/* && "$REPO_SLUG" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]] || { echo "Cannot resolve latest release for $REPO_URL; use --version" >&2; exit 1; }
         RELEASE_TAG="$(curl --fail --silent --show-error --location --max-time 15 \
             -H 'Accept: application/vnd.github+json' \
             "https://api.github.com/repos/$REPO_SLUG/releases/latest" | python3 -c '
@@ -132,32 +199,119 @@ import json, re, sys
 release = json.load(sys.stdin)
 tag = release.get("tag_name", "")
 if release.get("draft") or release.get("prerelease") or not isinstance(tag, str) or not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
-    sys.exit("No valid stable release found; installation left unchanged")
+    sys.exit("No valid stable release found")
 print(tag)
 ')"
     fi
-    echo -e "  ${C_DIM}> installing $RELEASE_TAG...${C_RESET}"
-    TMP_CLONE="$(mktemp -d)"
-    trap 'rm -rf "$TMP_CLONE"' EXIT
-    git clone --depth 1 --branch "$RELEASE_TAG" -- "$REPO_URL" "$TMP_CLONE/repo" 2>&1 | while IFS= read -r line; do echo -e "  ${C_DIM}${line}${C_RESET}"; done
-    # Validate the clone BEFORE lean_extract's rm -rf runs: a failed/offline
-    # clone exits here with the existing install untouched. Never reorder the
-    # nuke ahead of a proven-present source.
-    [ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
-    [ -d "$TMP_CLONE/repo/packages/shared" ] || { echo "Release is missing packages/shared; installation left unchanged" >&2; exit 1; }
-    [ -f "$TMP_CLONE/repo/packages/lib/VERSION" ] || { echo "Release is missing VERSION; installation left unchanged" >&2; exit 1; }
-    [ "$(cat "$TMP_CLONE/repo/packages/lib/VERSION")" = "${RELEASE_TAG#v}" ] || { echo "Release tag and VERSION disagree; installation left unchanged" >&2; exit 1; }
-    lean_extract "$TMP_CLONE/repo"
-    rm -rf "$TMP_CLONE"
-    trap - EXIT
+    echo -e "  ${C_DIM}> downloading $RELEASE_TAG...${C_RESET}"
+    ASSET="ai-status-$RELEASE_TAG.tar.gz"
+    ARCHIVE="$WORK_DIR/release.tar.gz"
+    SOURCE_ARCHIVE=false
+    if HTTP_CODE="$(curl --fail --silent --show-error --location --retry 2 --max-time 120 \
+        --output "$ARCHIVE" --write-out '%{http_code}' \
+        "https://github.com/$REPO_SLUG/releases/download/$RELEASE_TAG/$ASSET")"; then
+        curl --fail --silent --show-error --location --retry 2 --max-time 30 \
+            --output "$WORK_DIR/SHA256SUMS" "https://github.com/$REPO_SLUG/releases/download/$RELEASE_TAG/SHA256SUMS"
+        python3 - "$ARCHIVE" "$WORK_DIR/SHA256SUMS" "$ASSET" <<'PY'
+import hashlib, re, sys
+from pathlib import Path
+archive, sums, name = sys.argv[1:]
+entries = [line.split() for line in Path(sums).read_text().splitlines()]
+expected = [parts[0] for parts in entries if len(parts) == 2 and parts[1].lstrip("*") == name]
+if len(expected) != 1 or not re.fullmatch(r"[0-9a-fA-F]{64}", expected[0]):
+    sys.exit("Missing or invalid package checksum")
+if hashlib.sha256(Path(archive).read_bytes()).hexdigest() != expected[0].lower():
+    sys.exit("Package checksum does not match")
+PY
+    elif [ "$HTTP_CODE" = 404 ]; then
+        # Pre-package releases still install from the exact tag, without git.
+        SOURCE_ARCHIVE=true
+        curl --fail --silent --show-error --location --retry 2 --max-time 120 \
+            --output "$ARCHIVE" "https://codeload.github.com/$REPO_SLUG/tar.gz/refs/tags/$RELEASE_TAG"
+    else
+        echo "Could not download $RELEASE_TAG" >&2
+        exit 1
+    fi
+    python3 - "$ARCHIVE" "$STAGE_DIR" "$SOURCE_ARCHIVE" <<'PY'
+from pathlib import Path, PurePosixPath
+import shutil, sys, tarfile
+archive, destination, source_archive = sys.argv[1:]
+root = Path(destination)
+with tarfile.open(archive, "r:gz") as tar:
+    for member in tar:
+        parts = PurePosixPath(member.name).parts
+        if member.name.startswith("/") or ".." in parts:
+            sys.exit("Unsafe path in release archive")
+        if source_archive == "true":
+            parts = parts[1:]
+        if len(parts) < 2 or parts[0] != "packages" or parts[1] not in ("lib", "shared"):
+            continue
+        target = root.joinpath(*parts)
+        if member.isdir():
+            target.mkdir(parents=True, exist_ok=True)
+        elif member.isfile():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with tar.extractfile(member) as data, target.open("wb") as out:
+                shutil.copyfileobj(data, out)
+            target.chmod(member.mode & 0o777)
+        else:
+            sys.exit("Unexpected link or special file in release archive")
+PY
 fi
 
-# Check requirements
-CHECK_SCRIPT="$INSTALL_DIR/packages/lib/check.sh"
-[ "$USE_LOCAL_LIB" = true ] && CHECK_SCRIPT="$SCRIPT_DIR/check.sh"
+# All validation and requirement checks happen before the active files change.
+python3 - "$STAGE_DIR" "${RELEASE_TAG#v}" <<'PY'
+from pathlib import Path
+import json, sys
+sys.dont_write_bytecode = True
+root = Path(sys.argv[1])
+lib = root / "packages/lib"
+for required in (lib / "VERSION", lib / "src/bin/ai-status", lib / "check.sh", root / "packages/shared/providers/providers.json"):
+    if not required.is_file():
+        sys.exit(f"Release is missing {required.relative_to(root)}")
+version = (lib / "VERSION").read_text().strip()
+if sys.argv[2] and version != sys.argv[2]:
+    sys.exit("Release tag and VERSION disagree")
+json.load(open(root / "packages/shared/providers/providers.json", encoding="utf-8"))
+for script in lib.rglob("*.py"):
+    compile(script.read_bytes(), str(script), "exec")
+sys.path.insert(0, str(lib / "src"))
+import core.cli
+import core
+if core.__version__ != version:
+    sys.exit("CLI and release VERSION disagree")
+PY
 if [ "$SKIP_CHECK" = false ]; then
-    bash "$CHECK_SCRIPT"
+    bash "$STAGE_DIR/packages/lib/check.sh"
 fi
+
+# Updates keep existing display preferences and do not rerun the setup wizard.
+if [ -d "$INSTALL_DIR" ]; then
+    NON_INTERACTIVE=true
+    [ -n "$CONFIGURE_WAYBAR" ] || CONFIGURE_WAYBAR=false
+fi
+
+mkdir "$WORK_DIR/backups"
+for target in "$HOME/.config/ai-status/selected.json" "$WAYBAR_CONFIG" "$WAYBAR_CONFIG.ai-status.bak" \
+    "$BIN_DIR/ai-status" "$BIN_DIR/waybar-ai-status"; do
+    index="${#SNAPSHOT_PATHS[@]}"
+    if [ -e "$target" ] || [ -L "$target" ]; then
+        cp -a -- "$target" "$WORK_DIR/backups/$index"
+    fi
+    SNAPSHOT_PATHS+=("$target")
+done
+
+# Avoid removing the shell's working directory when the public command is run
+# inside the installed copy. The source has already been copied to staging.
+cd "$WORK_DIR"
+if [ -e "$INSTALL_DIR" ]; then
+    rm -rf -- "$PREVIOUS_DIR"
+    mv -- "$INSTALL_DIR" "$PREVIOUS_DIR"
+    OLD_INSTALL_MOVED=true
+fi
+mv -- "$STAGE_DIR" "$INSTALL_DIR"
+NEW_INSTALL_ACTIVE=true
+STAGE_DIR=""
 
 # ═══════════════════════════════════════════════════════════
 # CONFIGURATION WIZARD
@@ -173,7 +327,7 @@ if [ "$NON_INTERACTIVE" = false ]; then
         WIZARD_SCRIPT="$INSTALL_DIR/packages/lib/install-wizard.py"
         [ "$USE_LOCAL_LIB" = true ] && WIZARD_SCRIPT="$SCRIPT_DIR/install-wizard.py"
         [ ! -f "$WIZARD_SCRIPT" ] && WIZARD_SCRIPT="$SCRIPT_DIR/install-wizard.py"
-        WIZARD_OUT="/tmp/ai-status-wizard.json"
+        WIZARD_OUT="$WORK_DIR/wizard.json"
         # If the user cancels the wizard (Ctrl-C -> exit 1), don't let `set -e`
         # abort mid-install and leave a half-state — finish with defaults.
         if python3 "$WIZARD_SCRIPT" "$WIZARD_OUT"; then
@@ -227,40 +381,31 @@ ln -sf "$BIN_DIR/ai-status" "$BIN_DIR/waybar-ai-status"
 CONFIG_DIR="$HOME/.config/ai-status"
 mkdir -p "$CONFIG_DIR"
 
-python3 -c "
-import json, os
-
-path = os.path.expanduser('$CONFIG_DIR/selected.json')
-icon = '$ICON_MODE'
-sp = '$SHOW_PROVIDER'.lower() == 'true'
-sm = '$SHOW_MODEL'.lower() == 'true'
-smt = '$SHOW_METRIC'.lower() == 'true'
-pct = '$SHOW_PCT'.lower() == 'true'
-
+python3 - "$CONFIG_DIR/selected.json" "$ICON_MODE" "$SHOW_PROVIDER" "$SHOW_MODEL" "$SHOW_METRIC" "$SHOW_PCT" <<'PY'
+import json, os, sys, tempfile
+path, icon, sp, sm, smt, pct = sys.argv[1:]
 existing = {}
 if os.path.exists(path):
-    try:
-        with open(path) as f:
-            existing = json.load(f)
-    except: pass
-
-existing['icon_mode'] = icon
-existing['show_provider'] = sp
-existing['show_model'] = sm
-existing['show_metric'] = smt
-existing['show_pct'] = pct
-
-if 'provider' not in existing:
-    existing['provider'] = 'claude'
-if 'idx' not in existing:
-    existing['idx'] = 0
-if 'metric' not in existing:
-    existing['metric'] = 'rolling'
-
-with open(path, 'w') as f:
-    json.dump(existing, f, indent=2)
-print(f'  \033[2msaved display preferences to {path}\033[0m')
-"
+    with open(path, encoding="utf-8") as source:
+        existing = json.load(source)
+    if not isinstance(existing, dict):
+        sys.exit("Display preferences must be a JSON object")
+existing.update(icon_mode=icon, show_provider=sp == "true", show_model=sm == "true",
+                show_metric=smt == "true", show_pct=pct == "true")
+existing.setdefault("provider", "claude")
+existing.setdefault("idx", 0)
+existing.setdefault("metric", "rolling")
+with tempfile.NamedTemporaryFile("w", dir=os.path.dirname(path), delete=False, encoding="utf-8") as out:
+    temporary = out.name
+    json.dump(existing, out, indent=2)
+    out.write("\n")
+try:
+    os.replace(temporary, path)
+finally:
+    if os.path.exists(temporary):
+        os.unlink(temporary)
+print(f"  \033[2msaved display preferences to {path}\033[0m")
+PY
 
 # ═══════════════════════════════════════════════════════════
 # WAYBAR CONFIGURATION

@@ -103,6 +103,27 @@ test("features and fixes accumulate in one PR, including shared metadata", async
   const [major, minor] = previousVersion.split(".").map(Number);
   assert.equal(published.tag.toString(), `v${major}.${minor + 1}.0`);
   assert.equal(published.sha, releaseSha);
+  assert.equal(published.draft, true);
+  assert.equal(published.forceTag, true);
   assert.match(published.notes, /add a provider/);
   assert.match(published.notes, /pin stable versions/);
+});
+
+test("user-written PR entries replace internal commit wording in release notes", async () => {
+  const change = commit("feat(install): refactor all the installer internals", ["packages/lib/install.sh"]);
+  change.pullRequest = {
+    number: 34,
+    body: "## User-facing changes\n\nBEGIN_COMMIT_OVERRIDE\n" +
+      "feat(install): restore the previous version when an update fails\n\n" +
+      "fix(settings): preserve your selected provider and display preferences\n" +
+      "END_COMMIT_OVERRIDE\n\n## Validation\nOffline tests pass.\n",
+  };
+  const release = await manifest([change]);
+  const [pr] = await release.buildPullRequests();
+  const notes = pr.body.toString();
+  assert.match(notes, /restore the previous version when an update fails/);
+  assert.match(notes, /preserve your selected provider and display preferences/);
+  assert.match(notes, /Features/);
+  assert.match(notes, /Bug Fixes/);
+  assert.doesNotMatch(notes, /refactor all the installer internals|Offline tests/);
 });

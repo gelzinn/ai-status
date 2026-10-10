@@ -3,6 +3,7 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
   workflow_dispatch:
   workflow_call:
 
@@ -10,6 +11,14 @@ permissions:
   contents: read
 
 jobs:
+  pr-metadata:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate PR title and user-facing release notes
+        run: python3 .github/scripts/check_pr.py "$GITHUB_EVENT_PATH"
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -19,6 +28,13 @@ jobs:
         uses: ludeeus/action-shellcheck@master
         with:
           scandir: "packages/lib"
+          format: tty
+          severity: warning
+
+      - name: Lint release publication scripts
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ".github/scripts"
           format: tty
           severity: warning
 
@@ -38,6 +54,16 @@ jobs:
       - uses: actions/checkout@v5
       - name: Test stable installs and updates
         run: python3 -m unittest discover -s tests -v
+
+  release-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build and smoke-test the installable package
+        run: |
+          mkdir "$RUNNER_TEMP/release-source"
+          git archive HEAD packages/lib packages/shared | tar -x -C "$RUNNER_TEMP/release-source"
+          python3 .github/scripts/build_release.py --source "$RUNNER_TEMP/release-source" --output "$RUNNER_TEMP/release-assets" --version "$(cat packages/lib/VERSION)"
 
   release-config:
     runs-on: ubuntu-latest
