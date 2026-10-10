@@ -52,10 +52,24 @@ jobs:
           $installed = Join-Path $env:RUNNER_TEMP "AI Status instalado — teste"
           $result = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$installed`"") -Wait -PassThru
           if ($result.ExitCode -ne 0) { throw "Silent installation failed" }
+          # Simulate an older runtime and verify an upgrade replaces it fully.
+          $stale = Join-Path $installed "_internal/old-runtime/libssl-obsolete.dll"
+          New-Item -ItemType Directory -Force (Split-Path $stale) | Out-Null
+          Set-Content $stale "obsolete runtime fixture"
+          $preferences = Join-Path $env:APPDATA "ai-status/upgrade-marker.txt"
+          New-Item -ItemType Directory -Force (Split-Path $preferences) | Out-Null
+          Set-Content $preferences "preserved preferences fixture"
+          $result = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$installed`"") -Wait -PassThru
+          if ($result.ExitCode -ne 0 -or (Test-Path $stale)) { throw "Upgrade retained obsolete runtime files" }
+          if (!(Test-Path $preferences)) { throw "Upgrade removed user data" }
           python packages/lib/tests/packaged_smoke.py "$installed/ai-status-cli.exe"
           if ($LASTEXITCODE -ne 0) { throw "Installed CLI smoke test failed" }
+          # Also remove runtime files created outside the installer's file list.
+          Set-Content (Join-Path $installed "_internal/uninstall-marker.txt") "generated runtime fixture"
           $result = Start-Process -FilePath "$installed/unins000.exe" -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
           if ($result.ExitCode -ne 0) { throw "Silent uninstall failed" }
+          if (Test-Path (Join-Path $installed "_internal")) { throw "Uninstall retained runtime files" }
+          if (!(Test-Path $preferences)) { throw "Uninstall removed user data" }
       - name: Check package size
         run: python packages/lib/windows/size_report.py
       - uses: actions/upload-artifact@v4

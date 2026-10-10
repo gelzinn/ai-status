@@ -13,6 +13,8 @@ release containing Windows assets has been published. Run it as your normal
 user; installation does not require administrator access. Launch **AI Status**
 from the Start menu. A portable ZIP is also built: extract the entire folder
 and open `ai-status.exe`. Keep `ai-status-cli.exe` and `_internal` beside it.
+For portable upgrades, extract into a fresh folder and replace the old app folder;
+settings/cache live in your user profile.
 
 - Click the selected provider's tray logo to toggle the usage panel. Windows may initially put it in
   the hidden-icons menu; move it beside the clock using Windows settings.
@@ -37,7 +39,8 @@ and open `ai-status.exe`. Keep `ai-status-cli.exe` and `_internal` beside it.
 - Clicking outside the panel or closing it keeps the tray app running. Use **Exit** in its menu
   to stop it. An active query finishes before exit so child processes close.
 - The tray menu opens the latest release for updates. Run the new installer
-  to upgrade; configuration is preserved. There is no unattended executable
+  to upgrade; the app runtime is replaced completely and configuration is
+  preserved. There is no unattended executable
   replacement or remote shell execution.
 
 The installer and app contain their own runtime. Provider applications and
@@ -157,6 +160,7 @@ docstrings/assertions; runtime input validation uses explicit exceptions.
 CI renders the packaged widgets/logos, runs real ConPTY input/output checks,
 tests native HTTP against localhost (including invalid TLS certificates), and
 verifies public HTTPS from the frozen executable. It also tests the native
-launcher, silent install/uninstall in a Unicode path, and enforces size budgets
+launcher, silent install/upgrade/uninstall in a Unicode path (including removal
+of obsolete runtime DLLs and preservation of user data), and enforces size budgets
 of 54 MiB installed, 22 MiB for the portable ZIP, and 17 MiB for the installer.
 The build summary lists the largest remaining runtime files.

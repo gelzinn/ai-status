@@ -32,8 +32,16 @@ SetupIconFile=..\..\..\build\windows-app.ico
 [Tasks]
 Name: "autostart"; Description: "Start AI Status when I sign in to Windows"; Flags: unchecked
 
+[InstallDelete]
+; Replace the app-owned runtime during upgrades so removed DLLs do not remain.
+; User configuration/cache live outside {app} and are preserved.
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
 Source: "..\..\..\dist\ai-status\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Icons]
 Name: "{group}\AI Status"; Filename: "{app}\ai-status.exe"; Parameters: "tray"
