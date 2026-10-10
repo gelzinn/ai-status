@@ -4,6 +4,7 @@ import { site, repo } from "@/lib/env";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { GithubIcon } from "@/components/github-icon";
+import { WindowsInstall } from "@/components/windows-install";
 
 export function Cta() {
 	const installCmd = `curl -fsSL ${site.installUrl} | bash`;
@@ -30,8 +31,7 @@ export function Cta() {
 							Ready to monitor your AI?
 						</h2>
 						<p className="max-w-md text-base text-muted-foreground sm:text-lg">
-							One command installs the module and keeps it updated
-							automatically.
+							Install the Waybar module on Linux or the native tray app on Windows.
 						</p>
 					</div>
 				</div>
@@ -55,14 +55,7 @@ export function Cta() {
 								className="w-full m-0!"
 							/>
 						}
-						win={
-							<HighlightedCodeBlock
-								code="# Windows support is coming soon! Stay tuned."
-								lang="bash"
-								label="bash"
-								className="w-full m-0!"
-							/>
-						}
+						win={<WindowsInstall />}
 					/>
 				</div>
 
