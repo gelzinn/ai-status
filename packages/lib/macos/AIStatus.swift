@@ -1012,7 +1012,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                                       ("reset-credits", .credits(snapshot.providers[0].id)), ("about", .about)]
         for (name, page) in pages {
             model.page = page
-            let host = NSHostingController(rootView: PanelView(model: model).environment(\.accessibilityReduceMotion, true))
+            let host = NSHostingController(rootView: PanelView(model: model).transaction {
+                $0.disablesAnimations = true
+                $0.animation = nil
+            })
             host.view.frame = NSRect(x: 0, y: 0, width: 380, height: model.panelHeight)
             host.view.layoutSubtreeIfNeeded()
             if let directory = previewDirectory {
@@ -1022,7 +1025,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 window.contentViewController = host
                 window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
                 window.orderFront(nil)
-                // Let SwiftUI mount once. Reduced motion keeps usage fills deterministic.
+                // Let SwiftUI mount once with animations disabled for deterministic fills.
                 RunLoop.current.run(until: Date().addingTimeInterval(0.1))
                 host.view.layoutSubtreeIfNeeded()
                 host.view.displayIfNeeded()
