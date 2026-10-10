@@ -214,7 +214,7 @@ export function WaybarReplica({ version }: { version: string }) {
       >
         {isWindows ? (
           <div aria-hidden="true" className="flex size-8 items-center justify-center">
-            <WindowsIcon alt="" className="size-5" />
+            <WindowsIcon alt="" className="size-6" />
           </div>
         ) : (
           <div aria-hidden="true" className="flex items-center gap-3 opacity-50">
