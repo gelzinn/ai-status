@@ -2,6 +2,11 @@
 
 Monitor AI provider usage limits in your Waybar — across Claude, Copilot, Codex, Z.AI, Kiro, Antigravity, and OpenCode in real time.
 
+**Windows:** the lib also includes a native tray app for Windows 10/11 x64,
+with a usage dashboard, provider settings and packaged installer. See the
+[Windows guide](packages/lib/WINDOWS.md) for installation, build instructions
+and provider compatibility (especially Kiro on Windows 10).
+
 <img width="348" height="954" alt="Screenshot" src="https://github.com/user-attachments/assets/dcba0b97-d462-452e-b1b6-000cc445b803" />
 
 ## Features
@@ -81,7 +86,7 @@ The status bar shows the usage percentage of the active provider. Scroll up/down
 
 ## How It Works
 
-A Python daemon runs persistently in the background, fetching usage data from all enabled providers in parallel every 5 minutes. Each provider has a `query.sh` (raw data fetching) and a `parse.py` (structured formatting), making it straightforward to add new providers.
+A Python daemon runs persistently in the background, fetching usage data from all enabled providers in parallel every 5 minutes. Each provider has a `query.py` (raw data fetching) and a `parse.py` (structured formatting), making it straightforward to add new providers. Legacy Bash collectors remain as a fallback for providers without a Python collector.
 
 The daemon outputs JSON for Waybar's `return-type: json` custom module format, with the current status icon and a detailed tooltip showing progress bars and reset timers.
 

@@ -32,6 +32,8 @@ def metric_key(metric):
     Fable weekly limit) the label prefix in ``detail`` disambiguates them so
     each can be selected independently."""
     t = metric.get("type", "generic")
+    if metric.get("name"):
+        return f"{t}:{metric['name']}"
     detail = metric.get("detail") or ""
     if " · " in detail:
         label = detail.split(" · ", 1)[0].strip()

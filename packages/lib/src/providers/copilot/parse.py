@@ -7,6 +7,8 @@ def parse(raw_output):
         return {"provider": "GitHub Copilot", "metrics": []}
 
     snapshots = data.get("quota_snapshots", {})
+    if not snapshots:
+        return {"provider": "GitHub Copilot", "metrics": []}
     metrics = []
 
     for key, label in [("chat", "Chat"), ("completions", "Completions")]:

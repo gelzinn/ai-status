@@ -26,11 +26,12 @@ import subprocess
 import urllib.request
 
 from . import state
+from . import paths
 
 # waybar ``"signal": N`` on the image module -> we send SIGRTMIN+N to reload it.
 LOGO_SIGNAL = 11
 
-CACHE_DIR = os.path.expanduser("~/.cache/ai-status/logos")
+CACHE_DIR = str(paths.CACHE_DIR / "logos")
 CURRENT_PNG = os.path.join(CACHE_DIR, "current.png")
 # The current tooltip, mirrored here by the daemon so the logo module can show
 # it. Newlines are stored as U+2028 (waybar's image tooltip is a single line;
@@ -171,6 +172,8 @@ def signal_waybar():
     spawning pkill each time would be wasteful); re-discovers on failure.
     """
     global _waybar_pids
+    if paths.IS_WINDOWS:
+        return
     sig = signal.SIGRTMIN + LOGO_SIGNAL
 
     def _send(pids):
@@ -197,7 +200,7 @@ def signal_waybar():
 def update_current(selected, notify=True):
     """Regenerate ``current.png`` for the selected provider and (optionally)
     signal waybar to reload it. No-op unless the icon mode is ``logo``."""
-    if not selected or state.get_icon_mode(selected) != "logo":
+    if paths.IS_WINDOWS or not selected or state.get_icon_mode(selected) != "logo":
         return False
     provider = selected.get("provider", "antigravity")
     png = provider_png(provider)

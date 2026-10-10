@@ -3,10 +3,11 @@ import sys
 import subprocess
 from . import daemon
 from . import state
-from . import tui
 from . import logos
 from . import render
 from . import config as cfgmod
+from . import paths
+from . import fetch
 
 TERMINALS = ["foot", "alacritty", "kitty", "ghostty", "wezterm", "xterm"]
 
@@ -159,12 +160,47 @@ def revert_waybar():
 
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] == "refresh":
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+    command = sys.argv[1] if len(sys.argv) > 1 else ""
+    if command == "--query":
+        if len(sys.argv) != 3:
+            raise SystemExit("Usage: ai-status --query PROVIDER")
+        fetch.run_query(sys.argv[2])
+    elif command == "doctor":
+        import json
+        info = {"version": fetch.get_version_info()["current"],
+                "providers": cfgmod.available_providers(), "config": str(paths.CONFIG_DIR),
+                "cache": str(paths.CACHE_DIR), "desktop": False, "conpty": False}
+        try:
+            from . import tray
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance() or QApplication([])
+            info["desktop"] = not tray.status_icon().isNull()
+            if paths.IS_WINDOWS:
+                from winpty import Backend, PtyProcess
+                info["conpty"] = hasattr(Backend, "ConPTY") and callable(PtyProcess.spawn)
+        except ImportError:
+            pass
+        print(json.dumps(info, ensure_ascii=False))
+    elif command == "status":
+        import json
+        errors = {}
+        data = fetch.fetch_all_data(on_error=lambda name, message: errors.update({name: message}))
+        state.save_cache(data)
+        print(json.dumps({"providers": data, "errors": errors}, ensure_ascii=False))
+    elif command == "tray" or (paths.IS_WINDOWS and command in ("", "config")):
+        from . import tray
+        tray.run(configure=command == "config")
+    elif command == "refresh":
         state.trigger_refresh()
     elif len(sys.argv) > 1 and sys.argv[1] == "daemon":
-        sys.stderr = open('/tmp/ai-status-error.log', 'w')
+        paths.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        sys.stderr = open(paths.LOG_FILE, 'w', encoding="utf-8")
         daemon.run()
     elif len(sys.argv) > 1 and sys.argv[1] == "config":
+        from . import tui
         if not sys.stdout.isatty():
             for term in TERMINALS:
                 if subprocess.run(["which", term], capture_output=True).returncode == 0:
@@ -183,5 +219,5 @@ def main():
     elif len(sys.argv) > 1 and sys.argv[1] == "revert":
         revert_waybar()
     else:
-        print("Usage: ai-status [daemon|refresh|config|scroll-up|scroll-down|cycle-metric|logo|revert]")
+        print("Usage: ai-status [tray|status|doctor|daemon|refresh|config|scroll-up|scroll-down|cycle-metric|logo|revert]")
         sys.exit(1)

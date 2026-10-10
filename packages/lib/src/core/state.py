@@ -1,12 +1,15 @@
 import os
 import json
 import time
+import uuid
+from . import paths
 
-CACHE_FILE = os.path.expanduser("~/.cache/ai-status.json")
-SELECTED_FILE = os.path.expanduser("~/.config/ai-status/selected.json")
+CACHE_FILE = str(paths.CACHE_DIR / "usage.json") if paths.IS_WINDOWS else os.path.expanduser("~/.cache/ai-status.json")
+SELECTED_FILE = str(paths.CONFIG_DIR / "selected.json")
 
-LOCK_FILE = "/tmp/ai-status-query.lock"
-PID_FILE = "/tmp/ai-status.pids"
+LOCK_FILE = str(paths.RUNTIME_DIR / "ai-status-query.lock")
+PID_FILE = str(paths.RUNTIME_DIR / "ai-status.pids")
+REFRESH_FILE = str(paths.RUNTIME_DIR / "ai-status-refresh.json")
 
 ICON_MODES = ["off", "bot", "logo"]
 
@@ -21,8 +24,9 @@ def get_icon_mode(selected):
 def load_cache():
     if os.path.exists(CACHE_FILE):
         try:
-            with open(CACHE_FILE, "r") as f:
-                return json.load(f)
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, list) else []
         except Exception:
             pass
     return []
@@ -30,18 +34,19 @@ def load_cache():
 def save_cache(data):
     try:
         os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
-        with open(CACHE_FILE, "w") as f:
-            json.dump(data, f)
+        paths.atomic_json(CACHE_FILE, data)
     except Exception:
         pass
 
 def acquire_lock():
     try:
+        os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
         if os.path.exists(LOCK_FILE):
             mtime = os.path.getmtime(LOCK_FILE)
-            if time.time() - mtime < 15:
+            if time.time() - mtime < 90:
                 return False
-        with open(LOCK_FILE, "w") as f:
+            os.remove(LOCK_FILE)
+        with open(LOCK_FILE, "x") as f:
             f.write(str(os.getpid()))
         return True
     except Exception:
@@ -55,6 +60,8 @@ def release_lock():
         pass
 
 def register_pid():
+    if paths.IS_WINDOWS:
+        return  # os.kill(pid, 0) is not a safe Unix-style liveness probe here.
     pids = []
     if os.path.exists(PID_FILE):
         try:
@@ -81,8 +88,9 @@ def register_pid():
 def load_selected():
     if os.path.exists(SELECTED_FILE):
         try:
-            with open(SELECTED_FILE, "r") as f:
-                return json.load(f)
+            with open(SELECTED_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else None
         except Exception:
             pass
     return None
@@ -90,12 +98,14 @@ def load_selected():
 def save_selected(data):
     try:
         os.makedirs(os.path.dirname(SELECTED_FILE), exist_ok=True)
-        with open(SELECTED_FILE, "w") as f:
-            json.dump(data, f)
+        paths.atomic_json(SELECTED_FILE, data)
     except Exception:
         pass
 
 def trigger_refresh():
+    if paths.IS_WINDOWS:
+        paths.atomic_json(REFRESH_FILE, {"request": uuid.uuid4().hex})
+        return
     if os.path.exists(PID_FILE):
         try:
             with open(PID_FILE, "r") as f:

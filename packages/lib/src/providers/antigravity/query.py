@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-import pty
 import os
 import sys
 import time
 import select
 import re
-import fcntl
-import termios
 import struct
+from core.paths import IS_WINDOWS
+
+if not IS_WINDOWS:
+    import pty
+    import fcntl
+    import termios
 
 ANSI_ESCAPE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
@@ -92,10 +95,19 @@ def get_agy_usage():
             os.kill(pid, 9)
         except:
             pass
+        try:
+            os.waitpid(pid, 0)
+        except OSError:
+            pass
 
         return strip_ansi(output.decode('utf-8', errors='replace'))
 
 def main():
+    if IS_WINDOWS:
+        from core.console import query_antigravity
+        from core.provider_http import output
+        output(query_antigravity)
+        return
     try:
         raw_out = get_agy_usage()
         print(raw_out)

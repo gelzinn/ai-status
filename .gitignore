@@ -18,6 +18,8 @@ __pycache__/
 env/
 venv/
 .venv/
+build/
+dist/
 
 # Locks and PIDs (though they are in /tmp, good practice)
 *.lock

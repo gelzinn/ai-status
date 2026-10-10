@@ -2,7 +2,9 @@
 
 **Bug reports, feature requests, and pull requests are welcome.**
 
-This project targets Linux and Waybar, but the core logic in `src/core/` and the provider scripts in `src/providers/` are platform-independent and can be adapted to other status bars or operating systems.
+This project supports Linux/Waybar and a native Windows tray adapter. The lib
+lives in `packages/lib`. Keep provider data separate from the Waybar/Pango and
+desktop renderers; see [Windows development](packages/lib/WINDOWS.md#develop-and-build).
 
 ## Adding a New Provider
 
@@ -10,7 +12,7 @@ Each provider needs two files in `src/providers/<name>/`:
 
 | File | Purpose |
 |---|---|
-| `query.sh` | Fetches raw data via API call, CLI invocation, or terminal interaction |
+| `query.py` | Fetches raw data via API call, CLI invocation, or terminal interaction |
 | `parse.py` | Exports `parse(raw_output)` returning a standardized JSON structure |
 
 Walk through `src/providers/claude/` as a reference implementation.
@@ -18,7 +20,7 @@ Walk through `src/providers/claude/` as a reference implementation.
 Steps:
 
 1. Fork the repository on GitHub
-2. Create `src/providers/<name>/query.sh` with your data-fetching logic
+2. Create `packages/lib/src/providers/<name>/query.py` with your data-fetching logic and a `main()` function. Use `core.provider_http` for HTTP, CLI invocation and credential-free diagnostics; optional Python dependencies must stay out of the Linux import path. Bash is only a legacy fallback.
 3. Create `src/providers/<name>/parse.py` with a `parse(raw_output)` function
 4. Register the provider via `ai-status config` (it appears automatically)
 5. Open a pull request
