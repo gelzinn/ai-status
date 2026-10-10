@@ -1,4 +1,3 @@
-import { Cta } from "@/components/cta";
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import { Hero } from "@/components/hero";
@@ -144,8 +143,6 @@ export default async function Homepage() {
           <WaybarReplica version={latestVersion} />
         </aside>
       </main>
-
-      <Cta />
 
       <Footer />
     </div>
