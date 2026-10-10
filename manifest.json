@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.gelzinn.ai-status",
+  "name": "AI Status",
+  "version": "0.9.0",
+  "author": "gelzinn",
+  "license": "MIT",
+  "description": "Monitor AI provider usage limits in the Omarchy bar.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "packages/lib/quickshell/BarWidget.qml" },
+  "barWidget": {
+    "displayName": "AI Status",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

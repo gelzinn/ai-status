@@ -48,6 +48,7 @@ jobs:
           python -m py_compile packages/lib/src/core/*.py
           python -m py_compile packages/lib/src/providers/**/*.py
           python -m py_compile packages/lib/src/windows.py
+          python -m py_compile packages/lib/install-wizard.py
 
   python-tests:
     runs-on: ubuntu-latest
@@ -92,3 +93,31 @@ jobs:
         run: npm install --prefix "$RUNNER_TEMP/release-validation" --no-audit --no-fund release-please@17.3.0 ajv@8.17.1
       - name: Test versioning and release notes without publishing
         run: NODE_PATH="$RUNNER_TEMP/release-validation/node_modules" node tests/test_release_config.cjs
+
+  qml-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Qt QML tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qt6-declarative-dev-tools qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-shapes qml6-module-qtqml-models qml6-module-qtqml-workerscript qml6-module-qttest qt6-qpa-plugins
+      - name: Parse QML without rewriting files
+        run: |
+          for qml in packages/lib/quickshell/*.qml; do
+            /usr/lib/qt6/bin/qmlformat "$qml" > /dev/null
+          done
+      - name: Test native page interactions without a desktop
+        run: python3 packages/lib/tests/run_qml_tests.py
+
+  web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install web dependencies
+        run: npm install --ignore-scripts
+      - name: Build website
+        run: npm run build --workspace @ai-status/web

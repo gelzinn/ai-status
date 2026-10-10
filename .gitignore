@@ -33,3 +33,4 @@ dist/
 .idea/
 .DS_Store
 !packages/shared/providers/providers.json
+!manifest.json

@@ -63,6 +63,9 @@ PY
     done <<< "$SAVED_PREFS"
 fi
 CONFIGURE_WAYBAR=""
+CONFIGURE_BAR=""
+BAR="auto"
+BAR_EXPLICIT=false
 NON_INTERACTIVE=false
 SKIP_CHECK=false
 RELEASE_TAG=""
@@ -71,12 +74,18 @@ ROLLBACK=false
 # ── parse flags ───────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --icon-mode|--show-provider|--show-model|--show-metric|--show-pct|--configure-waybar|--configure-bar|--bar)
+            [ $# -ge 2 ] || { echo "Missing value for $1" >&2; exit 1; } ;;
+    esac
+    case "$1" in
         --icon-mode)        ICON_MODE="$2"; shift 2 ;;
         --show-provider)    SHOW_PROVIDER="$2"; shift 2 ;;
         --show-model)       SHOW_MODEL="$2"; shift 2 ;;
         --show-metric)      SHOW_METRIC="$2"; shift 2 ;;
         --show-pct)         SHOW_PCT="$2"; shift 2 ;;
         --configure-waybar) CONFIGURE_WAYBAR="$2"; shift 2 ;;
+        --configure-bar)    CONFIGURE_BAR="$2"; shift 2 ;;
+        --bar)              BAR="$2"; [ "$BAR" = auto ] || BAR_EXPLICIT=true; shift 2 ;;
         --no-interactive)   NON_INTERACTIVE=true; shift ;;
         --skip-check)       SKIP_CHECK=true; shift ;;
         --version)          [ $# -ge 2 ] && [ -n "$2" ] || { echo "Missing value for --version" >&2; exit 1; }
@@ -86,13 +95,43 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[ "$ROLLBACK" = false ] || [ -z "$RELEASE_TAG" ] || { echo "Use either --rollback or --version" >&2; exit 1; }
-case "$ICON_MODE" in bot|logo|off) ;; *) echo "Invalid --icon-mode: $ICON_MODE" >&2; exit 1 ;; esac
-for flag in SHOW_PROVIDER SHOW_MODEL SHOW_METRIC SHOW_PCT; do
-    case "${!flag}" in true|false) ;; *) echo "Invalid --$flag: ${!flag}" >&2; exit 1 ;; esac
-done
-case "$CONFIGURE_WAYBAR" in true|false|"") ;; *) echo "Invalid --configure-waybar" >&2; exit 1 ;; esac
+case "$BAR" in auto|waybar|quickshell) ;; *) echo "Invalid --bar: $BAR" >&2; exit 1 ;; esac
+if [ -n "$CONFIGURE_WAYBAR" ]; then
+    [ "$BAR" != quickshell ] || { echo "--configure-waybar cannot be used with --bar quickshell" >&2; exit 1; }
+    [ -z "$CONFIGURE_BAR" ] || [ "$CONFIGURE_BAR" = "$CONFIGURE_WAYBAR" ] || { echo "Conflicting configuration flags" >&2; exit 1; }
+    BAR="waybar"
+    BAR_EXPLICIT=true
+    CONFIGURE_BAR="$CONFIGURE_WAYBAR"
+fi
+validate_options() {
+    case "$ICON_MODE" in bot|logo|off) ;; *) echo "Invalid --icon-mode: $ICON_MODE" >&2; exit 1 ;; esac
+    local option value
+    for option in SHOW_PROVIDER SHOW_MODEL SHOW_METRIC SHOW_PCT CONFIGURE_BAR; do
+        value="${!option}"
+        case "$value" in true|false) ;; "") [ "$option" = CONFIGURE_BAR ] || exit 1 ;; *) echo "Invalid $option: $value" >&2; exit 1 ;; esac
+    done
+}
+validate_options
 
+quickshell_available() {
+    command -v omarchy >/dev/null 2>&1 && command -v omarchy-shell >/dev/null 2>&1 &&
+        { command -v qs >/dev/null 2>&1 || command -v quickshell >/dev/null 2>&1; }
+}
+if [ "$BAR" = auto ]; then
+    if quickshell_available && OMARCHY_SHELL_IPC_TIMEOUT=2 omarchy-shell shell ping >/dev/null 2>&1; then
+        BAR="quickshell"
+    elif pgrep -x waybar >/dev/null 2>&1 || command -v waybar >/dev/null 2>&1; then
+        BAR="waybar"
+    elif quickshell_available; then
+        BAR="quickshell"
+    else
+        # Preserve headless/manual Waybar setup; dependency validation below
+        # reports a missing bar unless the caller explicitly skips it.
+        BAR="waybar"
+    fi
+fi
+
+[ "$ROLLBACK" = false ] || [ -z "$RELEASE_TAG" ] || { echo "Use either --rollback or --version" >&2; exit 1; }
 # Only stable version tags may be requested. Never treat a branch (main) as
 # an installable release; local checkouts remain available for development.
 if [ -n "$RELEASE_TAG" ]; then
@@ -282,13 +321,13 @@ if core.__version__ != version:
     sys.exit("CLI and release VERSION disagree")
 PY
 if [ "$SKIP_CHECK" = false ]; then
-    bash "$STAGE_DIR/packages/lib/check.sh"
+    bash "$STAGE_DIR/packages/lib/check.sh" "$BAR"
 fi
 
 # Updates keep existing display preferences and do not rerun the setup wizard.
 if [ -d "$INSTALL_DIR" ]; then
     NON_INTERACTIVE=true
-    [ -n "$CONFIGURE_WAYBAR" ] || CONFIGURE_WAYBAR=false
+    [ -n "$CONFIGURE_BAR" ] || CONFIGURE_BAR=false
 fi
 
 mkdir "$WORK_DIR/backups"
@@ -318,7 +357,7 @@ STAGE_DIR=""
 # ═══════════════════════════════════════════════════════════
 
 if [ "$NON_INTERACTIVE" = false ]; then
-    if [ -n "$CONFIGURE_WAYBAR" ]; then
+    if [ -n "$CONFIGURE_BAR" ]; then
         echo -e "  ${C_DIM}flags detected — skipping interactive setup${C_RESET}"
     elif { true >/dev/tty; } 2>/dev/null; then
         # A terminal is attached — run the wizard reading from /dev/tty. This
@@ -330,32 +369,48 @@ if [ "$NON_INTERACTIVE" = false ]; then
         WIZARD_OUT="$WORK_DIR/wizard.json"
         # If the user cancels the wizard (Ctrl-C -> exit 1), don't let `set -e`
         # abort mid-install and leave a half-state — finish with defaults.
-        if python3 "$WIZARD_SCRIPT" "$WIZARD_OUT"; then
-            eval "$(python3 -c "
-import json
-with open('$WIZARD_OUT') as f:
-    d = json.load(f)
-for k, v in d.items():
-    print(f'{k}={v}')
-")"
+        if python3 "$WIZARD_SCRIPT" "$WIZARD_OUT" "$BAR" "$BAR_EXPLICIT"; then
+            eval "$(python3 - "$WIZARD_OUT" <<'PY'
+import json, shlex, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+for key in ('BAR', 'ICON_MODE', 'SHOW_PROVIDER', 'SHOW_MODEL', 'SHOW_METRIC', 'SHOW_PCT', 'CONFIGURE_BAR'):
+    if key in data:
+        print(f'{key}={shlex.quote(str(data[key]))}')
+PY
+)"
         else
             echo -e "  ${C_DIM}setup cancelled — installing with defaults (run 'ai-status config' to change)${C_RESET}"
         fi
+        rm -f "$WIZARD_OUT"
     else
         # Truly no terminal (cron/CI/headless) — configure with defaults instead
         # of leaving a half-install where waybar never gets the module.
         echo -e "  ${C_DIM}no terminal — configuring with defaults${C_RESET}"
-        CONFIGURE_WAYBAR="true"
+        CONFIGURE_BAR="true"
     fi
 fi
 
 # ── validate ───────────────────────────────────────────────
-case "$ICON_MODE" in bot|logo|off) ;; *) echo "Invalid --icon-mode: $ICON_MODE"; exit 1 ;; esac
-for f in SHOW_PROVIDER SHOW_MODEL SHOW_METRIC SHOW_PCT; do
-    val="${!f}"
-    case "$val" in true|false) ;; *) echo "Invalid --$f: $val"; exit 1 ;; esac
-done
-[ -z "$CONFIGURE_WAYBAR" ] && CONFIGURE_WAYBAR="false"
+validate_options
+[ -z "$CONFIGURE_BAR" ] && CONFIGURE_BAR="false"
+CHECK_SCRIPT="$INSTALL_DIR/packages/lib/check.sh"
+[ "$USE_LOCAL_LIB" = true ] && CHECK_SCRIPT="$SCRIPT_DIR/check.sh"
+if [ "$SKIP_CHECK" = false ]; then
+    bash "$CHECK_SCRIPT" "$BAR"
+fi
+if [ "$BAR" = quickshell ]; then
+    if ! OMARCHY_SHELL_IPC_TIMEOUT=2 omarchy-shell shell ping >/dev/null 2>&1; then
+        echo "Start the Omarchy shell, then re-run the installer to install the plugin." >&2
+        exit 1
+    fi
+    PLUGIN_ID="io.github.gelzinn.ai-status"
+    PLUGIN_DIR="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
+    if [ -e "$PLUGIN_DIR" ] && [ ! -d "$PLUGIN_DIR/.git" ]; then
+        echo "Existing plugin is not managed by Git: $PLUGIN_DIR. Leaving it untouched." >&2
+        exit 1
+    fi
+fi
 
 echo ""
 echo -e "  ${C_PURPLE}icon${C_RESET}          ${C_DIM}>${C_RESET} ${C_CYAN}$ICON_MODE${C_RESET}"
@@ -363,7 +418,8 @@ echo -e "  ${C_PURPLE}show provider${C_RESET} ${C_DIM}>${C_RESET} $(bool_color "
 echo -e "  ${C_PURPLE}show model${C_RESET}    ${C_DIM}>${C_RESET} $(bool_color "$SHOW_MODEL")$SHOW_MODEL${C_RESET}"
 echo -e "  ${C_PURPLE}show metric${C_RESET}   ${C_DIM}>${C_RESET} $(bool_color "$SHOW_METRIC")$SHOW_METRIC${C_RESET}"
 echo -e "  ${C_PURPLE}show %${C_RESET}        ${C_DIM}>${C_RESET} $(bool_color "$SHOW_PCT")$SHOW_PCT${C_RESET}"
-echo -e "  ${C_PURPLE}waybar config${C_RESET} ${C_DIM}>${C_RESET} $(bool_color "$CONFIGURE_WAYBAR")$CONFIGURE_WAYBAR${C_RESET}"
+echo -e "  ${C_PURPLE}bar${C_RESET}           ${C_DIM}>${C_RESET} ${C_CYAN}$BAR${C_RESET}"
+echo -e "  ${C_PURPLE}bar config${C_RESET}    ${C_DIM}>${C_RESET} $(bool_color "$CONFIGURE_BAR")$CONFIGURE_BAR${C_RESET}"
 echo ""
 
 # ═══════════════════════════════════════════════════════════
@@ -411,7 +467,7 @@ PY
 # WAYBAR CONFIGURATION
 # ═══════════════════════════════════════════════════════════
 
-if [ "$CONFIGURE_WAYBAR" = true ] && command -v waybar &>/dev/null; then
+if [ "$BAR" = waybar ] && [ "$CONFIGURE_BAR" = true ] && command -v waybar &>/dev/null; then
     echo ""
     echo -e "  ${C_PURPLE}${C_DIM}waybar modules${C_RESET}"
 
@@ -629,7 +685,7 @@ PYEOF
     echo ""
     echo -e "  ${C_DIM}Your original Waybar config was backed up. If anything looks off,${C_RESET}"
     echo -e "  ${C_DIM}run${C_RESET} ${C_CYAN}ai-status revert${C_RESET} ${C_DIM}to restore it.${C_RESET}"
-elif command -v waybar &>/dev/null; then
+elif [ "$BAR" = waybar ] && command -v waybar &>/dev/null; then
     # Manual mode — the user chose to add the modules themselves. Print the
     # blocks to copy (same as the docs / landing page). Nothing is touched, so
     # there's no backup to worry about.
@@ -676,7 +732,22 @@ fi
 
 # ═══════════════════════════════════════════════════════════
 
-if command -v waybar &>/dev/null; then
+if [ "$BAR" = quickshell ]; then
+    if [ -d "$PLUGIN_DIR/.git" ]; then
+        omarchy plugin update "$PLUGIN_ID" --yes
+    else
+        # Local development installs the checkout being tested, rather than main.
+        PLUGIN_SOURCE="$REPO_URL"
+        [ "$USE_LOCAL_LIB" = true ] && PLUGIN_SOURCE="$REPO_ROOT"
+        omarchy plugin add "$PLUGIN_SOURCE" --yes
+    fi
+    if [ "$CONFIGURE_BAR" = true ]; then
+        # Empty placement preserves an existing position; first enable uses right.
+        omarchy plugin enable "$PLUGIN_ID"
+    else
+        echo "Enable when ready: omarchy plugin enable $PLUGIN_ID"
+    fi
+elif command -v waybar &>/dev/null; then
     echo ""
     echo -e "  ${C_DIM}> restarting waybar...${C_RESET}"
     pkill -SIGUSR2 waybar 2>/dev/null || true

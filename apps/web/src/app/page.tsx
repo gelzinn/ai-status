@@ -1,5 +1,6 @@
 import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
+import { QuickshellConfiguration } from "@/components/quickshell-configuration";
 import { Hero } from "@/components/hero";
 import { Features } from "@/components/features";
 import { InstallPlatformProvider, PlatformContent } from "@/components/install-platform";
@@ -30,7 +31,7 @@ export default async function Homepage() {
           </div>
 
           <PlatformContent
-            linux={<WaybarConfiguration />}
+            linux={<><QuickshellConfiguration /><WaybarConfiguration /></>}
             windows={<WindowsConfiguration />}
           />
 

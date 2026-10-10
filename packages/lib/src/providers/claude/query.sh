@@ -28,8 +28,11 @@ if [[ -z "$TOKEN" ]]; then
   exit 0
 fi
 
-RESPONSE=$(curl -s --max-time 15 "https://api.anthropic.com/api/oauth/usage" \
+# The reset inventory is opt-in and requires a recognised Claude CLI surface.
+# Use a published client version; older versions receive an ineligible block.
+RESPONSE=$(curl -s --max-time 15 "https://api.anthropic.com/api/oauth/usage?cedar_ember=1" \
   -H "Authorization: Bearer $TOKEN" \
+  -H "User-Agent: claude-cli/2.1.281 (external, cli)" \
   -H "anthropic-beta: oauth-2025-04-20" 2>/dev/null)
 
 if [[ -z "$RESPONSE" ]]; then

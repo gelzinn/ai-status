@@ -64,6 +64,10 @@ test("library fixes propose a patch with notes and a matching VERSION", async ()
   assert.match(pr.body.toString(), /preserve failed downloads/);
   const version = pr.updates.find(update => update.path === "packages/lib/VERSION");
   assert.equal(version.updater.updateContent(previousVersion), `${major}.${minor}.${patch + 1}\n`);
+  const plugin = pr.updates.find(update => update.path === "manifest.json");
+  assert.ok(plugin, "The Omarchy plugin version must follow the library release");
+  const pluginContent = fs.readFileSync(path.join(root, "manifest.json"), "utf8");
+  assert.equal(JSON.parse(plugin.updater.updateContent(pluginContent)).version, `${major}.${minor}.${patch + 1}`);
 });
 
 test("features and fixes accumulate in one PR, including shared metadata", async () => {

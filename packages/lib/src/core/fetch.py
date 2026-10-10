@@ -45,7 +45,7 @@ def _is_error_result(result):
     if isinstance(result, list):
         return all(_is_error_result(item) for item in result)
     if isinstance(result, dict):
-        if "error" in result:
+        if "error" in result or result.get("_error") and not result.get("_cached"):
             return True
         metrics = result.get("metrics", [])
         if not metrics:
@@ -177,7 +177,7 @@ def get_version_info():
         "has_update": _latest_version is not None and _latest_version != __version__,
     }
 
-def fetch_all_data(on_result=None, on_error=None):
+def fetch_all_data(on_result=None, on_error=None, include_errors=False):
     repo_dir = cfgmod.providers_dir()
     script_dir = repo_dir
 
@@ -212,6 +212,8 @@ def fetch_all_data(on_result=None, on_error=None):
             providers = None
             try:
                 data = future.result()
+                if include_errors and (not data or isinstance(data, dict) and "error" in data):
+                    data = {"provider": dir_name, "metrics": [], "_error": (data or {}).get("error", "No usage data available")}
                 if data and "error" not in data:
                     providers = data if isinstance(data, list) else [data]
                     for idx, p in enumerate(providers):

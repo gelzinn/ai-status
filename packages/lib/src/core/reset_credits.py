@@ -114,3 +114,37 @@ def display_lines(block, now=None):
     if not data["credits"]:
         lines.append("Expiry not provided")
     return lines
+
+
+def presentation(block, now=None):
+    """Plain display fields for the Quickshell panel, using the shared live inventory."""
+    data = available_credits(block, now)
+    if not data["available"]:
+        return None
+    details = []
+    for item in data["credits"]:
+        title = item["title"]
+        if item["count"] > 1:
+            title += f" ×{item['count']}"
+        if item["expires_at"]:
+            stamp, remaining = format_expiry(item["expires_at"], now)
+            detail = f"Expires {stamp} · {remaining}"
+        else:
+            detail = "Expiration not reported"
+        details.append(f"{title} · {detail}")
+    if data["undetailed"]:
+        details.append("Expiration not reported")
+    rows = []
+    credits = data["credits"] + ([{"title": "Reset credit", "count": data["undetailed"], "expires_at": None}]
+                                  if data["undetailed"] else [])
+    for item in credits:
+        date = item["expires_at"]
+        stamp, remaining = format_expiry(date, now) if date else ("Not provided", "")
+        offset = date.astimezone().strftime("%z") if date else ""
+        zone = f"UTC{offset[:3]}:{offset[3:]}" if offset else ""
+        rows.append({"title": item["title"], "count": item["count"],
+                     "expires": stamp, "remaining": remaining, "timezone": zone})
+    available = data["available"]
+    return {"available": available,
+            "summary": f"{available} reset{'s' if available != 1 else ''} available",
+            "details": details, "rows": rows, "undetailed": data["undetailed"]}

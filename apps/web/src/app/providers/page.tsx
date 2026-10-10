@@ -9,7 +9,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
 	title: `Supported Providers | ${site.name}`,
-	description: `Every AI provider ${LIB_NAME} can track in your Waybar — what each one reports and where it reads your credentials from.`,
+	description: `Every AI provider ${LIB_NAME} can track in your status bar — what each one reports and where it reads your credentials from.`,
 };
 
 export default function ProvidersPage() {
@@ -24,7 +24,7 @@ export default function ProvidersPage() {
 						Supported Providers
 					</h1>
 					<p className="max-w-2xl text-lg text-muted-foreground">
-						Every AI service {LIB_NAME} can track in your Waybar — what each one
+						Every AI service {LIB_NAME} can track in Waybar and Omarchy Quickshell — what each one
 						reports, and where it reads your credentials from.
 					</p>
 				</section>

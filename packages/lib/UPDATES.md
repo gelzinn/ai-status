@@ -67,6 +67,15 @@ same command covers every case:
 | Local checkout | Extracts from your working tree, local edits included |
 | Older full-repo install | Replaced with the lean copy automatically |
 
+After updating, the script reloads only the selected bar. Waybar receives its existing reload signal; Quickshell uses Omarchy's plugin add/update mechanism and hot reload. Use `--bar waybar` or `--bar quickshell` to choose explicitly. Existing display preferences are preserved unless changed in the wizard or by flags.
+
+For a plugin installed directly through Omarchy, update only AI Status with:
+
+```bash
+omarchy plugin update io.github.gelzinn.ai-status
+```
+
+Omarchy keeps the plugin's bar placement and refuses updates it cannot fast-forward. Shared preferences and provider credentials remain outside the plugin checkout.
 Downloads, checksums, Python validation, CLI import, and dependency checks
 run in a staging directory before replacing the active installation. If
 activation or setup fails, the installer restores the previous files,
@@ -78,14 +87,13 @@ and skip the first-install wizard. Explicit display flags override the saved
 values. Waybar modules are only reconfigured during an update if you pass
 `--configure-waybar true`.
 
-After updating, the script restarts Waybar automatically to apply changes.
 
 Release notes are available on [GitHub Releases](https://github.com/gelzinn/ai-status/releases)
 and, for releases made with the new workflow, in `packages/lib/CHANGELOG.md`.
 
 ## Checking Your Version
 
-The current version is shown at the top of the Waybar tooltip. You can also check:
+The current version appears at the top of the Waybar tooltip or Quickshell details panel. For the CLI installation, you can also check:
 
 ```bash
 ai-status --version

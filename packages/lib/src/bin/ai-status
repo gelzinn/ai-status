@@ -10,4 +10,4 @@ if sys.argv[1:] == ["--version"]:
 from core.cli import main
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

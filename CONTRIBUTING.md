@@ -2,9 +2,7 @@
 
 **Bug reports, feature requests, and pull requests are welcome.**
 
-This project supports Linux/Waybar and a native Windows tray adapter. The lib
-lives in `packages/lib`. Keep provider data separate from the Waybar/Pango and
-desktop renderers; see [Windows development](packages/lib/WINDOWS.md#develop-and-build).
+This project supports Linux/Waybar, Omarchy Quickshell, and a native Windows tray adapter. The shared Python backend lives in `packages/lib/src/core/`, providers in `packages/lib/src/providers/`, and the native Omarchy plugin in `packages/lib/quickshell/`. Keep provider data separate from the frontend renderers; see [Windows development](packages/lib/WINDOWS.md#develop-and-build).
 
 ## Adding a New Provider
 
@@ -27,10 +25,10 @@ Steps:
 
 ## Adding Support for Other Platforms
 
-The visual formatting lives in `src/core/render.py` using Pango markup (Waybar's format). To support another status bar or OS:
+Waybar formatting lives in `packages/lib/src/core/render.py` using Pango markup. The Quickshell adapter emits structured snapshots from `packages/lib/src/core/quickshell.py`; QML owns its presentation. Keep new frontends separate so existing Waybar output remains compatible. To support another status bar or OS:
 
 1. Fork the repository on GitHub
-2. Modify `src/core/render.py` to output the appropriate format for your target
+2. Add an output adapter for your target and reuse the existing queries and state
 3. Update `install.sh` and `check.sh` for the new environment
 4. Open a pull request
 
@@ -44,6 +42,9 @@ The visual formatting lives in `src/core/render.py` using Pango markup (Waybar's
 | 4 | Verify the daemon runs: `ai-status daemon` |
 | 5 | Open a pull request describing what you changed and why |
 
+Run `python3 -m unittest discover -s packages/lib/tests -v` for adapter and isolated installer tests. For native plugin validation and desktop acceptance checks, see [INSTALL.md](packages/lib/INSTALL.md#development-validation).
+
+Run `python3 packages/lib/tests/run_qml_tests.py` for native settings and usage page tests. These use the production QML pages with a fake daemon and theme, via Qt Quick Test's offscreen renderer. Install `qt6-declarative-dev-tools`, `qml6-module-qtquick`, `qml6-module-qtquick-window`, `qml6-module-qtquick-shapes`, `qml6-module-qtqml-models`, `qml6-module-qtqml-workerscript`, `qml6-module-qttest`, and `qt6-qpa-plugins`. They do not replace an Omarchy desktop smoke test.
 ## Releases
 
 Development continues on `main`. The public installer downloads the tag of
@@ -52,7 +53,7 @@ reach users who install or update through the public command.
 
 After CI succeeds on `main`, Release Please opens or updates a single release
 PR with the next version, `packages/lib/VERSION`,
-`.release-please-manifest.json`, and `packages/lib/CHANGELOG.md`. Several PRs
+`.release-please-manifest.json`, `manifest.json`, and `packages/lib/CHANGELOG.md`. Several PRs
 can accumulate before a release. Merging a normal feature or fix PR does not
 publish a version. Merging the generated release PR creates its version tag
 and a draft GitHub Release after the same CI checks succeed. The workflow

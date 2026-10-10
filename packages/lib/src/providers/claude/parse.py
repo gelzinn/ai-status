@@ -114,6 +114,7 @@ def parse(raw_output):
         message = (usage.get("error") or {}).get("message", "Authentication failed")
         return {
             "provider": provider,
+            "_error": message,
             "metrics": [{"type": "generic", "percentage": 0, "detail": message}],
         }
 
@@ -121,6 +122,7 @@ def parse(raw_output):
         err = usage["error"]
         return {
             "provider": provider,
+            "_error": err.get("message", "API error"),
             "metrics": [{"type": "generic", "percentage": 0, "detail": err.get("message", "API error")}],
         }
 
