@@ -8,11 +8,11 @@ import threading
 import time
 import uuid
 
-from PySide6.QtCore import QObject, QLockFile, QTimer, Qt, QUrl, Signal, QSize
-from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QPalette
+from PySide6.QtCore import QEasingCurve, QObject, QPoint, QPointF, QRectF, QLockFile, QTimer, Qt, QUrl, Signal, QSize, QVariantAnimation
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QCheckBox, QDialog, QDialogButtonBox, QHBoxLayout,
-    QLabel, QListWidget, QListWidgetItem, QMenu, QMessageBox, QProgressBar,
+    QLabel, QListWidget, QListWidgetItem, QMenu, QMessageBox,
     QPushButton, QScrollArea, QSizePolicy, QStyledItemDelegate, QStyle,
     QSystemTrayIcon, QVBoxLayout, QWidget,
 )
@@ -39,9 +39,6 @@ QLabel { background: transparent; border: none; }
 QLabel#brand { color: #eeeeee; font-weight: 500; }
 QAbstractButton { border: none; background: transparent; text-align: left; }
 QAbstractButton:hover, QAbstractButton:focus { background: #1c1c1c; border-radius: 8px; }
-QProgressBar { background: #141414; border: 1px solid #222222; border-radius: 1px; }
-QProgressBar::chunk { background: #555555; }
-QProgressBar[active="true"]::chunk { background: #eeeeee; }
 QScrollArea { border: none; background: transparent; }
 QScrollBar:vertical { background: transparent; width: 5px; margin: 6px 0; }
 QScrollBar::handle:vertical { background: #303030; border-radius: 2px; min-height: 24px; }
@@ -50,9 +47,11 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: trans
 QPushButton { padding: 6px 8px; }
 QPushButton#actions { background: #1c1c1c; padding: 0; border-radius: 6px; text-align: center; }
 QPushButton#actions:hover { background: #252525; }
-QMenu { background: #111111; border: 1px solid #303030; padding: 5px; }
-QMenu::item { padding: 8px 16px; }
-QMenu::item:selected { background: #252525; color: #eeeeee; }
+QMenu { background: #111111; border: 1px solid #262626; border-radius: 10px; padding: 6px; }
+QMenu::item { color: #888888; padding: 8px 12px; margin: 1px 0; border-radius: 6px; }
+QMenu::item:selected { background: #1c1c1c; color: #eeeeee; }
+QMenu::item:disabled { color: #555555; background: transparent; }
+QMenu::separator { height: 1px; background: #262626; margin: 6px; }
 """
 
 
@@ -138,6 +137,130 @@ class UsageButton(QAbstractButton):
 
     def sizeHint(self):
         return self.layout().sizeHint() if self.layout() else QSize(32, 32)
+
+
+class UsageBar(QWidget):
+    """Stable raster bar with the preview's shimmer and staggered fill animation."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(15)
+        self.active = False
+        self.loading = False
+        self.target = 0.0
+        self.displayed = 0.0
+        self.opacity = 1.0
+        self.mounted = False
+        self.delay = 100
+        self.phase = 0.0
+        self.fill = QVariantAnimation(self)
+        self.fill.setDuration(1500)
+        easing = QEasingCurve(QEasingCurve.Type.BezierSpline)
+        easing.addCubicBezierSegment(QPointF(0.16, 1), QPointF(0.3, 1), QPointF(1, 1))
+        self.fill.setEasingCurve(easing)
+        self.fill.setStartValue(0.0)
+        self.fill.setEndValue(1.0)
+        self.fill.valueChanged.connect(self.advance_fill)
+        self.start_delay = QTimer(self)
+        self.start_delay.setSingleShot(True)
+        self.start_delay.timeout.connect(self.start_fill)
+        self.shimmer = QVariantAnimation(self)
+        self.shimmer.setDuration(1500)
+        self.shimmer.setLoopCount(-1)
+        self.shimmer.setStartValue(0.0)
+        self.shimmer.setEndValue(1.0)
+        self.shimmer.valueChanged.connect(self.advance_shimmer)
+
+    def sizeHint(self):
+        return QSize(200, 15)
+
+    def minimumSizeHint(self):
+        return QSize(48, 15)
+
+    def set_usage(self, percentage, active, loading, group_index=0):
+        target = max(0.0, min(100.0, float(percentage)))
+        changed = target != self.target or loading != self.loading
+        was_loading = self.loading
+        self.active = active
+        self.target = target
+        self.loading = loading
+        self.delay = 100 + group_index * 150
+        if loading:
+            self.start_delay.stop()
+            self.fill.stop()
+            self.opacity = 0.0
+            if not was_loading and self.isVisible():
+                self.shimmer.start()
+        else:
+            self.shimmer.stop()
+            if self.isVisible() and (changed or not self.mounted):
+                self.schedule_fill()
+        self.update()
+
+    def schedule_fill(self):
+        if self.mounted:
+            self.start_fill()
+        elif not self.start_delay.isActive():
+            self.start_delay.start(self.delay)
+
+    def start_fill(self):
+        if self.loading or not self.isVisible():
+            return
+        self.fill.stop()
+        self.fill_from = self.displayed
+        self.opacity_from = self.opacity
+        self.mounted = True
+        self.fill.start()
+
+    def advance_fill(self, progress):
+        self.displayed = self.fill_from + (self.target - self.fill_from) * progress
+        self.opacity = self.opacity_from + (1.0 - self.opacity_from) * progress
+        self.update()
+
+    def advance_shimmer(self, phase):
+        self.phase = phase
+        self.update()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self.loading:
+            self.shimmer.start()
+        elif not self.mounted or self.displayed != self.target:
+            self.schedule_fill()
+
+    def hideEvent(self, event):
+        self.start_delay.stop()
+        self.fill.stop()
+        self.shimmer.stop()
+        if self.mounted:
+            self.displayed = self.target
+            self.opacity = 1.0
+        super().hideEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        frame = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        painter.setPen(QColor("#222222"))
+        painter.setBrush(QColor("#1b1b1b" if self.loading else "#141414"))
+        painter.drawRoundedRect(frame, 1, 1)
+        inner = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        clip = QPainterPath()
+        clip.addRoundedRect(inner, 1, 1)
+        painter.setClipPath(clip)
+        if self.loading:
+            offset = (2 * self.phase - 1) * inner.width()
+            gradient = QLinearGradient(inner.left() + offset, 0, inner.right() + offset, 0)
+            gradient.setColorAt(0, QColor(255, 255, 255, 0))
+            gradient.setColorAt(0.5, QColor(255, 255, 255, 38))
+            gradient.setColorAt(1, QColor(255, 255, 255, 0))
+            painter.fillRect(inner, gradient)
+        else:
+            color = QColor("#eeeeee" if self.active else "#555555")
+            color.setAlphaF(self.opacity)
+            inner.setWidth(inner.width() * self.displayed / 100)
+            painter.fillRect(inner, color)
 
 
 def plain_label(text, color=None):
@@ -267,6 +390,7 @@ class Dashboard(QWidget):
         self.metric_values = []
         self.metric_buttons = []
         self.provider_buttons = {}
+        self.structure = None
         self.queued = False
         self.quitting = False
         self.last_update_check = 0
@@ -306,17 +430,23 @@ class Dashboard(QWidget):
         self.panel_layout.addWidget(self.scroll)
         self.tray = QSystemTrayIcon(status_icon(), self)
         menu = QMenu(self)
+        menu.setFont(panel_font())
+        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        menu.setWindowFlag(Qt.WindowType.FramelessWindowHint)
+        menu.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint)
         for label, callback in (("Open dashboard", self.show_dashboard), ("Refresh", self.refresh),
                                 ("Settings", self.configure), ("Connection details", self.show_diagnostics),
                                 ("Download latest version", self.open_release),
                                 ("Open logs folder", self.open_logs), ("Exit", self.request_exit)):
+            if label in ("Connection details", "Exit"):
+                menu.addSeparator()
             action = QAction(label, menu)
             action.triggered.connect(callback)
             menu.addAction(action)
             if label == "Refresh":
                 self.refresh_action = action
         self.menu = menu
-        self.menu_button.clicked.connect(lambda: menu.exec(self.menu_button.mapToGlobal(self.menu_button.rect().bottomLeft())))
+        self.menu_button.clicked.connect(self.show_actions)
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self.activate)
         self.tray.show()
@@ -336,6 +466,22 @@ class Dashboard(QWidget):
     def activate(self, reason):
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
             self.hide() if self.isVisible() else self.show_dashboard()
+
+    def actions_position(self):
+        self.menu.ensurePolished()
+        size = self.menu.sizeHint()
+        anchor = self.menu_button.mapToGlobal(QPoint(self.menu_button.width(), self.menu_button.height() + 8))
+        screen = self.app.screenAt(anchor) or self.screen()
+        area = screen.availableGeometry().adjusted(8, 8, -8, -8)
+        x = max(area.left(), min(anchor.x() - size.width(), area.right() - size.width() + 1))
+        y = anchor.y()
+        if y + size.height() > area.bottom() + 1:
+            y = self.menu_button.mapToGlobal(QPoint(0, -8)).y() - size.height()
+        y = max(area.top(), min(y, area.bottom() - size.height() + 1))
+        return QPoint(x, y)
+
+    def show_actions(self):
+        self.menu.exec(self.actions_position())
 
     def show_dashboard(self):
         screen = self.app.screenAt(self.tray.geometry().center()) or self.app.primaryScreen()
@@ -378,6 +524,8 @@ class Dashboard(QWidget):
         for button in self.metric_buttons:
             if button.value[0] in self.pending:
                 button.percentage.setText(render.SPINNERS[self.animation_frame % len(render.SPINNERS)])
+        if self.selected.get("provider") in self.pending:
+            self.update_tooltip()
 
     def request_exit(self):
         self.quitting = True
@@ -515,15 +663,18 @@ class Dashboard(QWidget):
     def update_tooltip(self):
         for name, entry, metric, value in self.visible_metrics:
             if value == self.selected_value():
-                text = f"{self.entry_name(name, entry)} {float(metric.get('percentage', 0)):.0f}%"
+                loading = name in self.pending
+                percentage = render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else f"{float(metric.get('percentage', 0)):.0f}%"
+                text = f"{self.entry_name(name, entry)} {percentage}"
                 if entry.get("_cached"):
                     text += " · cached"
-                if name in self.pending:
-                    text += " · updating"
-                self.tray.setIcon(provider_icon(name))
+                if getattr(self, "tray_provider", None) != name:
+                    self.tray.setIcon(provider_icon(name))
+                    self.tray_provider = name
                 self.tray.setToolTip(text[:120])
                 return
         self.tray.setIcon(status_icon())
+        self.tray_provider = None
         self.tray.setToolTip("AI Status · No usage available")
 
     @staticmethod
@@ -544,6 +695,12 @@ class Dashboard(QWidget):
             value = self.metric_values[0]
             self.selected.update(provider=value[0], idx=value[1], metric=value[2])
             state.save_selected(self.selected)
+        structure = tuple(self.metric_values)
+        if structure == self.structure:
+            self.update_rows()
+            self.fit_content()
+            return
+        self.structure = structure
         self.metric_buttons = []
         self.provider_buttons = {}
         content = QWidget()
@@ -567,6 +724,7 @@ class Dashboard(QWidget):
                 row.setSpacing(8)
                 arrow = plain_label("→" if active_provider else "", "#eeeeee")
                 arrow.setFixedWidth(14)
+                heading.arrow = arrow
                 row.addWidget(arrow)
                 logo = plain_label("")
                 logo.setPixmap(provider_icon(name).pixmap(16, 16))
@@ -574,15 +732,14 @@ class Dashboard(QWidget):
                 row.addWidget(logo)
                 label = plain_label(self.entry_name(name, entry), "#eeeeee" if active_provider else "#888888")
                 label.setStyleSheet(label.styleSheet() + "font-weight: 500;")
+                heading.name_label = label
                 row.addWidget(label, 1)
                 heading.setAccessibleName(self.entry_name(name, entry))
                 first = (name, entry.get("_idx", 0), render.metric_key(metrics[0]))
                 heading.clicked.connect(lambda checked=False, value=first: self.choose_metric(value))
                 group_layout.addWidget(heading)
-                if entry.get("_cached"):
-                    stale = plain_label("    Cached data", "#666666")
-                    stale.setToolTip(entry.get("_error", "Unable to refresh"))
-                    group_layout.addWidget(stale)
+                heading.cached_label = plain_label("    Cached data", "#666666")
+                group_layout.addWidget(heading.cached_label)
                 for metric in metrics:
                     title = metric.get("name") or render.TYPE_NAMES.get(metric.get("type"), "Usage")
                     value = (name, entry.get("_idx", 0), render.metric_key(metric))
@@ -601,53 +758,88 @@ class Dashboard(QWidget):
                     title_row.setSpacing(0)
                     bullet = plain_label("•" if active else "", color)
                     bullet.setFixedWidth(20)
+                    button.bullet = bullet
                     title_row.addWidget(bullet)
-                    title_row.addWidget(plain_label(title + ":", color), 1)
+                    button.title = plain_label(title + ":", color)
+                    title_row.addWidget(button.title, 1)
                     metric_layout.addLayout(title_row)
                     bar_row = QHBoxLayout()
                     bar_row.setContentsMargins(20, 0, 0, 0)
                     bar_row.setSpacing(4)
-                    bar_row.addWidget(plain_label("[", color))
-                    bar = QProgressBar()
-                    bar.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-                    bar.setTextVisible(False)
-                    bar.setFixedHeight(15)
-                    bar.setProperty("active", active)
-                    bar.setRange(0, 0 if name in self.pending else 100)
-                    bar.setValue(round(max(0, min(100, pct))))
-                    bar_row.addWidget(bar, 1)
-                    bar_row.addWidget(plain_label("]", color))
+                    button.open_bracket = plain_label("[", color)
+                    bar_row.addWidget(button.open_bracket)
+                    button.bar = UsageBar()
+                    bar_row.addWidget(button.bar, 1)
+                    button.close_bracket = plain_label("]", color)
+                    bar_row.addWidget(button.close_bracket)
                     button.percentage = plain_label(f"{pct:.0f}%", color)
-                    button.percentage.setFixedWidth(38)
-                    button.percentage.setAlignment(Qt.AlignmentFlag.AlignRight)
+                    button.percentage.setFixedSize(38, self.fontMetrics().height())
+                    button.percentage.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                     bar_row.addWidget(button.percentage)
                     metric_layout.addLayout(bar_row)
                     seconds = metric.get("reset_in_seconds")
                     reset = render.format_reset_time(seconds, metric.get("type")) if seconds is not None else "no reset available"
-                    description = plain_label("    " + (metric.get("detail") or reset), "#666666")
-                    description.setWordWrap(True)
-                    metric_layout.addWidget(description)
+                    button.description = plain_label("    " + (metric.get("detail") or reset), "#666666")
+                    button.description.setWordWrap(True)
+                    metric_layout.addWidget(button.description)
                     group_layout.addWidget(button)
                 layout.addWidget(group)
         if not self.metric_values:
-            message = ("Checking your connected providers…" if self.busy else
-                       "No usage available. Connect a provider and refresh." if config.enabled_order() else
-                       "No providers enabled. Choose them in Settings.")
-            empty = plain_label(message)
-            empty.setWordWrap(True)
-            layout.addWidget(empty)
+            self.empty_message = plain_label("")
+            self.empty_message.setWordWrap(True)
+            layout.addWidget(self.empty_message)
             settings = QPushButton("Settings")
             settings.clicked.connect(self.configure)
             layout.addWidget(settings)
+        self.update_rows()
         self.scroll.setWidget(content)
+        self.fit_content()
+        self.scroll.verticalScrollBar().setValue(scroll_position)
+
+    def update_rows(self):
+        groups = {}
+        for name, entry, metric, value in self.visible_metrics:
+            groups.setdefault(value[:2], (name, entry))
+        for key, (name, entry) in groups.items():
+            heading = self.provider_buttons[key]
+            active = key == self.selected_value()[:2]
+            heading.arrow.setText("→" if active else "")
+            heading.name_label.setText(self.entry_name(name, entry))
+            heading.name_label.setStyleSheet(f"color: {'#eeeeee' if active else '#888888'}; font-weight: 500;")
+            heading.setAccessibleName(self.entry_name(name, entry))
+            heading.cached_label.setVisible(bool(entry.get("_cached")))
+            heading.cached_label.setToolTip(entry.get("_error", "Unable to refresh"))
+        group_indices = {key: index for index, key in enumerate(groups)}
+        for button, (name, entry, metric, value) in zip(self.metric_buttons, self.visible_metrics):
+            active = value == self.selected_value()
+            loading = name in self.pending
+            color = "#eeeeee" if active else "#888888"
+            pct = float(metric.get("percentage", 0))
+            title = metric.get("name") or render.TYPE_NAMES.get(metric.get("type"), "Usage")
+            button.bullet.setText("•" if active else "")
+            button.title.setText(title + ":")
+            button.bar.set_usage(pct, active, loading, group_indices[value[:2]])
+            button.percentage.setText(render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else f"{pct:.0f}%")
+            for label in (button.bullet, button.title, button.open_bracket, button.close_bracket, button.percentage):
+                label.setStyleSheet(f"color: {color};")
+            seconds = metric.get("reset_in_seconds")
+            reset = render.format_reset_time(seconds, metric.get("type")) if seconds is not None else "no reset available"
+            button.description.setText("    " + (metric.get("detail") or reset))
+            button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {pct:.0f}%")
+        if not self.metric_values:
+            self.empty_message.setText("Checking your connected providers…" if self.busy else
+                "No usage available. Connect a provider and refresh." if config.enabled_order() else
+                "No providers enabled. Choose them in Settings.")
+        self.menu_button.setToolTip(self.status.text())
+        self.update_tooltip()
+
+    def fit_content(self):
+        content = self.scroll.widget()
         content.ensurePolished()
-        layout.activate()
+        content.layout().activate()
         natural_height = content.sizeHint().height() + 57
         screen = self.screen().availableGeometry()
         self.resize(self.width(), min(max(180, natural_height), 720, max(180, screen.height() - 32)))
-        self.scroll.verticalScrollBar().setValue(scroll_position)
-        self.menu_button.setToolTip(self.status.text())
-        self.update_tooltip()
 
 
 def smoke_test():
@@ -659,8 +851,8 @@ def smoke_test():
     button = UsageButton()
     row = QVBoxLayout(button)
     row.addWidget(plain_label("Rolling Usage:"))
-    bar = QProgressBar()
-    bar.setValue(23)
+    bar = UsageBar()
+    bar.set_usage(23, True, False)
     row.addWidget(bar)
     layout.addWidget(button)
     widget.resize(380, 180)

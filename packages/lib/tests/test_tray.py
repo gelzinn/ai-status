@@ -75,6 +75,87 @@ class DesktopTests(IsolatedState):
         for name in config.available_providers():
             self.assertTrue(tray.icon_has_pixels(tray.provider_icon(name)), name)
 
+    def test_refresh_keeps_rows_and_geometry_while_providers_finish_independently(self):
+        from core import fetch
+        self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
+            {"type": "weekly", "percentage": 23, "reset_in_seconds": 3600}]}])
+        self.dashboard.on_result("copilot", [{"provider": "Copilot", "metrics": [
+            {"type": "monthly", "percentage": 7}]}])
+        self.dashboard.show()
+        self.app.processEvents()
+        rows = self.dashboard.metric_buttons[:]
+        rows[0].setFocus()
+        def geometry():
+            return [self.dashboard.size()] + [(row.geometry(), row.bar.geometry(),
+                row.open_bracket.geometry(), row.close_bracket.geometry(),
+                row.percentage.geometry(), row.description.geometry()) for row in rows]
+        before = geometry()
+        with patch.object(state, "acquire_lock", return_value=True), patch.object(tray.threading, "Thread"):
+            self.dashboard.refresh()
+        self.app.processEvents()
+        self.dashboard.animate()
+        self.assertEqual(rows, self.dashboard.metric_buttons)
+        self.assertEqual(before, geometry())
+        self.assertTrue(all(row.bar.loading for row in rows))
+        self.assertIn(rows[0].percentage.text(), tray.render.SPINNERS)
+        self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
+            {"type": "weekly", "percentage": 100, "reset_in_seconds": 3600}]}])
+        self.app.processEvents()
+        self.assertFalse(rows[0].bar.loading)
+        self.assertTrue(rows[1].bar.loading)
+        self.assertEqual(rows[0].percentage.text(), "100%")
+        self.assertEqual(rows, self.dashboard.metric_buttons)
+        self.assertEqual(before, geometry())
+        self.assertTrue(rows[0].hasFocus())
+        with patch.object(fetch, "get_version_info", return_value={"has_update": False}):
+            self.dashboard.on_finished([])
+        self.app.processEvents()
+        self.assertEqual(rows[1].percentage.text(), "7%")
+        self.assertEqual(before, geometry())
+
+    def test_first_mount_animates_fill_and_selection_does_not_restart_it(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "rolling", "percentage": 80}, {"type": "weekly", "percentage": 20}]}])
+        self.dashboard.on_result("copilot", [{"provider": "Copilot", "metrics": [
+            {"type": "monthly", "percentage": 7}]}])
+        self.dashboard.show()
+        self.app.processEvents()
+        bar = self.dashboard.metric_buttons[0].bar
+        self.assertEqual(bar.displayed, 0)
+        self.assertLess(bar.start_delay.remainingTime(), self.dashboard.metric_buttons[2].bar.start_delay.remainingTime())
+        initial = bar.grab().toImage()
+        bar.start_delay.stop()
+        bar.start_fill()
+        bar.fill.setCurrentTime(500)
+        self.assertGreater(bar.displayed, 0)
+        self.assertLess(bar.displayed, 80)
+        self.dashboard.metric_buttons[1].click()
+        self.assertIs(bar, self.dashboard.metric_buttons[0].bar)
+        self.assertEqual(bar.fill.currentTime(), 500)
+        bar.fill.setCurrentTime(1500)
+        self.assertEqual(bar.displayed, 80)
+        self.assertNotEqual(initial, bar.grab().toImage())
+
+    def test_loading_shimmers_without_a_fill_and_pauses_when_hidden(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "weekly", "percentage": 80}]}])
+        self.dashboard.pending = {"codex"}
+        self.dashboard.draw()
+        self.dashboard.show()
+        self.app.processEvents()
+        bar = self.dashboard.metric_buttons[0].bar
+        bar.shimmer.setCurrentTime(0)
+        first = bar.grab().toImage()
+        bar.shimmer.setCurrentTime(750)
+        self.assertNotEqual(first, bar.grab().toImage())
+        self.assertEqual(bar.displayed, 0)
+        self.dashboard.hide()
+        self.assertEqual(bar.shimmer.state(), tray.QVariantAnimation.State.Stopped)
+        self.assertFalse(bar.start_delay.isActive())
+        self.dashboard.show()
+        self.app.processEvents()
+        self.assertEqual(bar.shimmer.state(), tray.QVariantAnimation.State.Running)
+
     def test_provider_settings_save_disabled_providers(self):
         settings = tray.ProviderSettings(self.dashboard)
         self.addCleanup(settings.deleteLater)
