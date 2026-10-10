@@ -26,7 +26,8 @@ settings/cache live in your user profile.
   Quickshell. The tray context menu also contains **Connection details**,
   update/log actions and **Exit**. R refreshes usage and C opens settings.
 - **Settings** opens inside the panel, with the back arrow before the title.
-  Choose the active provider/limit, display fields and icon, enable/disable
+  Choose the active provider/limit, with provider logos in the selector and its
+  options, set display fields and the bar icon, enable/disable
   providers, and reorder them with drag and drop, the per-row arrows, or
   Alt+Up/Down. **Save** applies changes and keeps settings open; the back arrow,
   Escape or **Cancel** returns to usage and discards any remaining unsaved edits.

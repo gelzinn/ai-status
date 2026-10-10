@@ -16,6 +16,7 @@ def main():
         for name in ("Panel.qml", "UsagePage.qml", "UsageBar.qml", "StableList.js", "ResetCreditsPage.qml", "SettingsPage.qml", "PanelButton.qml", "PanelIcon.qml", "qmldir"):
             shutil.copy2(tests.parent / "quickshell" / name, plugin / name)
         shutil.copy2(root / "Model.qml", plugin / "Model.qml")
+        shutil.copytree(tests.parent / "assets/providers", root / "assets/providers")
         env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software")
         return subprocess.call([
             env.get("QMLTESTRUNNER", "/usr/lib/qt6/bin/qmltestrunner"),

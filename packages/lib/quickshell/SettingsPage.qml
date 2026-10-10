@@ -19,22 +19,20 @@ Column {
         for (const name of enabledProviders) {
             const entries = Plugin.Model.snapshot.providers.filter(p => p.id === name)
             if (entries.length === 0)
-                items.push({provider: name, idx: 0, metric: "rolling", label: name})
+                items.push({provider: name, idx: 0, metric: "rolling", label: name, logoSource: root.providerLogo(name)})
             for (const entry of entries) {
                 for (const metric of entry.metrics) {
                     const detail = metric.key.indexOf(":") === -1 ? "" : " (" + metric.key.split(":").slice(1).join(":") + ")"
-                    items.push({provider: name, idx: entry.idx, metric: metric.key, label: entry.name + " · " + metric.name + detail})
+                    items.push({provider: name, idx: entry.idx, metric: metric.key, label: entry.name + " · " + metric.name + detail, logoSource: root.providerLogo(name, entry)})
                 }
                 if (entry.metrics.length === 0)
-                    items.push({provider: name, idx: entry.idx, metric: "rolling", label: entry.name})
+                    items.push({provider: name, idx: entry.idx, metric: "rolling", label: entry.name, logoSource: root.providerLogo(name, entry)})
             }
         }
         return items
     }
-    readonly property string selectedLabel: {
-        const choice = choices.find(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric)
-        return choice ? choice.label : "Choose a provider and limit"
-    }
+    readonly property var selectedChoice: choices.find(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) || null
+    readonly property string selectedLabel: selectedChoice ? selectedChoice.label : "Choose a provider and limit"
     readonly property bool valid: enabledProviders.length > 0 && Object.keys(display).some(key => display[key]) && choices.some(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric)
     spacing: Style.space(22)
     enabled: !Plugin.Model.settingsSaving
@@ -47,6 +45,10 @@ Column {
     Connections {
         target: Plugin.Model
         function onSettingsSaved() { root.saved = true }
+    }
+
+    function providerLogo(name, entry) {
+        return entry && entry.logoPath ? "file://" + entry.logoPath : Qt.resolvedUrl("../assets/providers/" + name + ".png")
     }
 
     function begin() {
@@ -116,6 +118,7 @@ Column {
             objectName: "active-provider"
             width: parent.width
             text: root.selectedLabel + "  ▾"
+            logoSource: root.selectedChoice ? root.selectedChoice.logoSource : ""
             multiline: true
             alignLeft: true
             outlined: true
@@ -128,8 +131,10 @@ Column {
                 model: root.choices
                 delegate: Button {
                     required property var modelData
+                    objectName: "active-provider-option-" + modelData.provider + "-" + modelData.idx + "-" + modelData.metric
                     width: parent.width
                     text: modelData.label
+                    logoSource: modelData.logoSource
                     multiline: true
                     alignLeft: true
                     onClicked: {

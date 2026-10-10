@@ -86,6 +86,10 @@ class DesktopTests(IsolatedState):
         self.assertTrue(self.dashboard.refresh_button.isEnabled())
 
     def test_settings_save_stays_in_panel_and_back_is_before_title(self):
+        # Offscreen backends do not consistently activate Tool windows on Windows.
+        active_window = patch.object(self.dashboard, "isActiveWindow", return_value=True)
+        active_window.start()
+        self.addCleanup(active_window.stop)
         self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
             {"type": "rolling", "percentage": 2}, {"type": "weekly", "percentage": 23}]}])
         self.dashboard.on_result("copilot", [{"provider": "Copilot", "metrics": [
@@ -101,6 +105,10 @@ class DesktopTests(IsolatedState):
         self.assertTrue(self.dashboard.refresh_button.isHidden())
         self.assertTrue(self.dashboard.settings_button.isHidden())
         settings.active.setCurrentIndex(settings.active.findData(["codex", 0, "weekly"]))
+        for i in range(settings.active.count()):
+            self.assertTrue(tray.icon_has_pixels(settings.active.itemIcon(i)))
+        self.assertEqual(settings.active.currentData()[0], "codex")
+        self.assertEqual(settings.active.itemIcon(settings.active.currentIndex()).cacheKey(), tray.provider_icon("codex").cacheKey())
         settings.display["show_provider"].setChecked(False)
         settings.icon_mode.setCurrentIndex(settings.icon_mode.findData("logo"))
         with patch.object(self.dashboard, "refresh") as refresh:
@@ -118,6 +126,15 @@ class DesktopTests(IsolatedState):
         self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
         self.assertEqual(self.dashboard.brand.text(), "AI Status")
         self.assertTrue(self.dashboard.settings_button.hasFocus())
+
+    def test_provider_selector_popup_does_not_dismiss_settings(self):
+        self.dashboard.configure()
+        self.app.processEvents()
+        popup = self.dashboard.settings_view.active.view()
+        with patch.object(self.dashboard, "isActiveWindow", return_value=False), patch.object(QApplication, "activePopupWidget", return_value=popup):
+            QApplication.sendEvent(self.dashboard, tray.QEvent(tray.QEvent.Type.ActivationChange))
+        self.assertTrue(self.dashboard.isVisible())
+        self.assertTrue(self.dashboard.configuring())
 
     def test_settings_escape_and_cancel_discard_only_unsaved_changes(self):
         self.dashboard.configure()

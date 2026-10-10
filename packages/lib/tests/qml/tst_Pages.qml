@@ -107,6 +107,32 @@ Item {
             mouseClick(findChild(settings, "active-provider"))
             verify(settings.selectionOpen)
         }
+        function test_provider_selector_logos_render_in_trigger_and_every_option() {
+            settings.iconMode = "off"
+            const trigger = findChild(settings, "active-provider")
+            const triggerLogo = findChild(trigger, "provider-logo")
+            tryCompare(triggerLogo, "status", Image.Ready)
+            verify(trigger.logoSource.toString().endsWith("/claude.png"))
+            mouseClick(trigger)
+            verify(settings.selectionOpen)
+            wait(20)
+            for (const choice of settings.choices) {
+                const option = findChild(settings, "active-provider-option-" + choice.provider + "-" + choice.idx + "-" + choice.metric)
+                verify(option.visible)
+                tryCompare(findChild(option, "provider-logo"), "status", Image.Ready)
+                verify(option.logoSource.toString().endsWith("/" + choice.provider + ".png"))
+            }
+            mouseClick(findChild(settings, "active-provider-option-codex-0-weekly"))
+            compare(settings.selected.provider, "codex")
+            compare(settings.selected.metric, "weekly")
+            verify(trigger.logoSource.toString().endsWith("/codex.png"))
+            tryCompare(triggerLogo, "status", Image.Ready)
+            // Enabling a provider before its first query still uses its bundled logo.
+            settings.toggleProvider("kiro")
+            settings.selected = {provider: "kiro", idx: 0, metric: "rolling"}
+            verify(trigger.logoSource.toString().endsWith("/kiro.png"))
+            tryCompare(triggerLogo, "status", Image.Ready)
+        }
         function test_usage_layout_has_content_and_stable_metric_alignment() {
             verify(usage.implicitHeight > 300)
             const rightEdges = []

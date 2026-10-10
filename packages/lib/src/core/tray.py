@@ -646,6 +646,7 @@ class ProviderSettings(QWidget):
         layout.setSpacing(8)
         layout.addWidget(plain_label("Active provider & limit", "#eeeeee"))
         self.active = QComboBox()
+        self.active.setIconSize(QSize(16, 16))
         self.active.setAccessibleName("Active provider and limit")
         layout.addWidget(self.active)
         layout.addSpacing(14)
@@ -741,7 +742,7 @@ class ProviderSettings(QWidget):
                     key = render.metric_key(metric)
                     title = metric.get("name") or render.TYPE_NAMES.get(metric.get("type"), "Usage")
                     detail = " (" + key.split(":", 1)[1] + ")" if ":" in key else ""
-                    self.active.addItem(f"{Dashboard.entry_name(name, entry)} · {title}{detail}",
+                    self.active.addItem(provider_icon(name), f"{Dashboard.entry_name(name, entry)} · {title}{detail}",
                                         [name, entry.get("_idx", 0), key])
         index = self.active.findData(choice)
         self.active.setCurrentIndex(index if index >= 0 else 0)
@@ -926,7 +927,7 @@ class Dashboard(QWidget):
     def changeEvent(self, event):
         super().changeEvent(event)
         if event.type() == event.Type.ActivationChange and not self.isActiveWindow():
-            if not self.menu.isVisible() and not self.findChildren(QDialog):
+            if not QApplication.activePopupWidget() and not self.menu.isVisible() and not self.findChildren(QDialog):
                 self.hide()
 
     def keyPressEvent(self, event):
