@@ -39,6 +39,8 @@ export function InstallTabs({
 					return (
 						<button
 							key={p.id}
+							aria-label={p.name}
+							aria-pressed={isActive}
 							onClick={() => p.available && setActiveOs(p.id)}
 							type="button"
 							disabled={!p.available}

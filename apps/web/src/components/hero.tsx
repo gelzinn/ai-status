@@ -1,9 +1,10 @@
 import { HighlightedCodeBlock } from "@/components/code-highlight";
-import { ArrowRight, ArrowRightIcon } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { site } from "@/lib/env";
 import { InstallTabs } from "@/components/install-tabs";
 import Link from "next/link";
 import { WindowsInstall } from "@/components/windows-install";
+import { PlatformContent } from "@/components/install-platform";
 
 export function Hero() {
 	const installCmd = `curl -fsSL ${site.installUrl} | bash`;
@@ -36,12 +37,10 @@ export function Hero() {
 				win={<WindowsInstall />}
       />
 
-      <Link
-        href="/llms.txt"
-        className="inline-flex items-center gap-1 text-sm font-medium text-foreground hover:text-muted-foreground transition-colors w-fit mt-1"
-      >
-        Copy-paste install guide for LLMs <ArrowRight className="size-3.5" />
-      </Link>
+      <PlatformContent
+        linux={<Link href="/llms.txt" className="inline-flex w-fit items-center gap-1 text-sm font-medium transition-colors hover:text-muted-foreground">Copy-paste install guide for LLMs <ArrowRight className="size-3.5" /></Link>}
+        windows={<Link href="/windows/llms.txt" className="inline-flex w-fit items-center gap-1 text-sm font-medium transition-colors hover:text-muted-foreground">Copy-paste Windows guide for LLMs <ArrowRight className="size-3.5" /></Link>}
+      />
 		</section>
 	);
 }

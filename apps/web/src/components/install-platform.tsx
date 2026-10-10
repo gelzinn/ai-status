@@ -24,3 +24,9 @@ export function useInstallPlatform() {
   if (!context) throw new Error("InstallPlatformProvider is required");
   return context;
 }
+
+/** Select server-rendered content without sending its rendering logic to the client. */
+export function PlatformContent({ linux, windows }: { linux: ReactNode; windows: ReactNode }) {
+  const { activeOs } = useInstallPlatform();
+  return activeOs === "Windows" ? windows : linux;
+}

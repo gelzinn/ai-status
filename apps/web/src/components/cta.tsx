@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { GithubIcon } from "@/components/github-icon";
 import { WindowsInstall } from "@/components/windows-install";
+import { PlatformContent } from "@/components/install-platform";
 
 export function Cta() {
 	const installCmd = `curl -fsSL ${site.installUrl} | bash`;
@@ -31,7 +32,10 @@ export function Cta() {
 							Ready to monitor your AI?
 						</h2>
 						<p className="max-w-md text-base text-muted-foreground sm:text-lg">
-							Install the Waybar module on Linux or the native tray app on Windows.
+							<PlatformContent
+								linux="Install the Waybar module and monitor usage from your Linux status bar."
+								windows="Install the Windows app and monitor usage from your system tray."
+							/>
 						</p>
 					</div>
 				</div>
