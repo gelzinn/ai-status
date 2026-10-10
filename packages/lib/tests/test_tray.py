@@ -125,7 +125,7 @@ class DesktopTests(IsolatedState):
         self.app.processEvents()
         self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
         self.assertEqual(self.dashboard.brand.text(), "AI Status")
-        self.assertTrue(self.dashboard.settings_button.hasFocus())
+        self.assertIs(self.dashboard.focusWidget(), self.dashboard.settings_button)
 
     def test_provider_selector_popup_does_not_dismiss_settings(self):
         self.dashboard.configure()
