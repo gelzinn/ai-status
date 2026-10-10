@@ -23,6 +23,11 @@ Item {
         anchors.centerIn: parent
         scale: Math.min(root.width, root.height) / 24
         antialiasing: true
+        // GeometryRenderer ignores Item.antialiasing. Resolve rounded strokes
+        // with MSAA in this small layer, then smoothly scale to the icon size.
+        layer.enabled: visible
+        layer.samples: 4
+        layer.smooth: true
         ShapePath {
             strokeColor: root.foreground
             strokeWidth: 2
