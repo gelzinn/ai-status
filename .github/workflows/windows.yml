@@ -1,0 +1,116 @@
+name: Windows package
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact release tag to package; omitted for PR previews
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: packages/lib/windows/requirements.txt
+      - name: Install Windows build dependencies
+        run: python -m pip install -r packages/lib/windows/requirements.txt
+      - name: Test native collectors and desktop adapter
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: packages/lib/src
+        run: python -m unittest discover -s packages/lib/tests -v
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build portable package and installer
+        id: package
+        shell: pwsh
+        run: |
+          $version = (Get-Content packages/lib/VERSION -Raw).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') { throw "Invalid package version" }
+          ./packages/lib/windows/build.ps1
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Test packaged CLI and collectors without credentials
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "ai-status-clean-profile"
+          New-Item -ItemType Directory -Force $root | Out-Null
+          $env:USERPROFILE = $root
+          $env:APPDATA = Join-Path $root "Roaming"
+          $env:LOCALAPPDATA = Join-Path $root "Local"
+          $env:CODEX_HOME = Join-Path $root "codex"
+          $env:CLAUDE_CONFIG_DIR = Join-Path $root "claude"
+          $env:XDG_DATA_HOME = Join-Path $root "data"
+          $env:XDG_CONFIG_HOME = Join-Path $root "config"
+          $env:COMMANDCODE_API_KEY = ""
+          $env:QT_QPA_PLATFORM = "offscreen"
+          python packages/lib/tests/packaged_smoke.py dist/ai-status/ai-status-cli.exe
+          if ($LASTEXITCODE -ne 0) { throw "Packaged CLI smoke test failed" }
+          $version = (Get-Content packages/lib/VERSION -Raw).Trim()
+          $installer = Join-Path $PWD "dist/ai-status-$version-windows-x64-setup.exe"
+          $identity = (Get-Item $installer).VersionInfo
+          $identity | Select-Object OriginalFilename, ProductName, CompanyName, FileDescription, ProductVersion | ConvertTo-Json -Compress | Write-Host
+          # Inno Setup pads its version-resource strings with trailing spaces.
+          if (([string]$identity.OriginalFilename).Trim() -ne "ai-status-$version-windows-x64-setup.exe" -or
+              ([string]$identity.ProductName).Trim() -ne "AI Status" -or
+              ([string]$identity.CompanyName).Trim() -ne "gelzinn") {
+            throw "Installer product identity does not match its versioned filename"
+          }
+          $installed = Join-Path $env:RUNNER_TEMP "AI Status instalado — teste"
+          $result = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$installed`"") -Wait -PassThru
+          if ($result.ExitCode -ne 0) { throw "Silent installation failed" }
+          # Simulate an older runtime and verify an upgrade replaces it fully.
+          $stale = Join-Path $installed "_internal/old-runtime/libssl-obsolete.dll"
+          New-Item -ItemType Directory -Force (Split-Path $stale) | Out-Null
+          Set-Content $stale "obsolete runtime fixture"
+          $preferences = Join-Path $env:APPDATA "ai-status/upgrade-marker.txt"
+          New-Item -ItemType Directory -Force (Split-Path $preferences) | Out-Null
+          Set-Content $preferences "preserved preferences fixture"
+          $result = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$installed`"") -Wait -PassThru
+          if ($result.ExitCode -ne 0 -or (Test-Path $stale)) { throw "Upgrade retained obsolete runtime files" }
+          if (!(Test-Path $preferences)) { throw "Upgrade removed user data" }
+          python packages/lib/tests/packaged_smoke.py "$installed/ai-status-cli.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Installed CLI smoke test failed" }
+          # Also remove runtime files created outside the installer's file list.
+          Set-Content (Join-Path $installed "_internal/uninstall-marker.txt") "generated runtime fixture"
+          $result = Start-Process -FilePath "$installed/unins000.exe" -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
+          if ($result.ExitCode -ne 0) { throw "Silent uninstall failed" }
+          if (Test-Path (Join-Path $installed "_internal")) { throw "Uninstall retained runtime files" }
+          if (!(Test-Path $preferences)) { throw "Uninstall removed user data" }
+      - name: Check package size
+        run: python packages/lib/windows/size_report.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-status-${{ steps.package.outputs.version }}-windows-x64-portable
+          path: dist/ai-status/
+          compression-level: 9
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-status-${{ steps.package.outputs.version }}-windows-x64-setup
+          path: dist/*-windows-x64-setup.exe
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: inputs.ref != ''
+        with:
+          name: windows-release
+          path: |
+            dist/*-windows-x64.zip
+            dist/*-windows-x64-setup.exe
+          compression-level: 0
+          if-no-files-found: error

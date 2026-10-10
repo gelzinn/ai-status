@@ -1,7 +1,9 @@
 import re
 import math
+from html import escape
 from . import fetch
 from . import state
+from .reset_credits import display_lines as reset_credit_lines
 
 TYPE_NAMES = {
     "rolling": "Rolling Usage",
@@ -32,6 +34,8 @@ def metric_key(metric):
     Fable weekly limit) the label prefix in ``detail`` disambiguates them so
     each can be selected independently."""
     t = metric.get("type", "generic")
+    if metric.get("name"):
+        return f"{t}:{metric['name']}"
     detail = metric.get("detail") or ""
     if " · " in detail:
         label = detail.split(" · ", 1)[0].strip()
@@ -235,6 +239,8 @@ def format_provider_block(
         if detail:
             lines.append("    " + _dim(detail, recede if recede else DIM_RESET))
         lines.append("")
+    for line in reset_credit_lines(provider_data.get("reset_credits")):
+        lines.append("    " + _dim(escape(line), DIM_INACTIVE))
     return "\n".join(lines)
 
 
@@ -286,6 +292,8 @@ def format_loading_provider_block(
         if detail:
             lines.append("    " + _dim(detail, recede if recede else DIM_RESET))
         lines.append("")
+    for line in reset_credit_lines(provider_data.get("reset_credits")):
+        lines.append("    " + _dim(escape(line), DIM_INACTIVE))
     return "\n".join(lines)
 
 

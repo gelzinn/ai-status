@@ -119,10 +119,12 @@ if action == 'view':
     print(state.read_text())
 elif action == 'upload':
     server.mkdir(exist_ok=True)
-    for name in args[3:5]:
+    for name in args[3:]:
+        if name.startswith('--'):
+            break
         source = pathlib.Path(name)
         shutil.copyfile(source, server / source.name)
-        if os.environ.get('TEST_FAIL_UPLOAD'):
+        if os.environ.get('TEST_FAIL_UPLOAD') or (name.endswith('.exe') and os.environ.get('TEST_FAIL_WINDOWS_UPLOAD')):
             sys.exit(1)
 elif action == 'download':
     target = pathlib.Path(args[args.index('--dir') + 1])
@@ -131,6 +133,9 @@ elif action == 'download':
             name = args[index + 1]
             shutil.copyfile(server / name, target / name)
             if name.endswith('.tar.gz') and os.environ.get('TEST_CORRUPT_DOWNLOAD'):
+                with (target / name).open('ab') as out:
+                    out.write(b'corrupt')
+            if name.endswith('.exe') and os.environ.get('TEST_CORRUPT_WINDOWS_DOWNLOAD'):
                 with (target / name).open('ab') as out:
                     out.write(b'corrupt')
 elif action == 'edit':
@@ -195,6 +200,54 @@ else:
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.actions(), ["view"])
         self.assertFalse(Path(self.env["TEST_SERVER"]).exists())
+
+    def windows_assets(self):
+        assets = self.root / "windows-release"
+        assets.mkdir()
+        for suffix in ("windows-x64.zip", "windows-x64-setup.exe"):
+            (assets / f"ai-status-{self.version}-{suffix}").write_bytes(suffix.encode())
+        self.env["WINDOWS_ASSET_DIR"] = str(assets)
+        return assets
+
+    def test_windows_assets_are_uploaded_and_verified_before_publication(self):
+        assets = self.windows_assets()
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(self.state()["isDraft"])
+        server = Path(self.env["TEST_SERVER"])
+        sums = (server / "SHA256SUMS").read_text().splitlines()
+        self.assertEqual(len(sums), 3)
+        for asset in assets.iterdir():
+            self.assertEqual((server / asset.name).read_bytes(), asset.read_bytes())
+            self.assertIn(hashlib.sha256(asset.read_bytes()).hexdigest() + "  " + asset.name, sums)
+
+    def test_missing_windows_assets_keep_release_as_a_draft(self):
+        assets = self.windows_assets()
+        next(assets.glob("*.exe")).unlink()
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.state()["isDraft"])
+        self.assertEqual(self.actions(), ["view"])
+
+    def test_windows_upload_failure_is_recoverable_without_early_publication(self):
+        self.windows_assets()
+        self.env["TEST_FAIL_WINDOWS_UPLOAD"] = "1"
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.state()["isDraft"])
+        self.assertNotIn("edit", self.actions())
+        del self.env["TEST_FAIL_WINDOWS_UPLOAD"]
+        result = self.publish()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(self.state()["isDraft"])
+
+    def test_corrupt_windows_download_keeps_release_as_a_draft(self):
+        self.windows_assets()
+        self.env["TEST_CORRUPT_WINDOWS_DOWNLOAD"] = "1"
+        result = self.publish()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.state()["isDraft"])
+        self.assertNotIn("edit", self.actions())
 
     def test_package_is_deterministic_lean_and_has_a_matching_checksum(self):
         source = self.root / "export"

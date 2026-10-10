@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { GripVertical, Layers, RefreshCw } from "lucide-react";
+import { Download, GripVertical, Layers, RefreshCw } from "lucide-react";
+import { WindowsIcon } from "@/components/os-icons";
 import { cn } from "@/lib/utils";
 import { PROVIDERS, type Provider } from "@ai-status/shared";
 
@@ -154,7 +155,7 @@ function MultiProvider() {
   );
 }
 
-function LiveUpdates() {
+function LiveUpdates({ windows = false }: { windows?: boolean }) {
   return (
     <VisualStage className="flex-col items-center justify-center">
       {/* Background data stream */}
@@ -178,7 +179,7 @@ function LiveUpdates() {
         <div className="pointer-events-none absolute -inset-7.5 rounded-full border border-border/10 opacity-0 delay-0 transition-opacity duration-700 group-hover:opacity-100 group-hover:delay-450" />
 
         {/* AI Status Module */}
-        <div className="relative flex h-8 items-center justify-center gap-2 rounded-full border border-border bg-card/50 px-3 pl-8 transition-colors duration-500 group-hover:bg-card">
+        <div className={cn("relative flex h-8 items-center justify-center gap-2 border border-border bg-card/50 transition-colors duration-500 group-hover:bg-card", windows ? "w-10 rounded-md" : "rounded-full px-3 pl-8")}>
           <div className="absolute left-3 flex h-4 w-4 items-center justify-center">
             <div className="absolute h-3 w-3 animate-spin rounded-full border-[1.5px] border-border border-t-foreground transition-opacity duration-500 group-hover:opacity-0" />
             <ProviderLogo
@@ -186,18 +187,18 @@ function LiveUpdates() {
               className="absolute h-3.5 w-3.5 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
             />
           </div>
-          <span className="text-xs font-medium text-foreground">92%</span>
+          {!windows && <span className="text-xs font-medium text-foreground">92%</span>}
         </div>
       </div>
     </VisualStage>
   );
 }
 
-function TooltipDetail() {
+function TooltipDetail({ windows = false }: { windows?: boolean }) {
   return (
-    <VisualStage className="flex-col items-center p-4 pt-8">
+    <VisualStage className={cn("flex-col items-center p-4", windows ? "justify-end pb-5" : "pt-8")}>
       {/* Mock Waybar segment */}
-      <div className="relative z-20 flex h-10 w-48 items-center justify-between rounded-full border border-border bg-card/80 px-4 backdrop-blur-md transition-colors duration-500 group-hover:bg-card">
+      <div className={cn("relative z-20 flex h-10 items-center justify-between border border-border bg-card/80 px-4 backdrop-blur-md transition-colors duration-500 group-hover:bg-card", windows ? "w-54 rounded-lg" : "w-48 rounded-full")}>
         <div className="flex items-center gap-2">
           <ProviderLogo
             provider={PROVIDERS.CLAUDE}
@@ -211,7 +212,7 @@ function TooltipDetail() {
       </div>
 
       {/* Tooltip always visible but dim */}
-      <div className="absolute top-20 z-10 flex w-54 translate-y-3 flex-col gap-2 rounded-xl border border-border bg-card/40 p-3 opacity-60 backdrop-blur-xl transition-all duration-500 group-hover:translate-y-1 group-hover:bg-card/95 group-hover:opacity-100">
+      <div className={cn("absolute z-10 flex w-54 flex-col gap-2 rounded-xl border border-border bg-card/40 p-3 opacity-60 backdrop-blur-xl transition-all duration-500 group-hover:bg-card/95 group-hover:opacity-100", windows ? "bottom-18 -translate-y-3 group-hover:-translate-y-1" : "top-20 translate-y-3 group-hover:translate-y-1")}>
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[10px] text-foreground">Rolling Usage</span>
@@ -268,12 +269,10 @@ function Configurable() {
   );
 }
 
-function SelfUpdating({
+function Updates({
   latestVersion,
-  oldVersion,
 }: {
   latestVersion: string;
-  oldVersion: string;
 }) {
   return (
     <VisualStage className="flex-col items-center justify-center">
@@ -284,7 +283,7 @@ function SelfUpdating({
           {/* Old Version */}
           <div className="relative z-10 flex items-center gap-2 transition-all duration-700 group-hover:opacity-40">
             <span className="font-mono text-[10px] font-medium text-muted-foreground">
-              {oldVersion}
+              Installed
             </span>
           </div>
 
@@ -306,14 +305,14 @@ function SelfUpdating({
       <div className="absolute bottom-6 flex translate-y-2 items-center gap-1.5 opacity-0 transition-all delay-100 duration-500 group-hover:translate-y-0 group-hover:opacity-100">
         <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
         <span className="text-[10px] font-medium text-muted-foreground">
-          Auto-updated in background
+          Install the latest version
         </span>
       </div>
     </VisualStage>
   );
 }
 
-function ZeroDependencies() {
+function Lightweight() {
   return (
     <VisualStage className="items-center justify-center perspective-[1000px]">
       <div className="relative flex items-center justify-center gap-6 px-4">
@@ -321,7 +320,7 @@ function ZeroDependencies() {
           front={
             <img src="https://svgl.app/library/python.svg" className="h-8 w-8" alt="Python" />
           }
-          back={<FlipLabel>ZERO</FlipLabel>}
+          back={<FlipLabel>Python</FlipLabel>}
         />
 
         {/* Center '+' */}
@@ -338,8 +337,20 @@ function ZeroDependencies() {
               alt="Bash"
             />
           }
-          back={<FlipLabel>DEPS</FlipLabel>}
+          back={<FlipLabel>Bash</FlipLabel>}
         />
+      </div>
+    </VisualStage>
+  );
+}
+
+function Standalone() {
+  return (
+    <VisualStage className="items-center justify-center perspective-[1000px]">
+      <div className="relative flex items-center justify-center gap-6 px-4">
+        <FlipCard front={<WindowsIcon className="size-8" />} back={<FlipLabel>x64</FlipLabel>} />
+        <div className="text-2xl font-light text-muted-foreground transition-all duration-400 group-hover:scale-0 group-hover:opacity-0">+</div>
+        <FlipCard className="delay-150" front={<Download className="size-8 text-foreground" />} back={<FlipLabel>.exe</FlipLabel>} />
       </div>
     </VisualStage>
   );
@@ -352,6 +363,7 @@ export const FeatureVisuals = {
   LiveUpdates,
   TooltipDetail,
   Configurable,
-  SelfUpdating,
-  ZeroDependencies,
+  Updates,
+  Lightweight,
+  Standalone,
 };

@@ -20,6 +20,8 @@ jobs:
   release:
     needs: checks
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pending.outputs.tag }}
     permissions:
       contents: write
       issues: write
@@ -36,7 +38,40 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - name: Find the pending stable draft
+        id: pending
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: |
+          tag="v$(cat packages/lib/VERSION)"
+          draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease --jq '.isDraft and (.isPrerelease | not)')
+          if [ "$draft" = true ]; then
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          fi
+
+  windows-package:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    uses: ./.github/workflows/windows.yml
+    with:
+      ref: ${{ needs.release.outputs.tag }}
+
+  publish:
+    needs: [release, windows-package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: windows-release
       - name: Build, verify, and publish the pending draft release
         env:
           GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          WINDOWS_ASSET_DIR: windows-release
         run: bash .github/scripts/publish_release.sh

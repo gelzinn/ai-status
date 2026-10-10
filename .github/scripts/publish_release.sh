@@ -17,12 +17,26 @@ git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
 mkdir "$WORK_DIR/source"
 git archive "$TAG" packages/lib packages/shared | tar -x -C "$WORK_DIR/source"
 python3 .github/scripts/build_release.py --source "$WORK_DIR/source" --output "$WORK_DIR/assets" --version "$VERSION"
-gh release upload "$TAG" "$WORK_DIR/assets/ai-status-$TAG.tar.gz" "$WORK_DIR/assets/SHA256SUMS" \
+assets=("$WORK_DIR/assets/ai-status-$TAG.tar.gz" "$WORK_DIR/assets/SHA256SUMS")
+patterns=(--pattern "ai-status-$TAG.tar.gz" --pattern SHA256SUMS)
+if [ -n "${WINDOWS_ASSET_DIR:-}" ]; then
+    for name in "ai-status-$VERSION-windows-x64.zip" "ai-status-$VERSION-windows-x64-setup.exe"; do
+        if [ ! -f "$WINDOWS_ASSET_DIR/$name" ]; then
+            echo "Missing Windows release asset: $name" >&2
+            exit 1
+        fi
+        cp "$WINDOWS_ASSET_DIR/$name" "$WORK_DIR/assets/$name"
+        (cd "$WORK_DIR/assets" && sha256sum "$name") >> "$WORK_DIR/assets/SHA256SUMS"
+        assets+=("$WORK_DIR/assets/$name")
+        patterns+=(--pattern "$name")
+    done
+fi
+gh release upload "$TAG" "${assets[@]}" \
     --repo "$GITHUB_REPOSITORY" --clobber
 
 # Test the actual uploaded bytes before making them visible through latest.
 mkdir "$WORK_DIR/downloaded"
-gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "ai-status-$TAG.tar.gz" --pattern SHA256SUMS \
+gh release download "$TAG" --repo "$GITHUB_REPOSITORY" "${patterns[@]}" \
     --dir "$WORK_DIR/downloaded"
 (cd "$WORK_DIR/downloaded" && sha256sum --check SHA256SUMS)
 gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

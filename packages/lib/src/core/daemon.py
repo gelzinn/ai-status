@@ -9,6 +9,7 @@ from . import fetch
 from . import render
 from . import logos
 from . import config as cfgmod
+from . import paths
 
 should_update = True
 is_updating = False
@@ -48,9 +49,8 @@ def update_task():
                     _pending.discard(dir_name)
 
                 data = fetch.fetch_all_data(on_result=on_result)
-                if data:
-                    latest_data = data
-                    state.save_cache(data)
+                latest_data = data
+                state.save_cache(data)
             finally:
                 state.release_lock()
         else:
@@ -74,7 +74,8 @@ def run():
     global should_update, is_updating, latest_data, _results_by_dir, _pending
 
     state.register_pid()
-    signal.signal(signal.SIGUSR1, handle_signal)
+    if not paths.IS_WINDOWS:
+        signal.signal(signal.SIGUSR1, handle_signal)
     latest_data = state.load_cache()
 
     if not state.load_selected():
@@ -94,12 +95,18 @@ def run():
     last_update_check = 0
     last_config_mtime = 0
     last_selected_mtime = 0
+    last_refresh = paths.read_json(state.REFRESH_FILE)
     should_update = True
     selected = state.load_selected()
 
     while True:
         try:
             now = time.time()
+            if paths.IS_WINDOWS:
+                refresh = paths.read_json(state.REFRESH_FILE)
+                if refresh != last_refresh:
+                    last_refresh = refresh
+                    should_update = True
             
             if now - last_update_check >= 3600:
                 fetch.check_for_updates()

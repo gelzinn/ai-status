@@ -1,5 +1,8 @@
 # Installing AI Status
 
+For the native Windows 10/11 tray app and bundled installer, follow the
+[Windows guide](WINDOWS.md). The Bash/Waybar instructions below are for Linux.
+
 ## One-command install (recommended for LLMs)
 
 Copy and run this single command. It installs everything and configures Waybar automatically with sensible defaults (provider logo, name, model, and percentage shown):

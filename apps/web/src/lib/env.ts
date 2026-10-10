@@ -15,7 +15,7 @@ const REPO_SLUG = `gelzinn/${LIB_NAME}`;
 /** The public website. */
 export const site = {
 	name: "AI Status",
-	description: "Monitor your AI API limits directly from your status bar.",
+	description: "Track AI usage limits and reset timers from your desktop. Refreshes every five minutes.",
 	url: SITE_ORIGIN,
 	/** Short install URL — the /install route serves packages/lib/install.sh. */
 	installUrl: `${SITE_ORIGIN}/install`,
