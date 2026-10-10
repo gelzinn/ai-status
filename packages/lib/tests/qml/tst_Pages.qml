@@ -92,7 +92,9 @@ Item {
             verify(usage.implicitHeight > 300)
             const rightEdges = []
             function walk(item) {
-                for (const child of item.children) {
+                // QQmlListProperty gained JS iteration in later Qt versions.
+                for (let index = 0; index < item.children.length; index++) {
+                    const child = item.children[index]
                     verify(child.width >= 0)
                     verify(isFinite(child.x) && isFinite(child.y))
                     if (typeof child.text === "string" && /^\d+%$/.test(child.text))
