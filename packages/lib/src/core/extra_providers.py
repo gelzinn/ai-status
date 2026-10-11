@@ -190,7 +190,9 @@ def _parse(name, data):
         metrics.append(_money(data['balance'], 'Available credit balance'))
     elif name == 'lyceum':
         metrics.append(_money(data['available_credits'], 'Available balance'))
-        metrics.append(_money(data['used_credits'], 'Credits used (reported period)', kind='spend'))
+        spent = _money(data['used_credits'], 'Credits used (reported period)', kind='spend')
+        spent.update(title='Credits used', detail='Reported period')
+        metrics.append(spent)
     elif name == 'novita':
         row = data.get('data') if isinstance(data.get('data'), dict) else data
         metrics.append(_money(row['availableBalance'], 'Available credit balance', scale=10000))

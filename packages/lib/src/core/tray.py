@@ -1303,7 +1303,9 @@ class Dashboard(QWidget):
             value = self.metric_values[0]
             self.selected.update(provider=value[0], idx=value[1], metric=value[2])
             state.save_selected(self.selected)
-        structure = tuple(self.metric_values)
+        structure = tuple((value, render.metric_is_amount(metric))
+                          for _, _, metric, value in self.visible_metrics)
+        focused_value = next((button.value for button in self.metric_buttons if button.hasFocus()), None)
         if structure == self.structure:
             self.update_rows()
             self.fit_content()
@@ -1346,7 +1348,8 @@ class Dashboard(QWidget):
                 first = (name, entry.get("_idx", 0), render.metric_key(metrics[0]))
                 heading.clicked.connect(lambda checked=False, value=first: self.choose_metric(value))
                 group_layout.addWidget(heading)
-                heading.cached_label = plain_label("    Cached data", "#666666")
+                heading.cached_label = plain_label("Cached data", "#666666")
+                heading.cached_label.setContentsMargins(50, 0, 0, 0)
                 group_layout.addWidget(heading.cached_label)
                 for metric in metrics:
                     title = render.metric_title(metric)
@@ -1356,6 +1359,7 @@ class Dashboard(QWidget):
                     pct = render.metric_percentage(metric)
                     button = UsageButton()
                     button.value = value
+                    button.is_amount = render.metric_is_amount(metric)
                     button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {render.metric_value(metric)}")
                     button.clicked.connect(lambda checked=False, value=value: self.choose_metric(value))
                     self.metric_buttons.append(button)
@@ -1365,19 +1369,21 @@ class Dashboard(QWidget):
                     title_row = QHBoxLayout()
                     title_row.setSpacing(8)
                     bullet = plain_label("•" if active else "", color)
-                    bullet.setFixedWidth(20)
+                    bullet.setFixedWidth(38)
                     button.bullet = bullet
                     title_row.addWidget(bullet)
                     button.title = plain_label(title, color)
                     button.title.setWordWrap(True)
-                    title_row.addWidget(button.title, 1)
+                    title_row.addWidget(button.title, 0 if button.is_amount else 1)
                     button.percentage = plain_label(render.metric_value(metric), color)
-                    button.percentage.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                    button.percentage.setAlignment((Qt.AlignmentFlag.AlignLeft if button.is_amount else Qt.AlignmentFlag.AlignRight) | Qt.AlignmentFlag.AlignVCenter)
                     title_row.addWidget(button.percentage)
+                    if button.is_amount:
+                        title_row.addStretch()
                     metric_layout.addLayout(title_row)
                     button.bar_container = QWidget()
                     bar_row = QHBoxLayout(button.bar_container)
-                    bar_row.setContentsMargins(20, 0, 0, 0)
+                    bar_row.setContentsMargins(46, 0, 0, 0)
                     bar_row.setSpacing(4)
                     button.open_bracket = plain_label("[", color)
                     bar_row.addWidget(button.open_bracket)
@@ -1387,13 +1393,13 @@ class Dashboard(QWidget):
                     bar_row.addWidget(button.close_bracket)
                     metric_layout.addWidget(button.bar_container)
                     button.description = plain_label(render.metric_detail(metric), "#666666")
-                    button.description.setContentsMargins(20, 0, 0, 0)
+                    button.description.setContentsMargins(46, 0, 0, 0)
                     button.description.setWordWrap(True)
                     metric_layout.addWidget(button.description)
                     group_layout.addWidget(button)
                 heading.credits = UsageButton()
                 credits_layout = QHBoxLayout(heading.credits)
-                credits_layout.setContentsMargins(24, 6, 8, 6)
+                credits_layout.setContentsMargins(50, 6, 8, 6)
                 credits_layout.setSpacing(8)
                 heading.credits_title = plain_label("")
                 credits_layout.addWidget(heading.credits_title, 1)
@@ -1411,6 +1417,11 @@ class Dashboard(QWidget):
             layout.addWidget(settings)
         self.update_rows()
         self.scroll.setWidget(content)
+        if focused_value is not None:
+            for button in self.metric_buttons:
+                if button.value == focused_value:
+                    button.setFocus()
+                    break
         self.fit_content()
         self.scroll.verticalScrollBar().setValue(scroll_position)
 
@@ -1439,12 +1450,17 @@ class Dashboard(QWidget):
             pct = render.metric_percentage(metric)
             title = render.metric_title(metric)
             button.bullet.setText("•" if active else "")
-            button.title.setText(title)
+            button.title.setText(title + ":" if button.is_amount else title)
             button.bar.set_usage(pct or 0, active, loading, group_indices[value[:2]])
             button.bar_container.setVisible(pct is not None)
             for item in (button.bar, button.open_bracket, button.close_bracket):
                 item.setVisible(pct is not None)
-            button.percentage.setFixedWidth(max(38, self.fontMetrics().horizontalAdvance(render.metric_value(metric)) + 4))
+            value_width = max(38, self.fontMetrics().horizontalAdvance(render.metric_value(metric)) + 4)
+            button.percentage.setFixedWidth(value_width)
+            if button.is_amount:
+                available = self.width() - 2 - 32 - 8 - 46 - 8 - value_width
+                title_width = self.fontMetrics().horizontalAdvance(title + ":") + 1
+                button.title.setFixedWidth(max(24, min(title_width, available)))
             button.percentage.setText(render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else render.metric_value(metric))
             for label in (button.bullet, button.title, button.open_bracket, button.close_bracket, button.percentage):
                 label.setStyleSheet(f"color: {color};")

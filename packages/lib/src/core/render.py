@@ -68,7 +68,7 @@ def metric_value(metric):
 
 
 def metric_title(metric):
-    title = metric.get("name") or TYPE_NAMES.get(metric.get("type", "generic"), "Usage")
+    title = metric.get("title") or metric.get("name") or TYPE_NAMES.get(metric.get("type", "generic"), "Usage")
     unit = metric.get("unit")
     if unit and (metric_percentage(metric) is None or metric.get("value_format") == "amount_ratio"):
         title = title.removesuffix(f" ({unit})")
@@ -78,6 +78,8 @@ def metric_title(metric):
 def metric_detail(metric):
     detail = metric.get("detail")
     if detail is None:
+        if metric_is_amount(metric) and metric.get("reset_in_seconds") is None:
+            return ""
         return format_reset_time(metric.get("reset_in_seconds"), metric.get("type"))
     name = metric.get("name") or ""
     unit = metric.get("unit")
@@ -91,6 +93,15 @@ def metric_detail(metric):
 def metric_sort_key(metric):
     order = metric.get("display_order")
     return order if type(order) is int else TYPE_ORDER.get(metric.get("type", "generic"), 4)
+
+
+def metric_is_amount(metric):
+    if metric_percentage(metric) is not None or isinstance(metric.get("amount"), bool):
+        return False
+    try:
+        return math.isfinite(float(metric.get("amount")))
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def _dim(text, alpha):

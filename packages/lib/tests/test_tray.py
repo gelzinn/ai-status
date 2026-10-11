@@ -315,7 +315,7 @@ class DesktopTests(IsolatedState):
         self.app.processEvents()
         rows = self.dashboard.metric_buttons
         right_edges = [row.percentage.mapTo(self.dashboard.scroll.widget(),
-                       tray.QPoint(row.percentage.width(), 0)).x() for row in rows]
+                       tray.QPoint(row.percentage.width(), 0)).x() for row in rows if not row.is_amount]
         self.assertEqual(len(set(right_edges)), 1)
         for row in rows:
             self.assertEqual(row.title.parentWidget(), row.percentage.parentWidget())
@@ -327,6 +327,62 @@ class DesktopTests(IsolatedState):
         rows[-1].click()
         self.assertEqual(state.load_selected()["metric"], rows[-1].value[2])
         self.assertEqual(rows[-1].bullet.text(), "•")
+
+    def test_native_metric_content_aligns_with_provider_name_and_amount_value_is_adjacent(self):
+        config.save_config(["deepseek"])
+        self.dashboard.on_result("deepseek", [{"provider": "DeepSeek", "metrics": [
+            {"type": "balance", "name": "Available balance", "id": "balance", "amount": 20.5,
+             "unit": "USD", "percentage": None, "detail": "Organization credits"},
+            {"type": "monthly", "name": "Monthly usage", "percentage": 25, "reset_in_seconds": 3600},
+        ]}])
+        self.dashboard.show()
+        self.app.processEvents()
+        content = self.dashboard.scroll.widget()
+        heading = self.dashboard.provider_buttons[("deepseek", 0)]
+        anchor = heading.name_label.mapTo(content, tray.QPoint(0, 0)).x()
+        marker = heading.arrow.mapTo(content, tray.QPoint(0, 0)).x()
+        for row in self.dashboard.metric_buttons:
+            self.assertEqual(row.title.mapTo(content, tray.QPoint(0, 0)).x(), anchor)
+            self.assertEqual(row.bullet.mapTo(content, tray.QPoint(0, 0)).x(), marker)
+            self.assertEqual(row.description.mapTo(content,
+                tray.QPoint(row.description.contentsMargins().left(), 0)).x(), anchor)
+            if not row.bar_container.isHidden():
+                self.assertEqual(row.open_bracket.mapTo(content, tray.QPoint(0, 0)).x(), anchor)
+            if row.is_amount:
+                self.assertTrue(row.percentage.alignment() & tray.Qt.AlignmentFlag.AlignLeft)
+                self.assertFalse(row.percentage.alignment() & tray.Qt.AlignmentFlag.AlignRight)
+                self.assertEqual(row.percentage.x() - row.title.geometry().right() - 1, 8)
+                self.assertTrue(row.bar_container.isHidden())
+                self.assertEqual(row.percentage.font().pixelSize(), 13)
+        amount = next(row for row in self.dashboard.metric_buttons if row.is_amount)
+        amount.setFocus()
+        QTest.keyClick(amount, tray.Qt.Key.Key_Return)
+        selected = amount.value
+        before = [(row.geometry(), row.percentage.geometry()) for row in self.dashboard.metric_buttons]
+        self.dashboard.pending.add("deepseek")
+        self.dashboard.animate()
+        self.app.processEvents()
+        self.assertEqual(before, [(row.geometry(), row.percentage.geometry()) for row in self.dashboard.metric_buttons])
+        self.assertEqual(self.dashboard.selected_value(), selected)
+        self.assertTrue(amount.hasFocus())
+
+    def test_cached_status_and_reset_credits_link_align_with_provider_name(self):
+        config.save_config(["codex"])
+        self.dashboard.on_result("codex", [{"provider": "Codex", "_cached": True,
+            "_error": "Session expired", "metrics": [{"type": "weekly", "percentage": 23}],
+            "reset_credits": {"available": 2}}])
+        self.dashboard.show()
+        self.app.processEvents()
+        heading = self.dashboard.provider_buttons[("codex", 0)]
+        content = self.dashboard.scroll.widget()
+        anchor = heading.name_label.mapTo(content, tray.QPoint(0, 0)).x()
+        self.assertFalse(heading.cached_label.isHidden())
+        self.assertEqual(heading.cached_label.mapTo(content,
+            tray.QPoint(heading.cached_label.contentsMargins().left(), 0)).x(), anchor)
+        self.assertFalse(heading.credits.isHidden())
+        self.assertEqual(heading.credits_title.mapTo(content, tray.QPoint(0, 0)).x(), anchor)
+        heading.credits.click()
+        self.assertEqual(self.dashboard.reset_provider, ("codex", 0))
 
     def test_two_openrouter_accounts_fit_without_scrolling(self):
         from core import accounts

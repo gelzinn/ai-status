@@ -140,6 +140,33 @@ class ConnectionViewsTests(unittest.TestCase):
         self.assertEqual(options[0]["metric"], "credits:Account spend / total credits (USD)")
         self.assertEqual(options[0]["label"], "OpenRouter · Personal · Account credits")
 
+    def test_monetary_values_keep_their_scope_and_have_no_invented_progress(self):
+        values = [dict(type="balance", name=name, percentage=None, amount=amount, unit=unit)
+                  for name, amount, unit in (("Balance", 20.5, "USD"), ("Granted", 2, "USD"),
+                                             ("Purchased", 18.5, "USD"))]
+        entry = dict(self.data[0], metrics=values)
+        snapshot = quickshell.build_snapshot([entry], self.selected)
+        metrics = snapshot["providers"][0]["metrics"]
+        self.assertTrue(all(metric["isAmount"] and not metric["hasPercentage"] for metric in metrics))
+        self.assertEqual([metric["value"] for metric in metrics], ["$20.50", "$2.00", "$18.50"])
+        quota = dict(type="monthly", percentage=25, amount=5, limit=20, unit="USD")
+        self.assertFalse(render.metric_is_amount(quota))
+        for invalid in (None, True, "unavailable", float("inf"), float("nan")):
+            self.assertFalse(render.metric_is_amount(dict(amount=invalid, percentage=None)))
+        self.assertEqual(render.metric_detail(dict(values[0], detail=None)), "")
+        self.assertIn("Resets in", render.metric_detail(dict(values[0], detail=None, reset_in_seconds=3600)))
+
+    def test_shorter_amount_title_preserves_selection_identity_and_period(self):
+        from core import extra_providers
+        metric = extra_providers.parse("lyceum", {"available_credits": 3.5, "used_credits": 2})["metrics"][1]
+        original = dict(metric)
+        original.pop("title")
+        original["detail"] = "Credits used (reported period)"
+        self.assertEqual(render.metric_key(metric), render.metric_key(original))
+        self.assertEqual(render.metric_title(metric), "Credits used")
+        self.assertEqual(render.metric_detail(metric), "Reported period")
+        self.assertEqual(render.metric_value(metric), "$2.00")
+
 
 if __name__ == "__main__":
     unittest.main()

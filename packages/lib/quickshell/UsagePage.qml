@@ -104,6 +104,7 @@ Column {
                         Label { anchors.centerIn: parent; visible: logo.status !== Image.Ready; text: "◇" }
                     }
                     Label {
+                        objectName: "usage-provider-name-" + provider.modelData.id + "-" + provider.modelData.idx
                         width: Math.max(0, parent.width - Style.space(48))
                         text: provider.modelData.name
                         font.bold: provider.selected
@@ -117,7 +118,7 @@ Column {
                 }
             }
             Label {
-                x: Style.space(24)
+                x: Style.space(48)
                 width: Math.max(0, parent.width - x)
                 visible: provider.modelData.cached
                 text: "Cached data"
@@ -131,9 +132,11 @@ Column {
                     model: metrics
                     delegate: Item {
                         id: metric
+                        objectName: "usage-metric-" + provider.modelData.id + "-" + provider.modelData.idx + "-" + modelData.key
                         required property var entry
                         readonly property var modelData: entry
                         readonly property bool selected: provider.selected && modelData.key === Plugin.Model.snapshot.selected.metric
+                        readonly property bool inlineAmount: modelData.isAmount === true
                         width: provider.width
                         implicitHeight: block.implicitHeight
                         activeFocusOnTab: true
@@ -144,7 +147,7 @@ Column {
                         Label { width: Style.space(16); text: metric.selected ? "•" : "" }
                         Column {
                             id: block
-                            x: Style.space(24)
+                            x: Style.space(48)
                             width: Math.max(0, parent.width - x)
                             spacing: Style.space(4)
                             Item {
@@ -154,8 +157,8 @@ Column {
                                 Label {
                                     id: metricTitle
                                     objectName: "usage-title-" + provider.modelData.id + "-" + provider.modelData.idx + "-" + metric.modelData.key
-                                    width: Math.max(0, parent.width - metricValue.width - Style.space(12))
-                                    text: metric.modelData.title || metric.modelData.name
+                                    width: metric.inlineAmount ? Math.min(implicitWidth, Math.max(0, parent.width - metricValue.width - Style.space(6))) : Math.max(0, parent.width - metricValue.width - Style.space(12))
+                                    text: (metric.modelData.title || metric.modelData.name) + (metric.inlineAmount ? ":" : "")
                                     opacity: metric.selected ? 1 : 0.55
                                     wrapMode: Text.WordWrap
                                 }
@@ -167,9 +170,10 @@ Column {
                                 Label {
                                     id: metricValue
                                     objectName: "usage-value-" + provider.modelData.id + "-" + provider.modelData.idx + "-" + metric.modelData.key
-                                    anchors.right: parent.right
+                                    anchors.right: metric.inlineAmount ? undefined : parent.right
+                                    x: metric.inlineAmount ? metricTitle.width + Style.space(6) : 0
                                     width: Math.min(parent.width * 0.6, Math.max(Style.space(40), Math.ceil(valueMetrics.advanceWidth)))
-                                    horizontalAlignment: Text.AlignRight
+                                    horizontalAlignment: metric.inlineAmount ? Text.AlignLeft : Text.AlignRight
                                     wrapMode: Text.WordWrap
                                     text: provider.modelData.loading ? Plugin.Model.spinner : (metric.modelData.value || Math.round(metric.modelData.percentage) + "%")
                                     opacity: metric.selected ? 1 : 0.55
@@ -179,7 +183,7 @@ Column {
                                 width: parent.width
                                 visible: metric.modelData.hasPercentage !== false
                                 spacing: Style.space(4)
-                                Label { id: leftBracket; text: "["; opacity: metric.selected ? 1 : 0.55 }
+                                Label { id: leftBracket; objectName: "usage-bracket-" + provider.modelData.id + "-" + provider.modelData.idx + "-" + metric.modelData.key; text: "["; opacity: metric.selected ? 1 : 0.55 }
                                 Plugin.UsageBar {
                                     visible: metric.modelData.hasPercentage !== false
                                     objectName: "usage-bar-" + provider.modelData.id + "-" + provider.modelData.idx + "-" + metric.modelData.key
@@ -196,6 +200,7 @@ Column {
                             }
                             Label {
                                 width: parent.width
+                                objectName: "usage-detail-" + provider.modelData.id + "-" + provider.modelData.idx + "-" + metric.modelData.key
                                 visible: text !== ""
                                 text: metric.modelData.detail
                                 opacity: 0.4
@@ -214,7 +219,7 @@ Column {
             Plugin.PanelButton {
                 id: creditsLink
                 objectName: "reset-credits-" + provider.modelData.id + "-" + provider.modelData.idx
-                x: Style.space(14)
+                x: Style.space(38)
                 width: Math.max(0, parent.width - x)
                 visible: !!provider.modelData.resetCredits && provider.modelData.resetCredits.available > 0
                 text: "Reset credits: " + (provider.modelData.resetCredits ? provider.modelData.resetCredits.available : 0) + " available"

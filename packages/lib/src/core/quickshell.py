@@ -183,6 +183,7 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
                     "percentage": percentage,
                     "value": render.metric_value(metric),
                     "hasPercentage": percentage is not None,
+                    "isAmount": render.metric_is_amount(metric),
                     "amount": metric.get("amount"),
                     "unit": metric.get("unit", ""),
                     "resetInSeconds": metric.get("reset_in_seconds"),
