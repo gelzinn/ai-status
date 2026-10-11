@@ -1,5 +1,6 @@
 import QtQuick
 import QtTest
+import qs.Commons
 import "plugin" as Plugin
 
 Item {
@@ -61,7 +62,7 @@ Item {
             const configure = findChild(panel, "panel-settings")
             compare(refresh.width, 28)
             compare(refresh.height, 28)
-            compare(refresh.radius, 6)
+            compare(refresh.radius, Style.cornerRadius)
             compare(findChild(refresh, "panel-refresh-icon").width, 16)
             compare(refresh.color, Qt.rgba(0, 0, 0, 0))
             compare(refresh.border.width, 0)
@@ -171,8 +172,106 @@ Item {
             compare(refresh.pathData, Plugin.PanelIcons.data.paths["refresh-cw"].map(command => command.join(" ")).join(" "))
             verify(refresh.pathData.indexOf("C ") !== -1)
             verify(Plugin.PanelIcons.path("settings").indexOf("C ") !== -1)
-            compare(Plugin.PanelIcons.path("arrow-left"), "M 12 19 L 5 12 L 12 5 M 19 12 L 5 12")
+            compare(Plugin.PanelIcons.path("arrow-left"), "M 12 21 L 3 12 L 12 3 M 21 12 L 3 12")
             compare(Plugin.PanelIcons.path("missing"), "")
+        }
+        function configureManyProviders() {
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.settings.providerIds = {claude: "claude", codex: "codex", kiro: "kiro"}
+            for (let index = 0; index < 20; index++) {
+                const id = "account:scroll-" + index
+                const entry = JSON.parse(JSON.stringify(snapshot.providers[0]))
+                entry.id = id
+                entry.providerId = "claude"
+                entry.name = "Claude · Account " + (index + 1)
+                snapshot.providers.push(entry)
+                snapshot.settings.names[id] = entry.name
+                snapshot.settings.providerIds[id] = "claude"
+                snapshot.settings.order.push(id)
+                snapshot.settings.enabled.push(id)
+            }
+            Plugin.Model.snapshot = snapshot
+            panel.configure()
+            wait(20)
+            const scroller = findChild(panel, "panel-scroller")
+            verify(scroller.contentHeight > scroller.height * 2)
+            return findChild(panel, "panel-settings-page")
+        }
+        function verifyControlInViewport(control, scroller) {
+            tryVerify(() => {
+                const top = control.mapToItem(scroller, 0, 0).y
+                return top >= -0.5 && top + control.height <= scroller.height + 0.5
+            }, 1000, "Focused control must be fully visible: " + control.objectName)
+        }
+        function tabToNextControl(control, scroller, backwards) {
+            const next = control.nextItemInFocusChain(!backwards)
+            keyClick(backwards ? Qt.Key_Backtab : Qt.Key_Tab,
+                     backwards ? Qt.ShiftModifier : Qt.NoModifier)
+            tryVerify(() => next.activeFocus)
+            verifyControlInViewport(next, scroller)
+            return next
+        }
+        function test_tab_and_backtab_reveal_controls_through_long_settings() {
+            const settings = configureManyProviders()
+            const scroller = findChild(panel, "panel-scroller")
+            const first = findChild(settings, "active-provider")
+            const last = findChild(settings, "settings-about")
+            first.forceActiveFocus(Qt.TabFocusReason)
+            verifyControlInViewport(first, scroller)
+            compare(scroller.contentY, 0)
+            let focused = first
+            let count = 0
+            while (focused !== last && count++ < 100)
+                focused = tabToNextControl(focused, scroller, false)
+            compare(focused, last)
+            verify(count > 40)
+            verify(scroller.contentY > scroller.height)
+            const bottomPosition = scroller.contentY
+            count = 0
+            while (focused !== first && count++ < 100)
+                focused = tabToNextControl(focused, scroller, true)
+            compare(focused, first)
+            verify(scroller.contentY < bottomPosition)
+            verifyControlInViewport(first, scroller)
+        }
+        function test_fixed_footer_and_header_focus_preserve_settings_scroll() {
+            const settings = configureManyProviders()
+            const scroller = findChild(panel, "panel-scroller")
+            const about = findChild(settings, "settings-about")
+            scroller.contentY = Math.max(0, scroller.contentHeight - scroller.height)
+            about.forceActiveFocus(Qt.TabFocusReason)
+            verifyControlInViewport(about, scroller)
+            const position = scroller.contentY
+            const cancel = findChild(panel, "settings-cancel")
+            keyClick(Qt.Key_Tab)
+            tryVerify(() => cancel.activeFocus)
+            compare(scroller.contentY, position)
+            const save = findChild(panel, "settings-save")
+            keyClick(Qt.Key_Tab)
+            tryVerify(() => save.activeFocus)
+            compare(scroller.contentY, position)
+            const back = findChild(panel, "panel-back")
+            back.forceActiveFocus(Qt.TabFocusReason)
+            wait(20)
+            verify(back.activeFocus)
+            compare(scroller.contentY, position)
+        }
+        function test_tab_dismisses_selector_without_scrolling_to_popup_overlay() {
+            const settings = configureManyProviders()
+            const scroller = findChild(panel, "panel-scroller")
+            const selector = findChild(settings, "active-provider")
+            selector.forceActiveFocus(Qt.TabFocusReason)
+            verifyControlInViewport(selector, scroller)
+            const position = scroller.contentY
+            keyClick(Qt.Key_Space)
+            tryVerify(() => selector.popupItem.activeFocus)
+            verify(selector.popupOpen)
+            compare(scroller.contentY, position)
+            keyClick(Qt.Key_Tab)
+            tryCompare(selector, "popupOpen", false)
+            const next = findChild(settings, "display-show_provider")
+            tryVerify(() => next.activeFocus)
+            verifyControlInViewport(next, scroller)
         }
         function test_reset_navigation_uses_clicked_provider_and_back_restores_focus() {
             const selected = JSON.stringify(Plugin.Model.snapshot.selected)
@@ -190,7 +289,7 @@ Item {
             const heading = findChild(panel, "reset-provider-heading")
             verify(!heading.activeFocusOnTab)
             verify(findChild(panel, "reset-back") === null)
-            compare(findChild(panel, "reset-table").radius, 8)
+            compare(findChild(panel, "reset-table").radius, Style.cornerRadius)
             mouseClick(heading)
             compare(panel.resetProvider.id, "codex")
             compare(JSON.stringify(Plugin.Model.snapshot.selected), selected)

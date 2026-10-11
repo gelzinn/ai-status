@@ -68,7 +68,7 @@ Column {
         implicitHeight: table.implicitHeight + 2
         color: "transparent"
         border.width: 1
-        radius: Style.space(8)
+        radius: Style.cornerRadius
         border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15)
         visible: root.inventory.available > 0
         Column {

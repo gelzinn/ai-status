@@ -1,4 +1,5 @@
 import QtQuick
+import qs.Commons
 Rectangle {
     property var anchorItem
     property var owner
@@ -12,7 +13,7 @@ Rectangle {
     width: contentWidth
     height: contentHeight
     color: "#111111"
-    radius: 12
+    radius: Style.cornerRadius
     border.color: "#282828"
     function fittedContentWidth(value) { return value }
     function fittedContentHeight(value, cap) { return Math.min(value + 32, cap) }

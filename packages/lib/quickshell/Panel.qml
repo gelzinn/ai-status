@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui as Ui
@@ -79,6 +80,29 @@ Ui.Panel {
         return false
     }
 
+    function revealFocusedControl() {
+        const window = keyCatcher.Window.window
+        const item = window ? window.activeFocusItem : null
+        if (!opened || !item || !item.visible || scroller.height <= 0) return
+        let ancestor = item
+        while (ancestor && ancestor !== content) ancestor = ancestor.parent
+        if (ancestor !== content) return
+
+        const margin = Style.space(4)
+        const top = item.mapToItem(scroller, 0, 0).y
+        const bottom = top + item.height
+        let nextY = scroller.contentY
+        if (top < margin || item.height + margin * 2 > scroller.height)
+            nextY += top - margin
+        else if (bottom > scroller.height - margin)
+            nextY += bottom - scroller.height + margin
+        nextY = Math.max(0, Math.min(nextY, Math.max(0, scroller.contentHeight - scroller.height)))
+        if (nextY !== scroller.contentY) {
+            scroller.cancelFlick()
+            scroller.contentY = nextY
+        }
+    }
+
     onConfigurationPageChanged: scroller.contentY = 0
     onResetEntryChanged: if (resetProvider && !resetEntry) Qt.callLater(() => {
         if (resetProvider && !resetEntry) showUsage()
@@ -94,7 +118,15 @@ Ui.Panel {
         open: root.opened
         focusTarget: keyCatcher
         contentWidth: panel.fittedContentWidth(Style.space(380))
-        contentHeight: panel.fittedContentHeight(header.height + Style.space(21) + content.implicitHeight + (footer.visible ? footer.height + Style.space(12) : 0), Style.space(680))
+        contentHeight: panel.fittedContentHeight(header.height + panel.padding + Style.space(13) + content.implicitHeight + (footer.visible ? footer.height + Style.space(12) : 0), Style.space(680))
+
+        Connections {
+            target: keyCatcher.Window.window
+            function onActiveFocusItemChanged() {
+                // Wait for the focus chain and any page layout changes to settle.
+                Qt.callLater(root.revealFocusedControl)
+            }
+        }
 
         Ui.PanelKeyCatcher {
             id: keyCatcher
@@ -190,7 +222,7 @@ Ui.Panel {
                 id: divider
                 objectName: "panel-divider"
                 anchors.top: header.bottom
-                anchors.topMargin: Style.space(8)
+                anchors.topMargin: panel.padding
                 x: -panel.padding
                 width: parent.width + panel.padding * 2
                 height: Style.space(1)
