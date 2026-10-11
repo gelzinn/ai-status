@@ -137,6 +137,10 @@ For a plugin installed directly through Omarchy, update only AI Status with:
 omarchy plugin update io.github.gelzinn.ai-status
 ```
 
+If the panel still shows the previous UI after updating, hot reload may have
+kept older QML components in memory. Run `omarchy restart shell` to load the
+updated components, then reopen the panel and check its labels and navigation.
+
 Omarchy keeps the plugin's bar placement and refuses updates it cannot fast-forward. Shared preferences and provider credentials remain outside the plugin checkout.
 Downloads, checksums, Python validation, CLI import, and dependency checks
 run in a staging directory before replacing the active installation. If
