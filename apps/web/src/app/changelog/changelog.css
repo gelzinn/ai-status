@@ -11,13 +11,12 @@
 .changelog :is(h1, h2, h3, h4, h5, h6) { font-family: inherit; }
 .changelog a { transition: color 150ms, background 150ms; }
 .changelog-prose a:hover { color: var(--foreground); }
-.changelog-container { width: calc(100% - 160px); max-width: 1280px; margin-inline: auto; }
 .changelog-skip { position: fixed; top: 8px; left: 24px; padding: 8px 16px; background: var(--foreground); color: var(--background); z-index: 100; transform: translateY(-160%); }
 .changelog-skip:focus { transform: translateY(0); }
 .changelog-page-header { padding: 64px 0 72px; position: relative; }
-.changelog-page-header h1 { font-size: 48px; font-weight: 510; line-height: 1; letter-spacing: -1.056px; margin: 0 0 18px -2px; text-box: trim-both cap alphabetic; }
+.changelog-page-header h1 { font-size: 48px; font-weight: 510; line-height: 1; letter-spacing: -1.056px; margin: 0 0 18px; text-box: trim-both cap alphabetic; }
 .changelog-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 40px; gap: 24px; }
-.changelog-toolbar nav { display: flex; gap: 16px; font-size: 15px; }
+.changelog-description { max-width: 40rem; color: var(--muted-foreground); font-size: 16px; line-height: 1.6; text-wrap: pretty; }
 .changelog-tools { display: flex; align-items: center; gap: 12px; font-family: var(--font-geist-sans), sans-serif; }
 .changelog-search { width: 280px; }
 .changelog-list { border-top: 1px solid var(--border); padding-top: 64px; }
@@ -59,12 +58,6 @@
 .changelog-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 20px; padding-bottom: 80px; font-size: 15px; color: var(--muted-foreground); }
 .changelog-pagination > span { font-size: 13px; margin-right: auto; }
 .changelog-pagination a { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 9px 16px; }
-@media (max-width: 1340px) {
-	.changelog-container { width: calc(100% - 84px); }
-}
-@media (max-width: 1024px) {
-	.changelog-container { width: calc(100% - 72px); }
-}
 @media (max-width: 810px) {
 	.changelog-entry { grid-template-columns: repeat(8, minmax(0, 1fr)) repeat(4, 0); }
 	.changelog-article { grid-column: 4 / span 6; }
@@ -74,7 +67,6 @@
 	.changelog-prose { font-size: 15px; line-height: 24px; }
 }
 @media (max-width: 640px) {
-	.changelog-container { width: calc(100% - 48px); }
 	.changelog-page-header { padding-bottom: 72px; }
 	.changelog-page-header h1 { font-size: 44px; line-height: 48px; }
 	.changelog-toolbar { min-height: 40px; flex-direction: column; align-items: stretch; gap: 24px; }

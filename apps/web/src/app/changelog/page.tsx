@@ -15,7 +15,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-changelog" });
 
 export const metadata: Metadata = {
 	title: `Changelog | ${site.name}`,
-	description: `The latest features, improvements and fixes in ${site.name}.`,
+	description: `Follow the latest features, improvements, and fixes in ${site.name}.`,
 	alternates: { canonical: "/changelog" },
 	openGraph: { title: `Changelog | ${site.name}`, url: "/changelog" },
 };
@@ -60,7 +60,7 @@ export default async function ChangelogPage({ searchParams }: {
 				<div className="changelog-page-header">
 					<h1>Changelog</h1>
 					<div className="changelog-toolbar">
-						<nav aria-label="Updates"><Link href="/changelog" aria-current="page">Changelog</Link></nav>
+						<p className="changelog-description">Follow the latest features, improvements, and fixes in {site.name}.</p>
 						<div className="changelog-tools">
 							<ChangelogSearch query={selection.query} />
 							<a href={`${repo.url}/releases.atom`} className={`${PILL_CONTROL} inline-flex size-10 shrink-0 items-center justify-center border-border bg-card text-muted-foreground outline-none hover:text-foreground focus-visible:border-foreground/30`} aria-label="Subscribe to release updates"><Bell className="size-4" aria-hidden="true" /></a>
