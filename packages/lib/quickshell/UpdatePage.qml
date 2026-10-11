@@ -10,6 +10,7 @@ Column {
     readonly property color linkColor: "#89b4fa"
     readonly property var guide: Plugin.Model.snapshot.update || {}
     readonly property var version: Plugin.Model.snapshot.version || {}
+    property bool commandCopied: false
     spacing: Style.space(16)
 
     function focusFirstControl() {
@@ -58,7 +59,7 @@ Column {
         Label { text: "Or run this command in a terminal:"; opacity: 0.7 }
         Rectangle {
             width: parent.width
-            implicitHeight: command.implicitHeight + Style.space(20)
+            implicitHeight: Math.max(command.implicitHeight + Style.space(20), Style.space(50))
             radius: Style.space(3)
             color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.04)
             border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
@@ -67,7 +68,7 @@ Column {
                 objectName: "update-command"
                 x: Style.space(10)
                 y: Style.space(10)
-                width: parent.width - Style.space(20)
+                width: Math.max(0, parent.width - Style.space(58))
                 text: root.guide.command || ""
                 textFormat: TextEdit.PlainText
                 color: root.foreground
@@ -80,16 +81,32 @@ Column {
                 selectedTextColor: root.foreground
                 selectionColor: Qt.rgba(root.linkColor.r, root.linkColor.g, root.linkColor.b, 0.3)
             }
+            Plugin.PanelButton {
+                id: copyCommand
+                objectName: "update-copy-command"
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.margins: Style.space(8)
+                width: Style.space(30)
+                text: root.commandCopied ? "Copied" : "Copy command"
+                iconName: root.commandCopied ? "check" : "copy"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                onClicked: {
+                    command.selectAll()
+                    command.copy()
+                    command.deselect()
+                    root.commandCopied = true
+                    copiedFeedback.restart()
+                }
+            }
         }
-        Plugin.PanelButton {
-            id: copyCommand
-            objectName: "update-copy-command"
-            text: "Copy command"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            outlined: true
-            onClicked: { command.selectAll(); command.copy(); command.deselect() }
-        }
+    }
+
+    Timer {
+        id: copiedFeedback
+        interval: 2000
+        onTriggered: root.commandCopied = false
     }
 
     Column {

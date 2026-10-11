@@ -557,6 +557,18 @@ def draw_control_icon(painter, rect, name, color="#aaaaaa"):
         path.lineTo(3, 21)
     elif name == "settings":
         path = settings_icon_path()
+    elif name == "copy":
+        path.addRoundedRect(QRectF(8, 8, 14, 14), 2, 2)
+        path.moveTo(4, 16)
+        path.cubicTo(2.9, 16, 2, 15.1, 2, 14)
+        path.lineTo(2, 4)
+        path.cubicTo(2, 2.9, 2.9, 2, 4, 2)
+        path.lineTo(14, 2)
+        path.cubicTo(15.1, 2, 16, 2.9, 16, 4)
+    elif name == "check":
+        path.moveTo(20, 6)
+        path.lineTo(9, 17)
+        path.lineTo(4, 12)
     else:
         points = {
             "arrow-left": ((12, 19), (5, 12), (12, 5), (19, 12), (5, 12)),
@@ -908,15 +920,26 @@ class UpdateView(QWidget):
         self.steps = plain_label("")
         self.steps.setWordWrap(True)
         layout.addWidget(self.steps)
+        self.command_box = QWidget()
+        self.command_box.setObjectName("updateCommandBox")
+        self.command_box.setStyleSheet("QWidget#updateCommandBox { background: #181818; border: 1px solid #303030; border-radius: 6px; }")
+        command_layout = QHBoxLayout(self.command_box)
+        command_layout.setContentsMargins(10, 10, 8, 10)
+        command_layout.setSpacing(8)
         self.command = QLabel()
         self.command.setTextFormat(Qt.TextFormat.PlainText)
         self.command.setWordWrap(True)
+        self.command.setMinimumWidth(1)
         self.command.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.command.setStyleSheet("color: #dddddd; background: #181818; border: 1px solid #303030; border-radius: 6px; padding: 10px;")
-        layout.addWidget(self.command)
-        self.copy_button = QPushButton("Copy command")
+        self.command.setStyleSheet("color: #dddddd;")
+        command_layout.addWidget(self.command, 1)
+        self.copy_button = ControlButton("copy", "Copy command")
         self.copy_button.clicked.connect(self.copy_command)
-        layout.addWidget(self.copy_button)
+        command_layout.addWidget(self.copy_button, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self.command_box)
+        self.copy_feedback = QTimer(self)
+        self.copy_feedback.setSingleShot(True)
+        self.copy_feedback.timeout.connect(self.reset_copy_feedback)
         self.action = QPushButton()
         self.action.setObjectName("update-action")
         self.action.setStyleSheet("color: #89b4fa; border: 1px solid #294666; border-radius: 6px; padding: 8px;")
@@ -948,9 +971,10 @@ class UpdateView(QWidget):
         self.description.setText(guide.get("description", ""))
         self.steps.setText("\n\n".join(f"{index}. {step}" for index, step in enumerate(guide.get("steps", []), 1)))
         command = guide.get("command", "")
+        if self.command.text() != command:
+            self.reset_copy_feedback()
         self.command.setText(command)
-        self.command.setVisible(bool(command))
-        self.copy_button.setVisible(bool(command))
+        self.command_box.setVisible(bool(command))
         self.update_action()
 
     def update_action(self):
@@ -968,6 +992,19 @@ class UpdateView(QWidget):
     def copy_command(self):
         QApplication.clipboard().setText(self.guide.get("command", ""))
         self.copy_button.setText("Copied")
+        self.copy_button.icon_name = "check"
+        self.copy_button.setToolTip("Copied")
+        self.copy_button.setAccessibleName("Copied")
+        self.copy_button.update()
+        self.copy_feedback.start(1800)
+
+    def reset_copy_feedback(self):
+        self.copy_feedback.stop()
+        self.copy_button.setText("")
+        self.copy_button.icon_name = "copy"
+        self.copy_button.setToolTip("Copy command")
+        self.copy_button.setAccessibleName("Copy command")
+        self.copy_button.update()
 
     def open_link(self, key):
         url = self.guide.get(key)

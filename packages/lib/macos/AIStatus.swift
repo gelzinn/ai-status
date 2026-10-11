@@ -829,16 +829,17 @@ struct UpdatePage: View {
             if !guide.command.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Terminal command").foregroundColor(Palette.bright)
-                    Text(guide.command).font(.custom("GeistMono-Regular", size: 11))
-                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(guide.command).font(.custom("GeistMono-Regular", size: 11))
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ControlButton(symbol: copiedCommand ? "checkmark" : "doc.on.doc",
+                                      help: copiedCommand ? "Copied" : "Copy command", action: {
+                            NSPasteboard.general.clearContents()
+                            copiedCommand = NSPasteboard.general.setString(guide.command, forType: .string)
+                        }).accessibilityLabel("Copy command")
+                    }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.border))
-                    HoverButton(bordered: true, action: {
-                        NSPasteboard.general.clearContents()
-                        copiedCommand = NSPasteboard.general.setString(guide.command, forType: .string)
-                    }) {
-                        HStack { Text(copiedCommand ? "Copied" : "Copy command"); Spacer(); Image(systemName: "doc.on.doc") }
-                    }
                 }
             }
             VStack(spacing: 6) {

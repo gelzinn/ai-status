@@ -13,6 +13,8 @@ Item {
         "arrow-right": "M5 12h14 M12 5l7 7-7 7",
         "arrow-up": "M12 19V5 M5 12l7-7 7 7",
         "arrow-down": "M12 5v14 M19 12l-7 7-7-7",
+        "copy": "M11 9h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2 M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
+        "check": "M20 6L9 17l-5-5",
         "chevron-down": "M6 9l6 6 6-6"
     })
     implicitWidth: 16
