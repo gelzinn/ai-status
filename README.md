@@ -11,6 +11,7 @@
   <p>
     <a href="https://ai-status.gelzin.com">Website &amp; interactive preview</a> ·
     <a href="#quick-start">Install</a> ·
+    <a href="#command-line">CLI</a> ·
     <a href="#supported-providers">Providers</a> ·
     <a href="#documentation">Documentation</a>
   </p>
@@ -129,6 +130,44 @@ Requires macOS 13+, Python 3.10+ and Xcode Command Line Tools (`xcode-select --i
 The packaged app includes its runtime. Installation needs no administrator access, Python setup or WSL. Provider apps and authenticated sessions remain separate prerequisites. Enable **Start when I sign in to Windows** in Settings if you want it to launch at sign-in.
 
 [Windows installation, updates and provider compatibility →](packages/lib/WINDOWS.md)
+
+## Command line
+
+Start with `ai-status --help`, or use `ai-status help accounts add` for a
+specific command. On Linux, `ai-status` without arguments shows help; on
+Windows and macOS it opens the native app. The Windows package includes
+`ai-status-cli.exe` for terminal commands.
+
+| Task | Command |
+| --- | --- |
+| Show the installed version | `ai-status --version` |
+| Find provider IDs and enabled defaults | `ai-status providers` |
+| Collect usage as JSON | `ai-status status` |
+| Check installation details as JSON | `ai-status doctor` |
+| Configure providers and display | `ai-status config` |
+| Request a refresh of the running panel | `ai-status refresh` |
+| List saved additional accounts | `ai-status accounts` |
+
+Default connections read existing provider app or CLI sessions; sign in through
+the provider's own tool. You do not need to add an account for that default
+session. `accounts` lists additional connections you have saved, so an empty
+list does not mean your existing CLI login is missing. Add a separate account
+with its own credential source when you want another profile:
+
+```bash
+ai-status accounts add codex --id work-codex --label Work \
+  --auth-file /path/to/work-codex/auth.json
+ai-status accounts add openrouter --id work-router --label "Work API" \
+  --env OPENROUTER_API_KEY=OPENROUTER_WORK_KEY
+```
+
+Replace the credential path with an existing account-specific file.
+`--env TARGET=SOURCE_ENV` reads an existing environment variable at query time;
+the source variable must be available to the AI Status process. `--id` is the
+stable account identifier; `--label` is its display name.
+
+[CLI usage and account commands →](packages/lib/INSTALL.md#command-line) ·
+[Credential sources and multiple accounts →](packages/lib/PROVIDERS.md#multiple-accounts-and-connections)
 
 ## What you get
 
