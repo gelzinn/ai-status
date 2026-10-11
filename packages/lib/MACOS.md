@@ -32,6 +32,17 @@ installer uses the latest stable release with checksum verification. Re-run
 the command to update; your provider selection and display preferences are
 preserved. A user LaunchAgent starts the app when you sign in.
 
+When a newer version is available, **Update available: vX.Y.Z →** opens an
+update guide inside the usage panel. **Open updater in Terminal** runs the
+macOS installer for a supported native installation. Follow its progress in
+Terminal; the app restarts after installation. The guide also includes a
+copyable command, release notes and installation instructions for manual
+updates. Back or **Esc** returns to usage. Updating is optional.
+
+You can also run `~/.local/bin/ai-status update` to open the updater. Development
+checkouts and unrecognized installations show manual instructions instead of
+replacing the checkout.
+
 The bundle lives at `~/.local/share/ai-status/AI Status.app`, with a shortcut at
 `~/Applications/AI Status.app`. Launch it from Applications or run
 `~/.local/bin/ai-status macos`. The login agent is

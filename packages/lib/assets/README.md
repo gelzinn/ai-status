@@ -17,8 +17,8 @@ The unmodified Geist Mono regular/medium fonts come from the project's Geist
 package (1.7.2), the same family as the landing-page preview. Their SIL Open Font
 License and copyright are in `fonts/OFL.txt` and the Windows license bundle.
 
-`panel-icons.json` contains the shared Lucide vectors for refresh, settings and
-navigation arrows, plus the native header controls' size, corner radius and
+`panel-icons.json` contains the shared Lucide vectors for refresh, settings,
+navigation arrows, copy and check, plus the native header controls' size, corner radius and
 hover/focus opacities. Quickshell, Windows and macOS read this same bundled file.
 The paths use move, line and cubic curve commands in a 24-unit view box, so each
 native renderer can draw them without an SVG runtime dependency. Their copyright

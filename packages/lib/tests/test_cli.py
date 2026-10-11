@@ -95,7 +95,7 @@ class CLIEntrypointTests(unittest.TestCase):
     def test_root_help_exposes_user_commands(self):
         for flag in ("--help", "-h"):
             with self.subTest(flag=flag):
-                self.assert_help(self.invoke(flag), "accounts", "providers", "status", "doctor", "config", "--version")
+                self.assert_help(self.invoke(flag), "accounts", "providers", "status", "doctor", "config", "update", "--version")
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Native desktops keep their no-argument launcher")
     def test_no_arguments_on_linux_prints_help_and_exits_successfully(self):
@@ -107,6 +107,7 @@ class CLIEntrypointTests(unittest.TestCase):
             "providers": ("--json",),
             "status": ("status",),
             "doctor": ("doctor", "JSON"),
+            "update": ("optional update", "terminal", "checksummed installer"),
         }
         for command, details in cases.items():
             with self.subTest(command=command):

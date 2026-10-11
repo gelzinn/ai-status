@@ -7,9 +7,16 @@ selection commands as the other native panels.
 Run `bash packages/lib/install-macos.sh` from the repository root on a Mac
 to compile and launch the checkout's code, including local changes.
 Verify menu bar selection, popover open/close and Escape, manual and background
-refresh, settings Save/Cancel and reordering, reset-credit navigation, About,
+refresh, settings Save/Cancel and reordering, reset-credit and update-guide navigation, About,
 multiple displays, and launch at sign-in. Check both light and dark
 appearance, provider errors, missing credentials and cached results.
+
+The app's `--smoke --preview-directory /tmp/ai-status-previews` command renders
+the update notice, guide, current-version status, launch-error feedback and manual
+fallback alongside the other native pages. It validates guide decoding, CLI
+result handling and back navigation with a local fixture, without running an
+installer. On a supported installed build, manually verify the
+explicit updater action opens Terminal and preserves settings after updating.
 
 Linux checks cover the backend and installer behavior. They do not verify
 AppKit/SwiftUI compilation or the on-screen macOS experience; those need a

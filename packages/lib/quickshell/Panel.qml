@@ -12,6 +12,7 @@ Ui.Panel {
     property var hostWidget: null
     property bool configurationPage: false
     property bool aboutPage: false
+    property bool updatePage: false
     property real settingsScrollPosition: 0
     property var resetProvider: null
     property real usageScrollPosition: 0
@@ -27,6 +28,7 @@ Ui.Panel {
         if (!Plugin.Model.snapshot.settings || Plugin.Model.settingsSaving) return
         settings.begin()
         aboutPage = false
+        updatePage = false
         resetProvider = null
         configurationPage = true
         open()
@@ -36,12 +38,19 @@ Ui.Panel {
         if (Plugin.Model.settingsSaving) return
         configurationPage = false
         aboutPage = false
+        const wasUpdate = updatePage
+        updatePage = false
         const previous = resetProvider
         resetProvider = null
         if (previous) Qt.callLater(() => {
             scroller.contentY = Math.min(usageScrollPosition, Math.max(0, scroller.contentHeight - scroller.height))
             const button = usage.resetButton(previous.id, previous.idx)
             if (button && button.visible) button.forceActiveFocus()
+            else keyCatcher.forceActiveFocus()
+        })
+        else if (wasUpdate) Qt.callLater(() => {
+            scroller.contentY = Math.min(usageScrollPosition, Math.max(0, scroller.contentHeight - scroller.height))
+            if (updateLink.visible) updateLink.forceActiveFocus()
             else keyCatcher.forceActiveFocus()
         })
     }
@@ -73,6 +82,13 @@ Ui.Panel {
         Qt.callLater(() => backButton.focusProgrammatically())
     }
 
+    function showUpdate() {
+        usageScrollPosition = scroller.contentY
+        updatePage = true
+        scroller.contentY = 0
+        Qt.callLater(() => backButton.focusProgrammatically())
+    }
+
     function switchPanel(direction) {
         if (bar && typeof bar.switchPanelFrom === "function")
             return bar.switchPanelFrom(hostWidget || root, direction)
@@ -83,7 +99,7 @@ Ui.Panel {
     onResetEntryChanged: if (resetProvider && !resetEntry) Qt.callLater(() => {
         if (resetProvider && !resetEntry) showUsage()
     })
-    onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; aboutPage = false; resetProvider = null }
+    onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; aboutPage = false; updatePage = false; resetProvider = null }
 
     Ui.KeyboardPanel {
         id: panel
@@ -101,13 +117,14 @@ Ui.Panel {
             objectName: "panel-key-catcher"
             anchors.fill: parent
             onCloseRequested: {
-                if (root.configurationPage || root.resetProvider) root.goBack()
+                if (root.configurationPage || root.resetProvider || root.updatePage) root.goBack()
                 else root.close()
             }
             onTabRequested: direction => {
                 if (root.aboutPage) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
                 else if (root.configurationPage) settings.focusFirstControl()
                 else if (root.resetProvider) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
+                else if (root.updatePage) updates.focusFirstControl()
                 else root.switchPanel(direction)
             }
             onMoveRequested: (dx, dy) => {
@@ -127,7 +144,7 @@ Ui.Panel {
                     objectName: "panel-back"
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
-                    visible: root.configurationPage || !!root.resetProvider
+                    visible: root.configurationPage || !!root.resetProvider || root.updatePage
                     iconName: "arrow-left"
                     tooltipText: root.aboutPage ? "Back to settings (Esc)" : "Back to usage (Esc)"
                     enabled: !Plugin.Model.settingsSaving
@@ -136,11 +153,11 @@ Ui.Panel {
                 Text {
                     objectName: "panel-title"
                     anchors.left: parent.left
-                    anchors.leftMargin: backButton.visible ? backButton.width + Style.space(8) : 0
+                    anchors.leftMargin: backButton.visible ? backButton.width + Style.space(12) : 0
                     anchors.right: controls.left
                     anchors.rightMargin: Style.space(8)
                     anchors.verticalCenter: parent.verticalCenter
-                    text: root.aboutPage ? "About" : root.configurationPage ? "Settings" : "AI Status"
+                    text: root.aboutPage ? "About" : root.configurationPage ? "Settings" : root.updatePage ? "Update AI Status" : "AI Status"
                     textFormat: Text.PlainText
                     color: root.barForeground
                     font.family: root.panelFont
@@ -165,7 +182,7 @@ Ui.Panel {
                     }
                     IconButton {
                         objectName: "panel-refresh"
-                        visible: !root.configurationPage
+                        visible: !root.configurationPage && !root.updatePage
                         enabled: !Plugin.Model.snapshot.loading
                         iconName: "refresh-cw"
                         spinning: !!Plugin.Model.snapshot.loading
@@ -174,7 +191,7 @@ Ui.Panel {
                     }
                     IconButton {
                         objectName: "panel-settings"
-                        visible: !root.configurationPage && !root.resetProvider
+                        visible: !root.configurationPage && !root.resetProvider && !root.updatePage
                         iconName: "settings"
                         tooltipText: "Configure (C)"
                         enabled: !Plugin.Model.settingsSaving && !!Plugin.Model.snapshot.settings
@@ -218,21 +235,41 @@ Ui.Panel {
                     Text {
                         width: parent.width
                         visible: text !== ""
-                        text: Plugin.Model.errorMessage || (Plugin.Model.snapshot.version && Plugin.Model.snapshot.version.has_update ? "Update available: v" + Plugin.Model.snapshot.version.latest : "")
+                        text: Plugin.Model.errorMessage
                         textFormat: Text.PlainText
                         wrapMode: Text.WordWrap
                         color: Commons.Color.accent
                         font.family: root.panelFont
                         font.pixelSize: Style.font.caption
                     }
+                    Plugin.PanelButton {
+                        id: updateLink
+                        objectName: "update-available"
+                        width: parent.width
+                        visible: !root.configurationPage && !root.resetProvider && !root.updatePage && !!Plugin.Model.snapshot.version && !!Plugin.Model.snapshot.version.has_update
+                        text: "Update available: v" + (Plugin.Model.snapshot.version ? Plugin.Model.snapshot.version.latest || "" : "")
+                        trailingIconName: "arrow-right"
+                        alignLeft: true
+                        foreground: "#89b4fa"
+                        fontFamily: root.panelFont
+                        onClicked: root.showUpdate()
+                    }
                     Plugin.UsagePage {
                         id: usage
                         width: parent.width
-                        visible: !root.configurationPage && !root.resetProvider
+                        visible: !root.configurationPage && !root.resetProvider && !root.updatePage
                         foreground: root.barForeground
                         fontFamily: root.panelFont
                         onResetRequested: (provider, idx) => root.showResetCredits(provider, idx)
                         onSettingsRequested: root.configure()
+                    }
+                    Plugin.UpdatePage {
+                        id: updates
+                        objectName: "panel-update-page"
+                        width: parent.width
+                        visible: root.updatePage
+                        foreground: root.barForeground
+                        fontFamily: root.panelFont
                     }
                     Plugin.ResetCreditsPage {
                         id: credits

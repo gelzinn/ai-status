@@ -10,7 +10,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import about, config, fetch, logos, paths, render, state, reset_credits
+from . import about, config, fetch, logos, paths, render, state, reset_credits, updates
 
 
 class _PlainText(HTMLParser):
@@ -224,6 +224,7 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
         "schemaVersion": 1,
         "about": about.project_info(),
         "version": fetch.get_version_info(),
+        "update": updates.update_guide(),
         "text": text,
         "selected": selected,
         "iconMode": state.get_icon_mode(selected),

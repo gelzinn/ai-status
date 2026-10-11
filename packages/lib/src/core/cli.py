@@ -684,6 +684,7 @@ def _build_parser():
         ("config", "Configure providers and display preferences"),
         ("status", "Fetch current usage and print JSON"),
         ("refresh", "Request a refresh in the running desktop app or bar"),
+        ("update", "Start an optional update using your installation method"),
         ("providers", "List installed provider IDs and default connection settings"),
         ("accounts", "List default connections and manage saved accounts"),
         ("doctor", "Print version, paths and runtime diagnostics as JSON"),
@@ -698,6 +699,12 @@ def _build_parser():
         "terminal configuration UI. On macOS, --frontend selects the terminal UI."
     )
     command_parsers["status"].epilog = "Output: a JSON object with providers and errors. Requires provider authentication."
+    command_parsers["update"].epilog = (
+        "Windows opens a checksummed installer. Linux and macOS open the updater in\n"
+        "a terminal. Portable and custom installations use the update guide:\n"
+        "https://github.com/gelzinn/ai-status/blob/main/packages/lib/UPDATES.md\n\n"
+        "An opened updater still needs to finish; this command does not force updates."
+    )
     command_parsers["providers"].add_argument("--json", action="store_true", help="Print provider metadata as JSON")
     command_parsers["providers"].epilog = (
         "Enabled means the default connection is configured for collection, not that it is\n"
@@ -797,6 +804,14 @@ def main(argv=None):
         return _run_accounts(args, command_parsers[command])
     if command == "providers":
         return _providers_main(args.json)
+    if command == "update":
+        from . import updates
+        try:
+            print(updates.run_update(), flush=True)
+        except (ValueError, OSError) as error:
+            print(str(error), file=sys.stderr)
+            return 1
+        return 0
     if command == "doctor":
         info = {"version": fetch.get_version_info()["current"],
                 "providers": cfgmod.available_providers(), "config": str(paths.CONFIG_DIR),

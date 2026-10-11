@@ -8,16 +8,16 @@ import threading
 import time
 import uuid
 
-from PySide6.QtCore import QEasingCurve, QEvent, QModelIndex, QObject, QPoint, QPointF, QRectF, QLockFile, QTimer, Qt, QUrl, Signal, QSize, QVariantAnimation
+from PySide6.QtCore import QEasingCurve, QEvent, QModelIndex, QObject, QPoint, QPointF, QRectF, QLockFile, QThread, QTimer, Qt, QUrl, Signal, QSize, QVariantAnimation
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout,
     QLabel, QListWidget, QListWidgetItem, QMenu,
-    QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QStyledItemDelegate, QStyle,
+    QPushButton, QScrollArea, QSizePolicy, QSpacerItem, QStackedWidget, QStyledItemDelegate, QStyle,
     QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
-from . import __version__, about, config, fetch, paths, render, reset_credits, state
+from . import __version__, about, config, fetch, paths, render, reset_credits, state, updates
 
 RELEASE_URL = "https://github.com/gelzinn/ai-status/releases/latest"
 ASSETS = paths.LIB_DIR / "assets"
@@ -41,6 +41,7 @@ QLabel { background: transparent; border: none; }
 QLabel#brand { color: #eeeeee; font-weight: 500; }
 QAbstractButton { border: none; background: transparent; text-align: left; }
 QAbstractButton:hover, QAbstractButton:focus { background: #1c1c1c; border-radius: 8px; }
+QAbstractButton#updateLink:hover, QAbstractButton#updateLink:focus { background: #15283d; border-radius: 8px; }
 QWidget#creditTable { border: 1px solid #262626; border-radius: 8px; }
 QWidget#creditTableHeader {
     background: rgba(255, 255, 255, 10);
@@ -295,16 +296,17 @@ def plain_label(text, color=None):
 
 class ArrowIcon(QWidget):
     """A centered arrow drawn without a font glyph or an extra SVG dependency."""
-    def __init__(self, back=False):
+    def __init__(self, back=False, color="#aaaaaa"):
         super().__init__()
         self.back = back
+        self.color = color
         size = panel_icons()["size"]
         self.setFixedSize(size, size)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        draw_control_icon(painter, QRectF(self.rect()), "arrow-left" if self.back else "arrow-right")
+        draw_control_icon(painter, QRectF(self.rect()), "arrow-left" if self.back else "arrow-right", self.color)
 
 
 class ResetCreditsView(QWidget):
@@ -889,6 +891,142 @@ class AboutView(QWidget):
             layout.addWidget(label)
 
 
+class UpdateWorker(QObject):
+    progress = Signal(str)
+    finished = Signal(str, bool)
+
+    def work(self):
+        try:
+            message = updates.run_update(progress=self.progress.emit)
+        except (ValueError, OSError) as error:
+            self.finished.emit(str(error), False)
+        except Exception:
+            logging.exception("Application update failed")
+            self.finished.emit("Unable to update. Retry or use the manual update guide.", False)
+        else:
+            self.finished.emit(message, True)
+
+
+class UpdateView(QWidget):
+    update_requested = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.guide = {}
+        self.version = {}
+        self.running = False
+        self.completed = False
+        self.failed = False
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 18, 16, 18)
+        layout.setSpacing(14)
+        self.heading = plain_label("Update AI Status", "#eeeeee")
+        self.heading.setStyleSheet("color: #eeeeee; font-weight: 500;")
+        layout.addWidget(self.heading)
+        self.versions = plain_label("")
+        self.versions.setWordWrap(True)
+        layout.addWidget(self.versions)
+        optional = plain_label("You can keep using this version and update when you're ready.")
+        optional.setWordWrap(True)
+        layout.addWidget(optional)
+        self.description = plain_label("")
+        self.description.setWordWrap(True)
+        layout.addWidget(self.description)
+        self.steps = plain_label("")
+        self.steps.setWordWrap(True)
+        layout.addWidget(self.steps)
+        self.command_box = QWidget()
+        self.command_box.setObjectName("updateCommandBox")
+        self.command_box.setStyleSheet("QWidget#updateCommandBox { background: #181818; border: 1px solid #303030; border-radius: 6px; }")
+        command_layout = QHBoxLayout(self.command_box)
+        command_layout.setContentsMargins(10, 10, 8, 10)
+        command_layout.setSpacing(8)
+        self.command = QLabel()
+        self.command.setTextFormat(Qt.TextFormat.PlainText)
+        self.command.setWordWrap(True)
+        self.command.setMinimumWidth(1)
+        self.command.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.command.setStyleSheet("color: #dddddd;")
+        command_layout.addWidget(self.command, 1)
+        self.copy_button = ControlButton("copy", "Copy command")
+        self.copy_button.clicked.connect(self.copy_command)
+        command_layout.addWidget(self.copy_button, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self.command_box)
+        self.copy_feedback = QTimer(self)
+        self.copy_feedback.setSingleShot(True)
+        self.copy_feedback.timeout.connect(self.reset_copy_feedback)
+        self.action = QPushButton()
+        self.action.setObjectName("update-action")
+        self.action.setStyleSheet("color: #89b4fa; border: 1px solid #294666; border-radius: 6px; padding: 8px;")
+        self.action.clicked.connect(self.update_requested)
+        layout.addWidget(self.action)
+        self.status = plain_label("")
+        self.status.setWordWrap(True)
+        self.status.hide()
+        layout.addWidget(self.status)
+        for title, key in (("Downloads and release notes", "releaseUrl"), ("Manual update guide", "guideUrl")):
+            button = QPushButton(title)
+            button.setObjectName("update-" + key)
+            row = QHBoxLayout(button)
+            row.setContentsMargins(8, 0, 8, 0)
+            row.addStretch()
+            row.addWidget(ArrowIcon())
+            button.clicked.connect(lambda checked=False, key=key: self.open_link(key))
+            layout.addWidget(button)
+        layout.addStretch()
+
+    def set_guide(self, guide, version):
+        self.guide = guide
+        self.version = version
+        self.heading.setText(guide.get("title") or "Update AI Status")
+        current = version.get("current") or __version__
+        latest = version.get("latest")
+        self.versions.setText(f"Installed: v{current}\nLatest: v{latest}" if latest else
+                              f"Installed: v{current}\nCheck for updates with Refresh.")
+        self.description.setText(guide.get("description", ""))
+        self.steps.setText("\n\n".join(f"{index}. {step}" for index, step in enumerate(guide.get("steps", []), 1)))
+        command = guide.get("command", "")
+        if self.command.text() != command:
+            self.reset_copy_feedback()
+        self.command.setText(command)
+        self.command_box.setVisible(bool(command))
+        self.update_action()
+
+    def update_action(self):
+        available = bool(self.guide.get("canUpdate") and self.version.get("has_update"))
+        self.action.setVisible(available or self.running or self.completed or self.failed)
+        self.action.setEnabled(available and not self.running)
+        self.action.setText("Updating…" if self.running else
+                            "Retry update" if self.failed else self.guide.get("actionLabel", "Update now"))
+
+    def show_progress(self, message):
+        self.status.setText(message)
+        self.status.setStyleSheet("color: #89b4fa;")
+        self.status.setVisible(bool(message))
+
+    def copy_command(self):
+        QApplication.clipboard().setText(self.guide.get("command", ""))
+        self.copy_button.setText("Copied")
+        self.copy_button.icon_name = "check"
+        self.copy_button.setToolTip("Copied")
+        self.copy_button.setAccessibleName("Copied")
+        self.copy_button.update()
+        self.copy_feedback.start(1800)
+
+    def reset_copy_feedback(self):
+        self.copy_feedback.stop()
+        self.copy_button.setText("")
+        self.copy_button.icon_name = "copy"
+        self.copy_button.setToolTip("Copy command")
+        self.copy_button.setAccessibleName("Copy command")
+        self.copy_button.update()
+
+    def open_link(self, key):
+        url = self.guide.get(key)
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+
+
 class Dashboard(QWidget):
     def __init__(self, app):
         super().__init__(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
@@ -913,6 +1051,9 @@ class Dashboard(QWidget):
         self.reset_provider = None
         self.settings_view = None
         self.settings_scroll_position = 0
+        self.usage_scroll_position = 0
+        self.updating = False
+        self.update_thread = None
         self.structure = None
         self.queued = False
         self.quitting = False
@@ -938,6 +1079,8 @@ class Dashboard(QWidget):
         self.back_button.clicked.connect(self.go_back)
         self.back_button.hide()
         header_layout.addWidget(self.back_button)
+        self.back_title_gap = QSpacerItem(0, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+        header_layout.addSpacerItem(self.back_title_gap)
         self.brand = plain_label("AI Status")
         self.brand.setObjectName("brand")
         header_layout.addWidget(self.brand)
@@ -975,6 +1118,13 @@ class Dashboard(QWidget):
         self.about_view = AboutView(self)
         self.about_scroll.setWidget(self.about_view)
         self.pages.addWidget(self.about_scroll)
+        self.update_scroll = QScrollArea()
+        self.update_scroll.setWidgetResizable(True)
+        self.update_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.update_view = UpdateView()
+        self.update_view.update_requested.connect(self.start_update)
+        self.update_scroll.setWidget(self.update_view)
+        self.pages.addWidget(self.update_scroll)
         self.settings_footer = QWidget()
         self.settings_footer_layout = QHBoxLayout(self.settings_footer)
         self.settings_footer_layout.setContentsMargins(16, 8, 16, 12)
@@ -988,7 +1138,7 @@ class Dashboard(QWidget):
         menu.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint)
         for label, callback in (("Open dashboard", self.show_dashboard), ("Refresh", self.refresh),
                                 ("Settings", self.configure), ("Connection details", self.show_diagnostics),
-                                ("Download latest version", self.open_release),
+                                ("Update AI Status", self.show_updates),
                                 ("Open logs folder", self.open_logs), ("Exit", self.request_exit)):
             if label in ("Connection details", "Exit"):
                 menu.addSeparator()
@@ -1044,8 +1194,8 @@ class Dashboard(QWidget):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
-            self.go_back() if self.reset_provider is not None or self.configuring() or self.viewing_about() else self.hide()
-        elif self.configuring() or self.viewing_about():
+            self.go_back() if self.reset_provider is not None or self.configuring() or self.viewing_about() or self.viewing_updates() else self.hide()
+        elif self.configuring() or self.viewing_about() or self.viewing_updates():
             super().keyPressEvent(event)
         elif event.key() == Qt.Key.Key_R:
             self.refresh()
@@ -1057,7 +1207,7 @@ class Dashboard(QWidget):
             super().keyPressEvent(event)
 
     def wheelEvent(self, event):
-        if self.reset_provider is not None or self.configuring() or self.viewing_about():
+        if self.reset_provider is not None or self.configuring() or self.viewing_about() or self.viewing_updates():
             super().wheelEvent(event)
             return
         self.cycle_metric(1 if event.angleDelta().y() < 0 else -1)
@@ -1080,22 +1230,85 @@ class Dashboard(QWidget):
 
     def show_usage(self):
         was_configuring = self.configuring()
+        was_updating = self.viewing_updates()
         key = self.reset_provider
         self.reset_provider = None
         self.pages.setCurrentWidget(self.scroll)
         self.update_header()
         self.fit_content()
+        if was_updating:
+            self.scroll.verticalScrollBar().setValue(self.usage_scroll_position)
         heading = self.provider_buttons.get(key)
         if heading:
             (heading.credits if not heading.credits.isHidden() else heading).setFocus()
         elif was_configuring:
             self.settings_button.setFocus()
+        elif was_updating:
+            (self.update_link if not self.update_link.isHidden() else self.settings_button).setFocus()
 
     def configuring(self):
         return self.pages.currentWidget() is self.settings_scroll
 
     def viewing_about(self):
         return self.pages.currentWidget() is self.about_scroll
+
+    def viewing_updates(self):
+        return self.pages.currentWidget() is self.update_scroll
+
+    def show_updates(self):
+        if not self.viewing_updates():
+            self.usage_scroll_position = self.scroll.verticalScrollBar().value()
+        self.reset_provider = None
+        self.update_view.set_guide(updates.update_guide(), fetch.get_version_info())
+        self.pages.setCurrentWidget(self.update_scroll)
+        self.update_scroll.verticalScrollBar().setValue(0)
+        self.update_header()
+        self.fit_content()
+        if not self.isVisible():
+            self.show_dashboard()
+        self.back_button.setFocus()
+
+    def start_update(self):
+        if self.quitting or self.updating:
+            return
+        # Detect the installation again immediately before acting, in case it changed.
+        guide, version = updates.update_guide(), fetch.get_version_info()
+        self.update_view.set_guide(guide, version)
+        if not guide.get("canUpdate") or not version.get("has_update"):
+            return
+        self.updating = True
+        self.update_view.running = True
+        self.update_view.failed = False
+        self.update_view.update_action()
+        self.update_view.show_progress("Preparing update…")
+        self.update_thread = QThread(self)
+        self.update_worker = UpdateWorker()
+        self.update_worker.moveToThread(self.update_thread)
+        self.update_thread.started.connect(self.update_worker.work)
+        self.update_worker.progress.connect(self.update_view.show_progress)
+        self.update_worker.finished.connect(self.on_update_finished)
+        self.update_worker.finished.connect(self.update_thread.quit)
+        self.update_thread.finished.connect(self.update_worker.deleteLater)
+        self.update_thread.finished.connect(self.update_thread.deleteLater)
+        self.update_thread.finished.connect(self.update_thread_finished)
+        self.update_thread.start()
+
+    def on_update_finished(self, message, successful):
+        self.update_view.completed = successful
+        self.update_view.failed = not successful
+        self.update_view.show_progress(message)
+        if not successful:
+            self.update_view.status.setStyleSheet("color: #f5a3a3;")
+        self.fit_content()
+
+    def update_thread_finished(self):
+        self.updating = False
+        self.update_thread = None
+        self.update_worker = None
+        self.update_view.running = False
+        self.update_view.update_action()
+        if self.quitting and not self.busy:
+            self.app.quit()
 
     def show_about(self):
         self.settings_scroll_position = self.settings_scroll.verticalScrollBar().value()
@@ -1118,13 +1331,17 @@ class Dashboard(QWidget):
     def update_header(self):
         configuring = self.configuring()
         about_page = self.viewing_about()
-        self.brand.setText("About" if about_page else "Settings" if configuring else "AI Status")
-        self.back_button.setVisible(configuring or about_page or self.reset_provider is not None)
+        update_page = self.viewing_updates()
+        self.brand.setText("Updates" if update_page else "About" if about_page else "Settings" if configuring else "AI Status")
+        show_back = configuring or about_page or update_page or self.reset_provider is not None
+        self.back_button.setVisible(show_back)
+        self.back_title_gap.changeSize(8 if show_back else 0, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
+        self.back_button.parentWidget().layout().invalidate()
         back_label = "Back to settings (Esc)" if about_page else "Back to usage (Esc)"
         self.back_button.setToolTip(back_label)
         self.back_button.setAccessibleName(back_label)
-        self.refresh_button.setVisible(not configuring and not about_page)
-        self.settings_button.setVisible(not configuring and not about_page and self.reset_provider is None)
+        self.refresh_button.setVisible(not configuring and not about_page and not update_page)
+        self.settings_button.setVisible(not configuring and not about_page and not update_page and self.reset_provider is None)
         self.settings_footer.setVisible(configuring)
 
     def animate(self):
@@ -1140,8 +1357,8 @@ class Dashboard(QWidget):
         self.auto_refresh.stop()
         self.poll.stop()
         self.animation.stop()
-        if self.busy:
-            self.status.setText("Exiting after the current refresh finishes…")
+        if self.busy or self.updating:
+            self.status.setText("Exiting after the current operation finishes…")
         else:
             self.app.quit()
 
@@ -1276,7 +1493,7 @@ class Dashboard(QWidget):
         if fetch.get_version_info()["has_update"]:
             self.status.setText(self.status.text() + " · update available")
         self.draw()
-        if self.quitting:
+        if self.quitting and not self.updating:
             self.app.quit()
         elif self.queued:
             self.queued = False
@@ -1333,6 +1550,7 @@ class Dashboard(QWidget):
         structure = tuple((value, render.metric_is_amount(metric))
                           for _, _, metric, value in self.visible_metrics)
         focused_value = next((button.value for button in self.metric_buttons if button.hasFocus()), None)
+        focused_update = getattr(self, "update_link", None) is not None and self.update_link.hasFocus()
         if structure == self.structure:
             self.update_rows()
             self.fit_content()
@@ -1344,6 +1562,17 @@ class Dashboard(QWidget):
         layout = QVBoxLayout(content)
         layout.setContentsMargins(16, 18, 16, 18)
         layout.setSpacing(20)
+        self.update_link = UsageButton()
+        self.update_link.setObjectName("updateLink")
+        self.update_link.setToolTip("See how to update AI Status. Updates are optional.")
+        update_row = QHBoxLayout(self.update_link)
+        update_row.setContentsMargins(4, 6, 8, 6)
+        update_row.setSpacing(8)
+        self.update_title = plain_label("", "#89b4fa")
+        update_row.addWidget(self.update_title, 1)
+        update_row.addWidget(ArrowIcon(color="#89b4fa"))
+        self.update_link.clicked.connect(self.show_updates)
+        layout.addWidget(self.update_link)
         for name in config.enabled_connection_order():
             for entry in self.data.get(name) or []:
                 metrics = sorted(entry.get("metrics", []), key=render.metric_sort_key)
@@ -1449,10 +1678,18 @@ class Dashboard(QWidget):
                 if button.value == focused_value:
                     button.setFocus()
                     break
+        elif focused_update:
+            self.update_link.setFocus()
         self.fit_content()
         self.scroll.verticalScrollBar().setValue(scroll_position)
 
     def update_rows(self):
+        version = fetch.get_version_info()
+        self.update_link.setVisible(bool(version.get("has_update")))
+        self.update_title.setText(f"Update available: v{version.get('latest', '')}")
+        self.update_link.setAccessibleName(self.update_title.text() + ". Open update guide")
+        if self.viewing_updates():
+            self.update_view.set_guide(self.update_view.guide, version)
         groups = {}
         for name, entry, metric, value in self.visible_metrics:
             groups.setdefault(value[:2], (name, entry))

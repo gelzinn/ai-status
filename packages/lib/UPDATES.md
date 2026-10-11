@@ -1,8 +1,70 @@
 # Updating AI Status
 
-**Updates use the same command as installation -- the install script handles both fresh installs and upgrades automatically.**
+Updates are optional. The **Update available** link opens an in-app guide for
+your installation. Opening the guide does not download or install anything.
+The guide includes release notes and an update action where supported.
 
-## Update Command
+You can also start that action explicitly from the command line:
+
+```bash
+ai-status update
+```
+
+| Installation | Update action |
+|---|---|
+| Windows installer | Downloads the stable installer, verifies its SHA-256 checksum, then opens setup |
+| Windows portable ZIP | Opens instructions for downloading and replacing the portable copy |
+| Omarchy plugin | Opens a terminal with `omarchy plugin update io.github.gelzinn.ai-status --yes` |
+| Linux public installer | Opens a terminal with the public installer, preserving the desktop bar |
+| macOS public installer | Opens Terminal with the public installer, preserving native or SwiftBar mode |
+| Checkout or custom location | Shows manual instructions; does not replace the checkout |
+
+The command reports when the installer or terminal has opened. This means the
+update has started; installation still needs to finish in that window. Download,
+checksum, and launch failures are shown in the app, or on stderr with a nonzero
+exit status from the CLI. If no supported Linux terminal is available, run the
+command from the guide in your own terminal.
+
+Only newer stable versions trigger the notice. Drafts, prereleases, and older
+version numbers are excluded. There are no forced updates or support-expiration
+notices.
+
+## Windows
+
+For an installed copy, **Download and open installer** downloads the exact
+stable release installer and its `SHA256SUMS` file from GitHub. The installer
+is opened only after its checksum matches. It remains a normal setup wizard;
+the app does not silently replace itself.
+
+Keep your existing installation folder. If setup asks to close AI Status,
+allow it to do so, and leave **Launch AI Status** selected at the end to start
+the updated app. You can cancel setup before installation. A verified
+installer is retained in the AI Status cache while setup uses it.
+
+For a portable copy, download the Windows portable ZIP from
+[GitHub Releases](https://github.com/gelzinn/ai-status/releases/latest), quit
+AI Status, and extract the new version to a new folder. Launch `ai-status.exe`
+from that folder. Keep the old folder until you have checked the new version.
+Both formats retain settings and provider configuration in AppData outside the
+application folder.
+
+## macOS
+
+The public installer handles fresh installs and upgrades:
+
+```bash
+curl -fsSL https://ai-status.gelzin.com/install/macos | bash
+```
+
+The in-app action preserves the detected native app, SwiftBar stream, or
+SwiftBar periodic mode. For the native app it also keeps login startup disabled
+when there is no existing AI Status LaunchAgent. The installer stages and
+validates the release before stopping the old app, then restarts AI Status.
+See [macOS installation](MACOS.md) for prerequisites and explicit mode flags.
+
+## Linux update command
+
+The public installer handles fresh installs and upgrades:
 
 ```bash
 curl -fsSL https://ai-status.gelzin.com/install | bash
