@@ -12,6 +12,7 @@
     <a href="https://ai-status.gelzin.com">Website &amp; interactive preview</a> ·
     <a href="#installation-guide">Install</a> ·
     <a href="#platform-support">Platforms</a> ·
+    <a href="#command-line">CLI</a> ·
     <a href="#supported-providers">Providers</a> ·
     <a href="#documentation">Documentation</a>
   </p>
@@ -142,6 +143,96 @@ Requires macOS 13+, Python 3.10+ and Xcode Command Line Tools (`xcode-select --i
 [macOS installation, branch testing and SwiftBar options →](packages/lib/MACOS.md)
 
 </details>
+
+## Command line
+
+Start with `ai-status --help`; `ai-status --version` prints the installed
+version. On Linux, `ai-status` without arguments shows help; on Windows and
+macOS it opens the native app. Use `ai-status-cli.exe` for terminal commands
+in the Windows package, or `~/.local/bin/ai-status` on Linux/macOS if needed.
+
+### Check usage and open settings
+
+```bash
+ai-status help accounts add   # Help for a specific command
+ai-status providers          # Provider IDs and enabled default connections
+ai-status status             # Collect usage and print JSON
+ai-status doctor             # Installation details as JSON
+ai-status config             # Provider and display settings
+```
+
+Sign in through the provider's own app or CLI. Your normal Codex login supplies
+the default Codex connection; it does not need `accounts add`.
+
+### See detected connections
+
+```bash
+ai-status accounts             # List connections from the last panel snapshot
+ai-status accounts --refresh   # Collect enabled connections, then list
+```
+
+Illustrative rows when default Codex is already visible in the panel:
+
+```text
+ID             PROVIDER  LABEL    SOURCE   COLLECTION  USAGE
+default:codex  codex     Default  default  enabled     available
+```
+
+The first command reads local data without checking provider logins. Use
+`--refresh` when you want to query the enabled connections before listing.
+
+### Add a separate work profile
+
+Point to an existing credential file from that profile. `--id` is the account
+identifier used for edits and removal; `--label` is its display name.
+
+```bash
+ai-status accounts add codex --id work-codex --label Work \
+  --auth-file /path/to/work-codex/auth.json
+ai-status accounts
+```
+
+Illustrative rows when the panel has data for default Codex and the saved Work
+profile has not been checked:
+
+```text
+ID             PROVIDER  LABEL    SOURCE   COLLECTION  USAGE
+default:codex  codex     Default  default  enabled     available
+work-codex     codex     Work     saved    enabled     not_checked
+```
+
+`SOURCE` distinguishes existing default connections from saved accounts.
+`COLLECTION` shows whether queries are enabled; `USAGE` describes the last
+recorded data. Listing reads the panel's cache and saved accounts without
+checking provider logins. Manage `default:codex` through `config`.
+
+### Filter and manage accounts
+
+```bash
+ai-status accounts --saved                      # Show only saved accounts
+ai-status accounts --saved --json               # Previous saved-account JSON schema
+ai-status accounts edit work-codex --label "Work team"
+ai-status accounts edit work-codex --disabled
+ai-status accounts remove work-codex
+```
+
+`accounts list` is equivalent to `accounts`. Add `--json` to get the combined
+list as JSON; use `--saved --json` for the previous saved-account format.
+`--saved` and `--refresh` cannot be combined. Edit and remove apply to saved
+accounts; removing one keeps its external credential file.
+
+For an API account, you can reference an existing environment variable instead:
+
+```bash
+ai-status accounts add openrouter --id work-router --label "Work API" \
+  --env OPENROUTER_API_KEY=OPENROUTER_WORK_KEY
+```
+
+Here `OPENROUTER_WORK_KEY` must contain your key and be available to the AI Status
+process. The connection stores the variable reference, not the key value.
+
+[CLI usage and account commands →](packages/lib/INSTALL.md#command-line) ·
+[Credential sources and multiple accounts →](packages/lib/PROVIDERS.md#multiple-accounts-and-connections)
 
 ## What you get
 

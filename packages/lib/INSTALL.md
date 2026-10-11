@@ -184,7 +184,102 @@ This copies the backup back (saving the current one as `.pre-revert` first) and 
 
 The config TUI lets you enable/disable providers, reorder with Shift+J/K, toggle display settings, and switch icon modes (bot, logo, off).
 
-## CLI flags reference
+## Command line
+
+Run `ai-status --help` to see the commands and `ai-status help COMMAND` for
+details. Help accepts nested commands, such as `ai-status help accounts add`;
+`ai-status accounts add --help` works too. `ai-status --version` prints the
+installed version. On Linux, running `ai-status` without arguments shows help
+and exits successfully. On Windows and macOS, it opens the native app.
+
+The examples below use `ai-status`. If `~/.local/bin` is not on your Linux or
+macOS `PATH`, use `~/.local/bin/ai-status`. In the Windows installation or
+portable folder, use `.\ai-status-cli.exe` from PowerShell.
+
+| Task | Command |
+| --- | --- |
+| Find installed provider IDs and their enabled state | `ai-status providers` |
+| Collect usage for enabled connections | `ai-status status` |
+| Check the version, paths and installed collectors | `ai-status doctor` |
+| Change providers, ordering and display preferences | `ai-status config` |
+| Request a refresh of the running app or daemon | `ai-status refresh` |
+
+`status` prints JSON with `providers` and `errors` and updates the usage cache.
+`doctor` also prints JSON; it checks the installation without collecting
+provider usage. `providers` lists default connections without verifying their
+credentials; use `providers --json` for scripts. For example, save a snapshot
+with `ai-status status > usage.json`.
+
+### Default sessions and additional accounts
+
+Default connections read credentials saved by the provider's own app or CLI.
+For example, your normal Codex login supplies the default Codex connection.
+Sign in through that tool and enable the provider with `ai-status config`;
+`accounts add` is for additional profiles or explicit credential sources.
+
+`ai-status accounts` is the same as `ai-status accounts list`: it shows default
+connections with usable data in the panel's shared cache alongside all saved
+additional accounts. Listing reads local data without network requests,
+provider login checks or Keychain access. A default connection can still
+appear when collection is disabled if its usable cached data remains.
+An empty list does not mean your provider CLI is signed out; it may not have
+been collected yet.
+
+Rows show the source (`default` or `saved`), collection state (`enabled` or
+`disabled`) and recorded usage status:
+
+| Usage status | Meaning |
+| --- | --- |
+| `available` | Usable usage data is recorded |
+| `cached` | Usable data is marked as cached or the snapshot is older than five minutes |
+| `unavailable` | A result exists without usable metrics |
+| `not_checked` | No result is recorded for the saved connection |
+
+The table identifies defaults as `default:codex`, for example, and saved
+accounts by the ID you chose, such as `work-codex`. Configure defaults with
+`ai-status config`; `accounts edit` and `accounts remove` operate on saved IDs.
+
+Use `accounts --refresh` to query enabled connections and update the cache
+before listing. Use `accounts --saved` for only saved accounts; these filters
+are also accepted after `accounts list`. `--saved` and `--refresh` cannot be
+combined. Neither a cached result nor the enabled state confirms a current
+provider login.
+
+`accounts --json` returns the combined array with `connection_id`, `source`
+and `usage_status` on each record. Default records use the provider ID in `id`;
+saved records retain their configured ID and account metadata. For scripts
+using the previous saved-account schema, use `accounts --saved --json`.
+
+```bash
+# Reference an existing credential file for a separate Codex profile:
+ai-status accounts add codex --id work-codex --label Work \
+  --auth-file /path/to/work-codex/auth.json
+
+# Read OPENROUTER_WORK_KEY from the environment at query time:
+ai-status accounts add openrouter --id work-router --label "Work API" \
+  --env OPENROUTER_API_KEY=OPENROUTER_WORK_KEY
+
+ai-status accounts list
+ai-status accounts list --json
+ai-status accounts list --refresh
+ai-status accounts list --saved --json
+ai-status accounts edit work-router --disabled
+ai-status accounts remove work-router
+```
+
+Replace the auth-file path with the existing profile's credential file.
+`--id` identifies the account for later edits or removal; `--label` is the name
+shown in the panel. `--env TARGET=SOURCE_ENV` names the provider's expected
+variable and the source variable to read; it saves the reference, not the key
+value. Make that source variable available to the running app or daemon.
+For launches outside your shell, use credential-file references as described
+in the [account guide](PROVIDERS.md#multiple-accounts-and-connections).
+Removing a connection keeps its provider credential files.
+
+## Installer flags reference
+
+These flags belong to `install.sh`. The installer's `--version vX.Y.Z` selects
+a release; the CLI's `ai-status --version` prints the installed version.
 
 | Flag | Values |
 |---|---|

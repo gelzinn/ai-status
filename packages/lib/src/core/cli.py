@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import subprocess
+import shutil
 import argparse
 import json
 import uuid
@@ -10,7 +11,7 @@ from . import state
 from . import logos
 from . import render
 from . import config as cfgmod
-from . import quickshell, paths, fetch, accounts
+from . import quickshell, paths, fetch, accounts, __version__
 
 TERMINALS = ["foot", "alacritty", "kitty", "ghostty", "wezterm", "xterm"]
 
@@ -364,44 +365,206 @@ def revert_waybar():
         print("Restart Waybar to apply the change.")
 
 
-def _accounts_main(argv=None):
-    parser = argparse.ArgumentParser(prog="ai-status accounts", description="Manage independently collected account connections.")
-    commands = parser.add_subparsers(dest="action", required=True)
-    listing = commands.add_parser("list", help="List account metadata without credential or option values")
-    listing.add_argument("--json", action="store_true")
+class _CLIParser(argparse.ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("formatter_class", argparse.RawDescriptionHelpFormatter)
+        kwargs.setdefault("allow_abbrev", False)
+        super().__init__(*args, **kwargs)
+
+    def _check_value(self, action, value):
+        if isinstance(action, argparse._SubParsersAction) and value not in action.choices:
+            raise argparse.ArgumentError(action, f"unknown command '{value}'")
+        super()._check_value(action, value)
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        self.exit(2, f"{self.prog}: error: {message}\n\nRun '{self.prog} --help' for usage and examples.\n")
+
+
+def _configure_accounts_parser(parser):
+    parser.description = (
+        "List default provider connections detected by the desktop and saved accounts.\n"
+        "With no subcommand, list connections from the last usage snapshot.\n"
+        "Default CLI logins do not need accounts add; --refresh checks enabled connections."
+    )
+    parser.epilog = (
+        "Examples:\n"
+        "  ai-status accounts\n"
+        "  ai-status accounts --refresh\n"
+        "  ai-status accounts list --saved --json\n"
+        "  ai-status accounts add codex --id work --label Work --auth-file ~/.codex-work/auth.json\n"
+        "  ai-status accounts edit work --disabled\n"
+        "  ai-status accounts list --json\n\n"
+        "Find provider IDs: ai-status providers\n"
+        "More options:      ai-status accounts add --help"
+    )
+    parser.set_defaults(action="list", json=False, saved=False, refresh=False)
+    options = (
+        ("--json", "Print connection metadata as JSON without credential values"),
+        ("--saved", "List only manually saved accounts; preserve the original JSON schema"),
+        ("--refresh", "Fetch usage for enabled connections before listing (may take a few seconds)"),
+    )
+    for option, description in options:
+        parser.add_argument(option, action="store_true", help=description)
+    commands = parser.add_subparsers(dest="action", title="account commands", metavar="COMMAND")
+    listing = commands.add_parser("list", help="List detected default connections and saved accounts (default)",
+                                  description="List connections from the last usage snapshot and saved account configuration.")
+    for option, description in options:
+        listing.add_argument(option, action="store_true", default=argparse.SUPPRESS, help=description)
+    listing.epilog = "Use --refresh to check enabled connections now, or --saved to list only manually added accounts."
     for verb in ("add", "edit"):
-        command = commands.add_parser(verb, help=f"{verb.title()} an account using credential references")
+        command = commands.add_parser(verb, help=f"{verb.title()} an account connection",
+                                      description=f"{verb.title()} an account using credential file or environment references.")
+        command.epilog = (
+            "Examples:\n"
+            "  ai-status accounts add codex --id work --label Work --auth-file ~/.codex-work/auth.json\n"
+            "  ai-status accounts add openrouter --id work-api --env OPENROUTER_API_KEY=OPENROUTER_WORK_KEY\n"
+            "  ai-status accounts add --file account.json\n"
+            "  ai-status accounts edit work --label Office --enabled\n\n"
+            "Use ai-status providers to find provider IDs. For --env, pass the name of an\n"
+            "existing environment variable containing the credential."
+        )
         if verb == "add":
-            command.add_argument("provider", nargs="?")
-            command.add_argument("--id", dest="account_id")
+            command.add_argument("provider", nargs="?", help="Provider ID from ai-status providers; may also be set in --file")
+            command.add_argument("--id", dest="account_id", help="Unique account ID (generated if omitted)")
         else:
-            command.add_argument("account_id")
-        command.add_argument("--label")
+            command.add_argument("account_id", help="Account ID from ai-status accounts")
+        command.add_argument("--label", help="Account name shown in the desktop interface")
         command.add_argument("--auth-file", help="Path to an existing provider credential file")
         command.add_argument("--env", action="append", default=[], metavar="TARGET=SOURCE_ENV", help="Resolve TARGET from SOURCE_ENV at query time")
         command.add_argument("--file", help="Account JSON file, or - to read stdin; options and references belong in this JSON")
-        command.add_argument("--disabled", action="store_true")
-        command.add_argument("--enabled", action="store_true")
-    removing = commands.add_parser("remove", help="Remove an account connection; credential files are retained")
-    removing.add_argument("account_id")
-    args = parser.parse_args(sys.argv[2:] if argv is None else argv)
+        command.add_argument("--disabled", action="store_true", help="Disable usage collection for this account")
+        command.add_argument("--enabled", action="store_true", help="Enable usage collection for this account")
+    removing = commands.add_parser("remove", help="Remove a connection, keeping credential files",
+                                   description="Remove a saved account connection. Its credential files are retained.")
+    removing.add_argument("account_id", help="Account ID from ai-status accounts")
+    parser.set_defaults(action="list")
+
+
+def _print_table(headers, rows):
+    rows = [[" ".join(str(value).split()) for value in row] for row in rows]
+    widths = [max([len(header), *(len(row[index]) for row in rows)]) for index, header in enumerate(headers)]
+    for row in [headers, *rows]:
+        print("  ".join(value.ljust(width) for value, width in zip(row, widths)).rstrip())
+
+
+def _accounts_main(argv=None):
+    parser = _CLIParser(prog="ai-status accounts")
+    _configure_accounts_parser(parser)
+    return _run_accounts(parser.parse_args(sys.argv[2:] if argv is None else argv), parser)
+
+
+def _connection_usage_status(entries, stale):
+    usable = []
+    for entry in entries:
+        try:
+            if quickshell.usable_metrics(entry):
+                usable.append(entry)
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            continue  # A malformed cache entry cannot establish usable usage.
+    if usable:
+        return "cached" if stale or any(entry.get("_cached") for entry in usable) else "available"
+    return "unavailable" if entries else "not_checked"
+
+
+def _listed_connections(records):
+    # This is the desktop's last collected snapshot, not a probe of credential
+    # files or the Keychain. Listing must remain fast and have no side effects.
+    cached = {}
+    for entry in state.load_cache():
+        if not isinstance(entry, dict):
+            continue
+        identity = entry.get("_connection_id")
+        if not isinstance(identity, str) or not identity:
+            account_id = entry.get("_account_id")
+            identity = "account:" + account_id if isinstance(account_id, str) and account_id else entry.get("_dir")
+        if not isinstance(identity, str) or not identity:
+            continue
+        if not identity.startswith("account:") and entry.get("_account_id") is not None:
+            continue
+        if not identity.startswith("account:") and entry.get("_dir") not in (None, identity):
+            continue
+        cached.setdefault(identity, []).append(entry)
+    age = _cache_age()
+    stale = age is not None and age >= SWIFTBAR_STALE_SECS
+    enabled = cfgmod.enabled_order()
+    defaults = []
+    for provider in cfgmod.available_providers():
+        usage = _connection_usage_status(cached.get(provider, []), stale)
+        if usage in ("available", "cached"):
+            defaults.append({"id": provider, "provider": provider, "label": "Default",
+                             "enabled": provider in enabled, "connection_id": provider,
+                             "source": "default", "usage_status": usage})
+    saved = []
+    for record in records:
+        identity = "account:" + record["id"]
+        entries = [entry for entry in cached.get(identity, [])
+                   if entry.get("_dir") in (None, record["provider"])
+                   and entry.get("_account_id") in (None, record["id"])]
+        saved.append({**accounts.public_record(record), "connection_id": identity,
+                      "source": "saved", "usage_status": _connection_usage_status(entries, stale)})
+    return defaults + saved
+
+
+def _list_accounts(args, records):
+    if args.saved:
+        public = [accounts.public_record(record) for record in records]
+        if args.json:
+            print(json.dumps(public, ensure_ascii=False))
+        elif public:
+            _print_table(["ID", "PROVIDER", "LABEL", "STATUS"], [
+                [record["id"], record["provider"], record["label"], "enabled" if record["enabled"] else "disabled"]
+                for record in public
+            ])
+        else:
+            print("No saved account connections configured.\n")
+            print("Show default CLI connections: ai-status accounts")
+            print("Add another account:         ai-status accounts add --help")
+        return 0
+    if args.refresh:
+        state.save_cache(fetch.fetch_all_data(include_errors=True))
+    public = _listed_connections(records)
+    if args.json:
+        print(json.dumps(public, ensure_ascii=False))
+    elif public:
+        _print_table(["ID", "PROVIDER", "LABEL", "SOURCE", "COLLECTION", "USAGE"], [
+            [("default:" + record["id"]) if record["source"] == "default" else record["id"],
+             record["provider"], record["label"], record["source"],
+             "enabled" if record["enabled"] else "disabled", record["usage_status"]]
+            for record in public
+        ])
+        print("\nDefault connections use existing provider logins. Edit/remove applies to saved accounts.")
+        print("Usage is from the last collected snapshot; use --refresh to check enabled connections now.")
+        print("Configure default connections: ai-status config")
+    else:
+        print("No account connections detected yet.\n")
+        print("Check your existing CLI logins: ai-status accounts --refresh")
+        print("Configure providers:           ai-status config")
+        print("Add another account:           ai-status accounts add --help")
+    return 0
+
+
+def _unknown_account(account_id):
+    if account_id.startswith("default:") or account_id in cfgmod.available_providers():
+        raise accounts.AccountError("Default provider connections are managed with ai-status config. Edit/remove applies only to saved accounts.")
+    raise accounts.AccountError("Unknown account ID. Use ai-status accounts --saved to find saved account IDs.")
+
+
+def _run_accounts(args, parser):
+    if args.action != "list":
+        for option in ("json", "saved", "refresh"):
+            if getattr(args, option):
+                parser.error(f"--{option} is only supported by accounts list")
+    if args.saved and args.refresh:
+        parser.error("--saved cannot be combined with --refresh")
     try:
         document = accounts.load_document(cfgmod.accounts_file())
         records = document["accounts"]
         if args.action == "list":
-            public = [accounts.public_record(record) for record in records]
-            if args.json:
-                print(json.dumps(public, ensure_ascii=False))
-            elif not public:
-                print("No account connections configured.")
-            else:
-                for record in public:
-                    status = "enabled" if record["enabled"] else "disabled"
-                    print(f"{record['id']}\t{record['provider']}\t{record['label']}\t{status}")
-            return 0
+            return _list_accounts(args, records)
         if args.action == "remove":
             if not any(record["id"] == args.account_id for record in records):
-                raise accounts.AccountError("Unknown account ID.")
+                _unknown_account(args.account_id)
             document["accounts"] = [record for record in records if record["id"] != args.account_id]
             if "order" in document:
                 document["order"] = [identity for identity in document["order"] if identity != "account:" + args.account_id]
@@ -424,13 +587,15 @@ def _accounts_main(argv=None):
         if args.action == "edit":
             previous = next((record for record in records if record["id"] == args.account_id), None)
             if previous is None:
-                raise accounts.AccountError("Unknown account ID.")
+                _unknown_account(args.account_id)
             record = {**previous, **payload, "id": args.account_id}
         else:
             record = dict(payload)
             if args.provider:
                 record["provider"] = args.provider
             record["id"] = args.account_id or record.get("id") or uuid.uuid4().hex
+            if not record.get("provider"):
+                raise accounts.AccountError("Specify a provider or use --file with a provider field. Find provider IDs with ai-status providers.")
         if args.label is not None:
             record["label"] = args.label
         if args.auth_file is not None:
@@ -449,7 +614,7 @@ def _accounts_main(argv=None):
             record["env"] = overrides
         record = accounts.normalize(record)
         if record["provider"] not in cfgmod.available_providers():
-            raise accounts.AccountError("Unknown provider; use ai-status doctor to list installed providers.")
+            raise accounts.AccountError("Unknown provider; use ai-status providers to list installed provider IDs.")
         if args.action == "add":
             if any(existing["id"] == record["id"] for existing in records):
                 raise accounts.AccountError("Account ID already exists; use accounts edit.")
@@ -469,22 +634,170 @@ def _accounts_main(argv=None):
         # AccountError messages are deliberately secret-free; filesystem errors
         # may echo arbitrary paths and therefore use a fixed message.
         error = sys.exc_info()[1]
-        print(str(error) if isinstance(error, accounts.AccountError) else "Unable to save account configuration.", file=sys.stderr)
+        print(str(error) if isinstance(error, accounts.AccountError) else "Unable to read or save account configuration.", file=sys.stderr)
         return 1
 
 
-def main():
+_FRONTEND_COMMANDS = (
+    "daemon", "refresh", "config", "save-settings", "select-metric", "scroll-up",
+    "scroll-down", "cycle-metric", "logo", "revert",
+)
+
+
+def _add_frontend_arguments(parser, visible=()):
+    # Preserve flags before and after the command while showing them only in
+    # the help of the command that uses them. Suppressed defaults prevent a
+    # subparser from overwriting a value supplied before the command.
+    options = (
+        ("--format", {"choices": ["waybar", "quickshell", "macos"]}, "Daemon output format (default: waybar)"),
+        ("--frontend", {"choices": ["waybar", "quickshell", "macos", "swiftbar"]}, "Desktop integration (default: waybar)"),
+        ("--settings-json", {"metavar": "JSON"}, "Validated settings object from the desktop interface"),
+        ("--selection-json", {"metavar": "JSON"}, "Provider, account index and metric selection object"),
+    )
+    for option, settings, description in options:
+        parser.add_argument(option, **settings, default=argparse.SUPPRESS,
+                            help=description if option in visible else argparse.SUPPRESS)
+
+
+def _build_parser():
+    parser = _CLIParser(
+        prog="ai-status", description="AI Status — AI provider usage in your desktop bar.",
+        epilog=(
+            "Examples:\n"
+            "  ai-status config                 Configure providers and display preferences\n"
+            "  ai-status providers              Find provider IDs\n"
+            "  ai-status accounts               List default connections and saved accounts\n"
+            "  ai-status accounts add --help    Connect another account\n"
+            "  ai-status status                 Fetch usage as JSON\n\n"
+            "Desktop integration commands:\n"
+            "  daemon, tray, macos, swiftbar, swiftbar-stream, swiftbar-refresh,\n"
+            "  swiftbar-select, save-settings, select-metric, scroll-up, scroll-down,\n"
+            "  cycle-metric, logo, revert\n\n"
+            "Run ai-status COMMAND --help or ai-status help COMMAND for details.\n"
+            "Without a command: show this help on Linux; open the app on Windows/macOS."
+        ),
+    )
+    parser.add_argument("--version", action="version", version=__version__, help="Show the installed version and exit")
+    _add_frontend_arguments(parser)
+    commands = parser.add_subparsers(dest="command", title="commands", metavar="COMMAND")
+    descriptions = (
+        ("config", "Configure providers and display preferences"),
+        ("status", "Fetch current usage and print JSON"),
+        ("refresh", "Request a refresh in the running desktop app or bar"),
+        ("providers", "List installed provider IDs and default connection settings"),
+        ("accounts", "List default connections and manage saved accounts"),
+        ("doctor", "Print version, paths and runtime diagnostics as JSON"),
+        ("help", "Show help for a command, including nested commands"),
+    )
+    command_parsers = {}
+    for name, description in descriptions:
+        command_parsers[name] = commands.add_parser(name, help=description, description=description + ".")
+    _configure_accounts_parser(command_parsers["accounts"])
+    command_parsers["config"].epilog = (
+        "Windows and macOS open native Settings by default. On Linux, this opens the\n"
+        "terminal configuration UI. On macOS, --frontend selects the terminal UI."
+    )
+    command_parsers["status"].epilog = "Output: a JSON object with providers and errors. Requires provider authentication."
+    command_parsers["providers"].add_argument("--json", action="store_true", help="Print provider metadata as JSON")
+    command_parsers["providers"].epilog = (
+        "Enabled means the default connection is configured for collection, not that it is\n"
+        "authenticated. Detected connections and saved accounts are listed by ai-status accounts.\n\n"
+        "Configure providers: ai-status config\n"
+        "Authentication guide: https://ai-status.gelzin.com/providers"
+    )
+    command_parsers["doctor"].add_argument("--smoke", action="store_true", help=argparse.SUPPRESS)
+    command_parsers["doctor"].add_argument("--http-smoke", action="store_true", help=argparse.SUPPRESS)
+    command_parsers["help"].add_argument("command_path", nargs="*", metavar="COMMAND", help="For example: accounts add")
+    integrations = (
+        ("daemon", "Stream usage for the desktop bar", ("--format",)),
+        ("save-settings", "Save settings supplied by a native desktop interface", ("--frontend", "--settings-json")),
+        ("select-metric", "Select a usage metric from a native desktop interface", ("--frontend", "--selection-json")),
+        ("scroll-up", "Select the previous provider with usage data", ("--frontend",)),
+        ("scroll-down", "Select the next provider with usage data", ("--frontend",)),
+        ("cycle-metric", "Select the next limit for the active provider", ("--frontend",)),
+        ("logo", "Print the Waybar logo path and tooltip", ()),
+        ("revert", "Restore the Waybar configuration backup", ()),
+        ("tray", "Open the native Windows tray app", ()),
+        ("macos", "Open the native macOS menu bar app", ()),
+        ("swiftbar", "Render the SwiftBar menu from cached usage", ()),
+        ("swiftbar-stream", "Stream the animated SwiftBar menu", ()),
+        ("swiftbar-refresh", "Fetch usage for SwiftBar and save the cache", ()),
+        ("swiftbar-select", "Select a provider and metric from SwiftBar", ()),
+    )
+    for name, description, visible in integrations:
+        # Integration commands remain discoverable in the epilog without
+        # crowding the list of everyday tasks.
+        command = commands.add_parser(name, description=description + ".")
+        command_parsers[name] = command
+        if name in _FRONTEND_COMMANDS:
+            _add_frontend_arguments(command, visible)
+    for name in ("config", "refresh"):
+        _add_frontend_arguments(command_parsers[name], ("--frontend",) if name == "config" else ())
+    for name in ("tray", "macos"):
+        command_parsers[name].add_argument("--settings", action="store_true", help="Open the app's Settings page")
+    selection = command_parsers["swiftbar-select"]
+    selection.add_argument("provider", help="Provider or saved account connection ID")
+    selection.add_argument("idx", nargs="?", default="0", help="Provider result index (default: 0)")
+    selection.add_argument("metric", nargs="?", help="Metric key (default: first available limit)")
+    return parser, command_parsers
+
+
+def _command_help(parser, command_path):
+    for name in command_path:
+        commands = next((action for action in parser._actions if isinstance(action, argparse._SubParsersAction)), None)
+        if commands is None or name not in commands.choices:
+            parser.error(f"unknown command '{name}'")
+        parser = commands.choices[name]
+    parser.print_help()
+    return 0
+
+
+def _providers_main(as_json=False):
+    metadata = (paths.read_json(paths.LIB_DIR / "assets/providers.json")
+                or paths.read_json(paths.LIB_DIR.parent / "shared/providers/providers.json"))
+    enabled = cfgmod.enabled_order()
+    records = [{"id": name, "name": metadata.get(name, {}).get("name", name), "enabled": name in enabled}
+               for name in cfgmod.available_providers()]
+    if as_json:
+        print(json.dumps(records, ensure_ascii=False))
+    elif records:
+        _print_table(["ID", "NAME", "DEFAULT CONNECTION"], [
+            [record["id"], record["name"], "enabled" if record["enabled"] else "disabled"] for record in records
+        ])
+        print("\nEnabled indicates collection settings, not authentication status.")
+        print("Configure providers: ai-status config")
+        print("Detected and saved connections: ai-status accounts")
+    else:
+        print("No provider collectors found. Reinstall AI Status to restore them.")
+    return 0
+
+
+def main(argv=None):
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
-    command = sys.argv[1] if len(sys.argv) > 1 else ""
-    if command == "--query":
-        if len(sys.argv) != 3:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "--query":
+        if len(argv) != 2:
             raise SystemExit("Usage: ai-status --query PROVIDER")
-        fetch.run_query(sys.argv[2])
-    elif command == "accounts":
-        return _accounts_main()
-    elif command == "doctor":
+        fetch.run_query(argv[1])
+        return 0
+    parser, command_parsers = _build_parser()
+    args = parser.parse_args(argv)
+    command = args.command
+    if command not in _FRONTEND_COMMANDS:
+        for name in ("format", "frontend", "settings_json", "selection_json"):
+            if hasattr(args, name):
+                parser.error(f"--{name.replace('_', '-')} requires a desktop integration command")
+    else:
+        _validate_frontend_args(args, command_parsers[command])
+    if command == "help":
+        return _command_help(parser, args.command_path)
+    if command == "accounts":
+        return _run_accounts(args, command_parsers[command])
+    if command == "providers":
+        return _providers_main(args.json)
+    if command == "doctor":
         info = {"version": fetch.get_version_info()["current"],
                 "providers": cfgmod.available_providers(), "config": str(paths.CONFIG_DIR),
                 "cache": str(paths.CACHE_DIR), "desktop": False, "conpty": False}
@@ -496,11 +809,11 @@ def main():
             if paths.IS_WINDOWS:
                 from .windows_console import available
                 info["conpty"] = available()
-            if "--smoke" in sys.argv:
+            if args.smoke:
                 info.update(tray.smoke_test())
         except ImportError:
             pass
-        if "--http-smoke" in sys.argv:
+        if args.http_smoke:
             from .provider_http import request
             response = json.loads(request("https://api.github.com/", timeout=10))
             info["native_https"] = paths.IS_WINDOWS and "current_user_url" in response
@@ -515,48 +828,52 @@ def main():
                    "swiftbar-refresh": _swiftbar_refresh}
         if command == "swiftbar-select":
             try:
-                _swiftbar_select(sys.argv[2:])
+                values = [args.provider, args.idx]
+                if args.metric is not None:
+                    values.append(args.metric)
+                _swiftbar_select(values)
             except (ValueError, OSError) as error:
                 print(str(error), file=sys.stderr)
                 return 1
         else:
             actions[command]()
-    elif command == "macos" or (sys.platform == "darwin" and command in ("", "config") and "--frontend" not in sys.argv):
+    elif command == "macos" or (sys.platform == "darwin" and command in (None, "config") and not hasattr(args, "frontend")):
         from . import macos
-        macos.launch(configure=command == "config" or "--settings" in sys.argv)
-    elif command == "tray" or (paths.IS_WINDOWS and command in ("", "config")):
+        macos.launch(configure=command == "config" or getattr(args, "settings", False))
+    elif command == "tray" or (paths.IS_WINDOWS and command in (None, "config")):
         from . import tray
-        tray.run(configure=command == "config")
-
+        tray.run(configure=command == "config" or getattr(args, "settings", False))
+    elif command is None:
+        parser.print_help()
     else:
-        return _frontend_main()
+        return _frontend_main(args, command_parsers[command])
+    return 0
 
 
-def _frontend_main():
-    parser = argparse.ArgumentParser(prog="ai-status")
-    parser.add_argument("command", choices=["daemon", "refresh", "config", "save-settings", "select-metric", "scroll-up", "scroll-down", "cycle-metric", "logo", "revert"])
-    parser.add_argument("--format", choices=["waybar", "quickshell", "macos"], default="waybar")
-    parser.add_argument("--frontend", choices=["waybar", "quickshell", "macos", "swiftbar"], default="waybar")
-    parser.add_argument("--settings-json")
-    parser.add_argument("--selection-json")
-    args = parser.parse_args()
-    if args.format != "waybar" and args.command != "daemon":
+def _validate_frontend_args(args, parser):
+    if getattr(args, "format", "waybar") != "waybar" and args.command != "daemon":
         parser.error("--format is only supported by daemon")
-    if args.settings_json is not None and args.command != "save-settings":
+    if getattr(args, "settings_json", None) is not None and args.command != "save-settings":
         parser.error("--settings-json is only supported by save-settings")
-    if args.selection_json is not None and args.command != "select-metric":
+    if getattr(args, "selection_json", None) is not None and args.command != "select-metric":
         parser.error("--selection-json is only supported by select-metric")
+    if args.command in ("select-metric", "save-settings"):
+        option = "selection-json" if args.command == "select-metric" else "settings-json"
+        if getattr(args, "frontend", "waybar") not in ("quickshell", "macos") or getattr(args, option.replace("-", "_"), None) is None:
+            parser.error(f"{args.command} requires --frontend quickshell|macos and --{option}")
+
+
+def _frontend_main(args, parser):
+    for name, default in (("format", "waybar"), ("frontend", "waybar"), ("settings_json", None), ("selection_json", None)):
+        if not hasattr(args, name):
+            setattr(args, name, default)
     if args.command == "select-metric":
-        if args.frontend not in ("quickshell", "macos") or args.selection_json is None:
-            parser.error("select-metric requires --frontend quickshell|macos and --selection-json")
         try:
             quickshell.select_metric(json.loads(args.selection_json))
         except (ValueError, OSError) as error:
             print(str(error), file=sys.stderr)
             return 1
     elif args.command == "save-settings":
-        if args.frontend not in ("quickshell", "macos") or args.settings_json is None:
-            parser.error("save-settings requires --frontend quickshell|macos and --settings-json")
         try:
             quickshell.save_settings(json.loads(args.settings_json))
         except (ValueError, OSError) as error:
@@ -570,13 +887,16 @@ def _frontend_main():
             sys.stderr = open(paths.LOG_FILE, 'w', encoding='utf-8')
         daemon.run(output_format=args.format)
     elif args.command == "config":
-        from . import tui
         if not sys.stdout.isatty():
             for term in TERMINALS:
-                if subprocess.run(["which", term], capture_output=True).returncode == 0:
-                    subprocess.Popen([term, "-e", sys.executable, os.path.realpath(sys.argv[0]), "config"])
-                    break
-            return
+                executable = shutil.which(term)
+                if executable:
+                    subprocess.Popen([executable, "-e", sys.executable, os.path.realpath(sys.argv[0]),
+                                      "config", "--frontend", args.frontend])
+                    return 0
+            print("No supported terminal found. Run ai-status config in an interactive terminal.", file=sys.stderr)
+            return 1
+        from . import tui
         tui.run()
     elif args.command == "scroll-up":
         scroll_up(args.frontend)
