@@ -211,10 +211,38 @@ For example, your normal Codex login supplies the default Codex connection.
 Sign in through that tool and enable the provider with `ai-status config`;
 `accounts add` is for additional profiles or explicit credential sources.
 
-`ai-status accounts` is the same as `ai-status accounts list`: it lists saved
-additional connections, separately from default sessions. An empty account
-list does not mean your provider CLI is signed out. Use `status` to check usage
-and provider errors.
+`ai-status accounts` is the same as `ai-status accounts list`: it shows default
+connections with usable data in the panel's shared cache alongside all saved
+additional accounts. Listing reads local data without network requests,
+provider login checks or Keychain access. A default connection can still
+appear when collection is disabled if its usable cached data remains.
+An empty list does not mean your provider CLI is signed out; it may not have
+been collected yet.
+
+Rows show the source (`default` or `saved`), collection state (`enabled` or
+`disabled`) and recorded usage status:
+
+| Usage status | Meaning |
+| --- | --- |
+| `available` | Usable usage data is recorded |
+| `cached` | Usable data is marked as cached or the snapshot is older than five minutes |
+| `unavailable` | A result exists without usable metrics |
+| `not_checked` | No result is recorded for the saved connection |
+
+The table identifies defaults as `default:codex`, for example, and saved
+accounts by the ID you chose, such as `work-codex`. Configure defaults with
+`ai-status config`; `accounts edit` and `accounts remove` operate on saved IDs.
+
+Use `accounts --refresh` to query enabled connections and update the cache
+before listing. Use `accounts --saved` for only saved accounts; these filters
+are also accepted after `accounts list`. `--saved` and `--refresh` cannot be
+combined. Neither a cached result nor the enabled state confirms a current
+provider login.
+
+`accounts --json` returns the combined array with `connection_id`, `source`
+and `usage_status` on each record. Default records use the provider ID in `id`;
+saved records retain their configured ID and account metadata. For scripts
+using the previous saved-account schema, use `accounts --saved --json`.
 
 ```bash
 # Reference an existing credential file for a separate Codex profile:
@@ -227,6 +255,8 @@ ai-status accounts add openrouter --id work-router --label "Work API" \
 
 ai-status accounts list
 ai-status accounts list --json
+ai-status accounts list --refresh
+ai-status accounts list --saved --json
 ai-status accounts edit work-router --disabled
 ai-status accounts remove work-router
 ```

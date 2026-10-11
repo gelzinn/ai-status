@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 from unittest.mock import Mock, patch
@@ -17,7 +18,7 @@ SRC = LIB / "src"
 ENTRYPOINT = SRC / "bin" / "ai-status"
 sys.path.insert(0, str(SRC))
 import core
-from core import __version__, cli, config, daemon, fetch, macos, paths, provider_http, state
+from core import __version__, accounts, cli, config, daemon, fetch, macos, paths, provider_http, state
 
 
 class CLIEntrypointTests(unittest.TestCase):
@@ -102,7 +103,7 @@ class CLIEntrypointTests(unittest.TestCase):
 
     def test_subcommand_help_and_help_command_are_equivalent(self):
         cases = {
-            "accounts": ("add", "edit", "list", "remove"),
+            "accounts": ("add", "edit", "list", "remove", "--saved", "--refresh"),
             "providers": ("--json",),
             "status": ("status",),
             "doctor": ("doctor", "JSON"),
@@ -158,6 +159,9 @@ class CLIEntrypointTests(unittest.TestCase):
             ("unknown-command",), ("--unknown-option",),
             ("status", "--unknown-option"), ("doctor", "--unknown-option"),
             ("accounts", "unknown-action"), ("accounts", "remove"),
+            ("accounts", "--saved", "--refresh"),
+            ("accounts", "--refresh", "remove", "work"),
+            ("accounts", "--saved", "remove", "work"),
             ("daemon", "--format", "unknown-format"),
             ("refresh", "--settings-json", "{}"),
             ("status", "--format", "quickshell"), ("help", "unknown-command"),
@@ -177,13 +181,14 @@ class CLIEntrypointTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("Usage: ai-status --query PROVIDER", result.stderr)
 
-    def test_accounts_without_action_explains_default_sessions_and_next_steps(self):
+    def test_accounts_without_action_explains_discovery_and_next_steps(self):
         result = self.invoke("accounts")
         self.assertEqual((result.returncode, result.stderr), (0, ""))
-        self.assertIn("default", result.stdout.lower())
+        self.assertIn("ai-status accounts --refresh", result.stdout)
         self.assertIn("ai-status accounts add", result.stdout)
-        self.assertIn("ai-status providers", result.stdout)
-        for arguments in (("accounts", "--json"), ("accounts", "list", "--json")):
+        self.assertIn("ai-status config", result.stdout)
+        for arguments in (("accounts", "--json"), ("accounts", "list", "--json"),
+                          ("accounts", "--saved", "--json"), ("accounts", "list", "--saved", "--json")):
             with self.subTest(arguments=arguments):
                 result = self.invoke(*arguments)
                 self.assertEqual((result.returncode, result.stderr), (0, ""))
@@ -222,18 +227,43 @@ class CLIEntrypointTests(unittest.TestCase):
         self.environment["WORK_KEY"] = "private-environment-value"
         public = {key: record[key] for key in ("id", "provider", "label", "enabled", "auth_file", "env")}
         public["option_keys"] = ["monthly_budget", "project_ids"]
-        for arguments in (("accounts",), ("accounts", "list"), ("accounts", "--json"), ("accounts", "list", "--json")):
+        full = {**public, "connection_id": "account:work", "source": "saved", "usage_status": "not_checked"}
+        for arguments in (("accounts",), ("accounts", "list"), ("accounts", "--json"), ("accounts", "list", "--json"),
+                          ("accounts", "--saved", "--json"), ("accounts", "list", "--saved", "--json"),
+                          ("accounts", "--saved", "list", "--json")):
             with self.subTest(arguments=arguments):
                 result = self.invoke(*arguments)
                 self.assertEqual((result.returncode, result.stderr), (0, ""))
                 for secret in ("private-environment-value", "private-credential-content", "private-project-value"):
                     self.assertNotIn(secret, result.stdout + result.stderr)
                 if "--json" in arguments:
-                    self.assertEqual(json.loads(result.stdout), [public])
+                    self.assertEqual(json.loads(result.stdout), [public if "--saved" in arguments else full])
                 else:
                     self.assertIn("ID", result.stdout)
                     self.assertIn("Trabalho", result.stdout)
                     self.assertIn("enabled", result.stdout.lower())
+
+    def test_cached_default_codex_appears_without_an_explicit_account_file(self):
+        cache = self.home / ".cache/ai-status.json"
+        if sys.platform == "win32":
+            cache = Path(self.environment["LOCALAPPDATA"]) / "ai-status/cache/usage.json"
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps([{"_dir": "codex", "provider": "Codex (Pro)", "metrics": [
+            {"type": "rolling", "percentage": 0}]}]), encoding="utf-8")
+        expected = {"id": "codex", "provider": "codex", "label": "Default", "enabled": True,
+                    "connection_id": "codex", "source": "default", "usage_status": "available"}
+        for arguments in (("accounts", "--json"), ("accounts", "list", "--json")):
+            with self.subTest(arguments=arguments):
+                result = self.invoke(*arguments)
+                self.assertEqual((result.returncode, result.stderr), (0, ""))
+                self.assertEqual(json.loads(result.stdout), [expected])
+        table = self.invoke("accounts")
+        self.assertEqual((table.returncode, table.stderr), (0, ""))
+        for detail in ("default:codex", "SOURCE", "COLLECTION", "USAGE", "available"):
+            self.assertIn(detail, table.stdout)
+        saved = self.invoke("accounts", "--saved", "--json")
+        self.assertEqual((saved.returncode, saved.stderr), (0, ""))
+        self.assertEqual(json.loads(saved.stdout), [])
 
 
 class CLICommandTests(unittest.TestCase):
@@ -246,12 +276,19 @@ class CLICommandTests(unittest.TestCase):
             (paths, "CACHE_DIR", self.root / "cache"),
             (paths, "LOG_FILE", self.root / "error.log"),
             (config, "CONFIG_FILE", str(self.root / "config/providers.json")),
+            (config, "CONFIG_DIR", str(self.root / "config")),
             (state, "CACHE_FILE", str(self.root / "usage.json")),
             (state, "SELECTED_FILE", str(self.root / "config/selected.json")),
         ):
             item = patch.object(target, name, value)
             item.start()
             self.addCleanup(item.stop)
+        environment = patch.dict(os.environ, {"HOME": str(self.root), "USERPROFILE": str(self.root),
+                                              "CODEX_HOME": str(self.root / ".codex"),
+                                              "CLAUDE_CONFIG_DIR": str(self.root / ".claude"),
+                                              "XDG_DATA_HOME": str(self.root / ".local/share")})
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def invoke(self, arguments, tty=False):
         class TTYOutput(io.StringIO):
@@ -265,6 +302,196 @@ class CLICommandTests(unittest.TestCase):
             except SystemExit as error:
                 result = error.code
         return 0 if result is None else result, output.getvalue(), errors.getvalue()
+
+    def save_usage(self, entries, age=0):
+        cache = Path(state.CACHE_FILE)
+        cache.write_text(json.dumps(entries), encoding="utf-8")
+        if age:
+            timestamp = time.time() - age
+            os.utime(cache, (timestamp, timestamp))
+
+    def usage(self, identity="codex", **changes):
+        return {"_dir": "codex", "_connection_id": identity, "_idx": 0,
+                "provider": "Codex (Pro)", "metrics": [{"type": "rolling", "percentage": 0}], **changes}
+
+    def test_full_accounts_keeps_default_and_saved_connection_identities_distinct(self):
+        records = [accounts.normalize({"id": identity, "provider": "codex", "label": label})
+                   for identity, label in (("codex", "Saved Codex"), ("work", "Work"))]
+        accounts.save_document({"version": 1, "accounts": records}, config.accounts_file())
+        self.save_usage([self.usage(), self.usage("account:codex", _account_id="codex"),
+                         self.usage("account:work", _account_id="work")])
+        with patch.object(fetch, "fetch_all_data") as query, patch.object(state, "save_cache") as save, \
+                patch.object(state, "trigger_refresh") as refresh, patch.object(accounts, "prepare") as prepare:
+            result, output, errors = self.invoke(["accounts", "--json"])
+        self.assertEqual((result, errors), (0, ""))
+        rows = json.loads(output)
+        self.assertEqual({row["connection_id"] for row in rows}, {"codex", "account:codex", "account:work"})
+        defaults = [row for row in rows if row["source"] == "default"]
+        self.assertEqual(defaults, [{"id": "codex", "provider": "codex", "label": "Default", "enabled": True,
+                                     "connection_id": "codex", "source": "default", "usage_status": "available"}])
+        for record in records:
+            row = next(row for row in rows if row["connection_id"] == "account:" + record["id"])
+            self.assertEqual(row, {**accounts.public_record(record), "connection_id": "account:" + record["id"],
+                                   "source": "saved", "usage_status": "available"})
+        query.assert_not_called()
+        save.assert_not_called()
+        refresh.assert_not_called()
+        prepare.assert_not_called()
+
+    def test_default_discovery_accepts_legacy_cache_and_deduplicates_provider_results(self):
+        legacy = self.usage()
+        del legacy["_connection_id"]
+        legacy.pop("_idx")
+        self.save_usage([legacy, self.usage(_idx=1), self.usage(_idx=2)])
+        result, output, errors = self.invoke(["accounts", "list", "--json"])
+        self.assertEqual((result, errors), (0, ""))
+        rows = json.loads(output)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["connection_id"], rows[0]["source"]), ("codex", "default"))
+
+    def test_saved_usage_does_not_discover_a_default_provider_login(self):
+        for entry in (self.usage("account:work"), self.usage(_account_id="work")):
+            with self.subTest(entry=entry):
+                self.save_usage([entry])
+                result, output, errors = self.invoke(["accounts", "--json"])
+                self.assertEqual((result, errors), (0, ""))
+                self.assertEqual(json.loads(output), [])
+
+    def test_default_identity_matches_provider_directory_when_present(self):
+        without_directory = self.usage()
+        del without_directory["_dir"]
+        for entry, expected in ((self.usage("openrouter"), []), (without_directory, ["codex"])):
+            with self.subTest(entry=entry):
+                self.save_usage([entry])
+                result, output, errors = self.invoke(["accounts", "--json"])
+                self.assertEqual((result, errors), (0, ""))
+                self.assertEqual([row["connection_id"] for row in json.loads(output)], expected)
+
+    def test_cached_or_stale_usage_is_separate_from_current_authentication_and_collection(self):
+        for entry, age in ((self.usage(_cached=True, _error="Login expired"), 0), (self.usage(), 301)):
+            with self.subTest(entry=entry, age=age):
+                config.save_config([])
+                self.save_usage([entry], age=age)
+                result, output, errors = self.invoke(["accounts", "--json"])
+                self.assertEqual((result, errors), (0, ""))
+                rows = json.loads(output)
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["usage_status"], "cached")
+                self.assertFalse(rows[0]["enabled"])
+                self.assertNotIn("authenticated", rows[0])
+                self.assertNotIn("Login expired", output)
+
+    def test_invalid_usage_never_discovers_default_accounts(self):
+        entries = [self.usage(metrics=[]), self.usage(_error="Login expired"),
+                   self.usage(metrics=[{"percentage": float("nan")}]),
+                   self.usage(metrics=[{"percentage": float("inf")}]),
+                   self.usage(metrics=[{"percentage": 10 ** 400}]),
+                   self.usage(metrics=[{"percentage": "unknown"}]),
+                   self.usage(metrics=[{"detail": "Usage not available"}])]
+        for entry in entries:
+            with self.subTest(entry=entry):
+                self.save_usage([entry])
+                result, output, errors = self.invoke(["accounts", "--json"])
+                self.assertEqual((result, errors), (0, ""))
+                self.assertEqual(json.loads(output), [])
+
+    def test_amount_and_unlimited_usage_can_discover_a_default_connection(self):
+        for metric in ({"type": "balance", "amount": 0, "currency": "USD"}, {"type": "quota", "value": "Unlimited"}):
+            with self.subTest(metric=metric):
+                self.save_usage([self.usage(metrics=[metric])])
+                result, output, errors = self.invoke(["accounts", "--json"])
+                self.assertEqual((result, errors), (0, ""))
+                rows = json.loads(output)
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0]["usage_status"], "available")
+
+    def test_saved_accounts_distinguish_unavailable_cached_and_unchecked_usage(self):
+        records = [accounts.normalize({"id": identity, "provider": "codex", "enabled": False})
+                   for identity in ("failed", "cached", "unchecked")]
+        accounts.save_document({"version": 1, "accounts": records}, config.accounts_file())
+        self.save_usage([self.usage("account:failed", metrics=[], _error="Login expired"),
+                         self.usage("account:cached", _cached=True, _error="Login expired")])
+        result, output, errors = self.invoke(["accounts", "--json"])
+        self.assertEqual((result, errors), (0, ""))
+        rows = json.loads(output)
+        self.assertEqual({row["id"]: row["usage_status"] for row in rows},
+                         {"failed": "unavailable", "cached": "cached", "unchecked": "not_checked"})
+        self.assertTrue(all(not row["enabled"] for row in rows))
+
+    def test_saved_usage_cannot_survive_a_provider_edit_or_another_account_identity(self):
+        record = accounts.normalize({"id": "work", "provider": "codex"})
+        accounts.save_document({"version": 1, "accounts": [record]}, config.accounts_file())
+        self.save_usage([self.usage("account:work", _account_id="work")])
+        update = self.root / "provider-update.json"
+        update.write_text('{"provider":"openrouter"}', encoding="utf-8")
+        with patch.object(state, "trigger_refresh"):
+            result, output, errors = self.invoke(["accounts", "edit", "work", "--file", str(update)])
+        self.assertEqual((result, errors), (0, ""))
+        without_context = self.usage("account:work")
+        del without_context["_dir"]
+        cases = (
+            (self.usage("account:work", _account_id="work"), "not_checked"),
+            (self.usage("account:work", _dir="openrouter", _account_id="other"), "not_checked"),
+            (self.usage("account:work", _dir="openrouter", _account_id="work"), "available"),
+            (without_context, "available"),
+        )
+        for entry, expected in cases:
+            with self.subTest(entry=entry):
+                self.save_usage([entry])
+                result, output, errors = self.invoke(["accounts", "--json"])
+                self.assertEqual((result, errors), (0, ""))
+                rows = json.loads(output)
+                self.assertEqual(len(rows), 1)
+                self.assertEqual((rows[0]["provider"], rows[0]["connection_id"], rows[0]["usage_status"]),
+                                 ("openrouter", "account:work", expected))
+
+    def test_saved_only_json_preserves_old_schema_and_skips_usage_discovery(self):
+        record = accounts.normalize({"id": "work", "provider": "codex", "env": {"CODEX_ACCESS_TOKEN": "WORK_TOKEN"},
+                                     "options": {"organization_id": "private-option-value"}})
+        accounts.save_document({"version": 1, "accounts": [record]}, config.accounts_file())
+        with patch.object(state, "load_cache", side_effect=AssertionError("Saved listing must not inspect usage")), \
+                patch.object(cli, "_cache_age", side_effect=AssertionError("Saved listing must not inspect cache metadata")), \
+                patch.object(accounts, "prepare", side_effect=AssertionError("Listing must not resolve credentials")):
+            result, output, errors = self.invoke(["accounts", "--saved", "--json"])
+        self.assertEqual((result, errors), (0, ""))
+        self.assertEqual(json.loads(output), [accounts.public_record(record)])
+        self.assertNotIn("private-option-value", output)
+
+    def test_accounts_refresh_explicitly_fetches_and_saves_before_listing(self):
+        data = [self.usage()]
+        for arguments in (["accounts", "--refresh", "--json"], ["accounts", "list", "--refresh", "--json"],
+                          ["accounts", "--refresh", "list", "--json"]):
+            with self.subTest(arguments=arguments):
+                events = []
+
+                def collect(**kwargs):
+                    events.append("collect")
+                    return data
+
+                def publish(value):
+                    events.append("publish")
+                    self.save_usage(value)
+
+                with patch.object(fetch, "fetch_all_data", side_effect=collect) as query, \
+                        patch.object(state, "save_cache", side_effect=publish) as save:
+                    result, output, errors = self.invoke(arguments)
+                self.assertEqual((result, errors), (0, ""))
+                self.assertEqual(events, ["collect", "publish"])
+                query.assert_called_once_with(include_errors=True)
+                save.assert_called_once_with(data)
+                self.assertEqual(json.loads(output)[0]["connection_id"], "codex")
+
+    def test_default_connections_cannot_be_edited_or_removed_as_saved_accounts(self):
+        self.save_usage([self.usage()])
+        before = {str(path.relative_to(self.root)): path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
+        for arguments in (["accounts", "remove", "default:codex"], ["accounts", "edit", "default:codex", "--disabled"]):
+            with self.subTest(arguments=arguments), patch.object(state, "trigger_refresh") as refresh:
+                result, output, errors = self.invoke(arguments)
+                self.assertEqual((result, output), (1, ""))
+                self.assertIn("ai-status config", errors)
+                refresh.assert_not_called()
+                after = {str(path.relative_to(self.root)): path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
+                self.assertEqual(after, before)
 
     def test_status_keeps_json_schema_account_identity_and_cache(self):
         data = [{"_dir": "openrouter", "_connection_id": "account:work", "_idx": 0,

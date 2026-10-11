@@ -383,25 +383,35 @@ class _CLIParser(argparse.ArgumentParser):
 
 def _configure_accounts_parser(parser):
     parser.description = (
-        "Manage additional account connections. With no subcommand, list saved accounts.\n"
-        "Default provider logins are used separately and do not need an account entry."
+        "List default provider connections detected by the desktop and saved accounts.\n"
+        "With no subcommand, list connections from the last usage snapshot.\n"
+        "Default CLI logins do not need accounts add; --refresh checks enabled connections."
     )
     parser.epilog = (
         "Examples:\n"
         "  ai-status accounts\n"
+        "  ai-status accounts --refresh\n"
+        "  ai-status accounts list --saved --json\n"
         "  ai-status accounts add codex --id work --label Work --auth-file ~/.codex-work/auth.json\n"
         "  ai-status accounts edit work --disabled\n"
         "  ai-status accounts list --json\n\n"
         "Find provider IDs: ai-status providers\n"
         "More options:      ai-status accounts add --help"
     )
-    parser.set_defaults(action="list", json=False)
-    parser.add_argument("--json", action="store_true", help="List saved accounts as JSON")
+    parser.set_defaults(action="list", json=False, saved=False, refresh=False)
+    options = (
+        ("--json", "Print connection metadata as JSON without credential values"),
+        ("--saved", "List only manually saved accounts; preserve the original JSON schema"),
+        ("--refresh", "Fetch usage for enabled connections before listing (may take a few seconds)"),
+    )
+    for option, description in options:
+        parser.add_argument(option, action="store_true", help=description)
     commands = parser.add_subparsers(dest="action", title="account commands", metavar="COMMAND")
-    listing = commands.add_parser("list", help="List saved accounts (default)",
-                                  description="List additional accounts. Default provider logins are not included.")
-    listing.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
-                         help="Print account metadata as JSON without credential values")
+    listing = commands.add_parser("list", help="List detected default connections and saved accounts (default)",
+                                  description="List connections from the last usage snapshot and saved account configuration.")
+    for option, description in options:
+        listing.add_argument(option, action="store_true", default=argparse.SUPPRESS, help=description)
+    listing.epilog = "Use --refresh to check enabled connections now, or --saved to list only manually added accounts."
     for verb in ("add", "edit"):
         command = commands.add_parser(verb, help=f"{verb.title()} an account connection",
                                       description=f"{verb.title()} an account using credential file or environment references.")
@@ -444,31 +454,117 @@ def _accounts_main(argv=None):
     return _run_accounts(parser.parse_args(sys.argv[2:] if argv is None else argv), parser)
 
 
+def _connection_usage_status(entries, stale):
+    usable = []
+    for entry in entries:
+        try:
+            if quickshell.usable_metrics(entry):
+                usable.append(entry)
+        except (AttributeError, TypeError, ValueError, OverflowError):
+            continue  # A malformed cache entry cannot establish usable usage.
+    if usable:
+        return "cached" if stale or any(entry.get("_cached") for entry in usable) else "available"
+    return "unavailable" if entries else "not_checked"
+
+
+def _listed_connections(records):
+    # This is the desktop's last collected snapshot, not a probe of credential
+    # files or the Keychain. Listing must remain fast and have no side effects.
+    cached = {}
+    for entry in state.load_cache():
+        if not isinstance(entry, dict):
+            continue
+        identity = entry.get("_connection_id")
+        if not isinstance(identity, str) or not identity:
+            account_id = entry.get("_account_id")
+            identity = "account:" + account_id if isinstance(account_id, str) and account_id else entry.get("_dir")
+        if not isinstance(identity, str) or not identity:
+            continue
+        if not identity.startswith("account:") and entry.get("_account_id") is not None:
+            continue
+        if not identity.startswith("account:") and entry.get("_dir") not in (None, identity):
+            continue
+        cached.setdefault(identity, []).append(entry)
+    age = _cache_age()
+    stale = age is not None and age >= SWIFTBAR_STALE_SECS
+    enabled = cfgmod.enabled_order()
+    defaults = []
+    for provider in cfgmod.available_providers():
+        usage = _connection_usage_status(cached.get(provider, []), stale)
+        if usage in ("available", "cached"):
+            defaults.append({"id": provider, "provider": provider, "label": "Default",
+                             "enabled": provider in enabled, "connection_id": provider,
+                             "source": "default", "usage_status": usage})
+    saved = []
+    for record in records:
+        identity = "account:" + record["id"]
+        entries = [entry for entry in cached.get(identity, [])
+                   if entry.get("_dir") in (None, record["provider"])
+                   and entry.get("_account_id") in (None, record["id"])]
+        saved.append({**accounts.public_record(record), "connection_id": identity,
+                      "source": "saved", "usage_status": _connection_usage_status(entries, stale)})
+    return defaults + saved
+
+
+def _list_accounts(args, records):
+    if args.saved:
+        public = [accounts.public_record(record) for record in records]
+        if args.json:
+            print(json.dumps(public, ensure_ascii=False))
+        elif public:
+            _print_table(["ID", "PROVIDER", "LABEL", "STATUS"], [
+                [record["id"], record["provider"], record["label"], "enabled" if record["enabled"] else "disabled"]
+                for record in public
+            ])
+        else:
+            print("No saved account connections configured.\n")
+            print("Show default CLI connections: ai-status accounts")
+            print("Add another account:         ai-status accounts add --help")
+        return 0
+    if args.refresh:
+        state.save_cache(fetch.fetch_all_data(include_errors=True))
+    public = _listed_connections(records)
+    if args.json:
+        print(json.dumps(public, ensure_ascii=False))
+    elif public:
+        _print_table(["ID", "PROVIDER", "LABEL", "SOURCE", "COLLECTION", "USAGE"], [
+            [("default:" + record["id"]) if record["source"] == "default" else record["id"],
+             record["provider"], record["label"], record["source"],
+             "enabled" if record["enabled"] else "disabled", record["usage_status"]]
+            for record in public
+        ])
+        print("\nDefault connections use existing provider logins. Edit/remove applies to saved accounts.")
+        print("Usage is from the last collected snapshot; use --refresh to check enabled connections now.")
+        print("Configure default connections: ai-status config")
+    else:
+        print("No account connections detected yet.\n")
+        print("Check your existing CLI logins: ai-status accounts --refresh")
+        print("Configure providers:           ai-status config")
+        print("Add another account:           ai-status accounts add --help")
+    return 0
+
+
+def _unknown_account(account_id):
+    if account_id.startswith("default:") or account_id in cfgmod.available_providers():
+        raise accounts.AccountError("Default provider connections are managed with ai-status config. Edit/remove applies only to saved accounts.")
+    raise accounts.AccountError("Unknown account ID. Use ai-status accounts --saved to find saved account IDs.")
+
+
 def _run_accounts(args, parser):
-    if args.json and args.action != "list":
-        parser.error("--json is only supported by accounts list")
+    if args.action != "list":
+        for option in ("json", "saved", "refresh"):
+            if getattr(args, option):
+                parser.error(f"--{option} is only supported by accounts list")
+    if args.saved and args.refresh:
+        parser.error("--saved cannot be combined with --refresh")
     try:
         document = accounts.load_document(cfgmod.accounts_file())
         records = document["accounts"]
         if args.action == "list":
-            public = [accounts.public_record(record) for record in records]
-            if args.json:
-                print(json.dumps(public, ensure_ascii=False))
-            elif not public:
-                print("No additional account connections configured.\n")
-                print("Default provider logins are used separately and are not listed here.")
-                print("Configure providers: ai-status config")
-                print("Find provider IDs:   ai-status providers")
-                print("Add an account:      ai-status accounts add --help")
-            else:
-                _print_table(["ID", "PROVIDER", "LABEL", "STATUS"], [
-                    [record["id"], record["provider"], record["label"], "enabled" if record["enabled"] else "disabled"]
-                    for record in public
-                ])
-            return 0
+            return _list_accounts(args, records)
         if args.action == "remove":
             if not any(record["id"] == args.account_id for record in records):
-                raise accounts.AccountError("Unknown account ID.")
+                _unknown_account(args.account_id)
             document["accounts"] = [record for record in records if record["id"] != args.account_id]
             if "order" in document:
                 document["order"] = [identity for identity in document["order"] if identity != "account:" + args.account_id]
@@ -491,7 +587,7 @@ def _run_accounts(args, parser):
         if args.action == "edit":
             previous = next((record for record in records if record["id"] == args.account_id), None)
             if previous is None:
-                raise accounts.AccountError("Unknown account ID.")
+                _unknown_account(args.account_id)
             record = {**previous, **payload, "id": args.account_id}
         else:
             record = dict(payload)
@@ -538,7 +634,7 @@ def _run_accounts(args, parser):
         # AccountError messages are deliberately secret-free; filesystem errors
         # may echo arbitrary paths and therefore use a fixed message.
         error = sys.exc_info()[1]
-        print(str(error) if isinstance(error, accounts.AccountError) else "Unable to save account configuration.", file=sys.stderr)
+        print(str(error) if isinstance(error, accounts.AccountError) else "Unable to read or save account configuration.", file=sys.stderr)
         return 1
 
 
@@ -570,7 +666,7 @@ def _build_parser():
             "Examples:\n"
             "  ai-status config                 Configure providers and display preferences\n"
             "  ai-status providers              Find provider IDs\n"
-            "  ai-status accounts               List additional account connections\n"
+            "  ai-status accounts               List default connections and saved accounts\n"
             "  ai-status accounts add --help    Connect another account\n"
             "  ai-status status                 Fetch usage as JSON\n\n"
             "Desktop integration commands:\n"
@@ -589,7 +685,7 @@ def _build_parser():
         ("status", "Fetch current usage and print JSON"),
         ("refresh", "Request a refresh in the running desktop app or bar"),
         ("providers", "List installed provider IDs and default connection settings"),
-        ("accounts", "Manage additional account connections (default: list)"),
+        ("accounts", "List default connections and manage saved accounts"),
         ("doctor", "Print version, paths and runtime diagnostics as JSON"),
         ("help", "Show help for a command, including nested commands"),
     )
@@ -605,7 +701,7 @@ def _build_parser():
     command_parsers["providers"].add_argument("--json", action="store_true", help="Print provider metadata as JSON")
     command_parsers["providers"].epilog = (
         "Enabled means the default connection is configured for collection, not that it is\n"
-        "authenticated. Additional accounts are listed by ai-status accounts.\n\n"
+        "authenticated. Detected connections and saved accounts are listed by ai-status accounts.\n\n"
         "Configure providers: ai-status config\n"
         "Authentication guide: https://ai-status.gelzin.com/providers"
     )
@@ -670,7 +766,7 @@ def _providers_main(as_json=False):
         ])
         print("\nEnabled indicates collection settings, not authentication status.")
         print("Configure providers: ai-status config")
-        print("Additional accounts: ai-status accounts")
+        print("Detected and saved connections: ai-status accounts")
     else:
         print("No provider collectors found. Reinstall AI Status to restore them.")
     return 0
