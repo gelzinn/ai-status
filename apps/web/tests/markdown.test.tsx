@@ -28,6 +28,21 @@ test("release Markdown preserves content and removes only the repeated automatic
 	assert.match(differentDate, /<h2/);
 });
 
+test("initial release notes remove a matching version/date heading linked to their commit history", async () => {
+	const initial = { tagName: "v0.1.0", publishedAt: "2026-07-03T22:44:24Z" };
+	const notes = "## [0.1.0](https://github.com/gelzinn/ai-status/commits/v0.1.0) (2026-07-03)\n\n" +
+		"### Features\n\n* Initial provider support.";
+	const html = renderToStaticMarkup(await renderMarkdown(notes, { release: initial }));
+	assert.doesNotMatch(html, /<h2/);
+	assert.match(html, /Initial provider support/);
+	for (const other of [
+		{ ...initial, tagName: "v0.2.0" },
+		{ ...initial, publishedAt: "2026-07-04T00:00:00Z" },
+	]) {
+		assert.match(renderToStaticMarkup(await renderMarkdown(notes, { release: other })), /<h2/);
+	}
+});
+
 test("heading IDs and local links remain unique within and across releases", async () => {
 	const notes = "### Fixes\n\n[Jump to fixes](#fixes)\n\n### Fixes\n\nAnother fix.";
 	const first = renderToStaticMarkup(await renderMarkdown(notes, { headingPrefix: "release-1-" }));

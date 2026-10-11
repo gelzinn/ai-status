@@ -75,7 +75,7 @@ type MarkdownOptions = {
 	release?: { tagName: string; publishedAt: string };
 };
 
-/** Remove only Release Please's redundant first version/date heading. */
+/** Remove only release notes' redundant first version/date heading. */
 function releaseHeading({ release }: MarkdownOptions) {
 	return (tree: { children: any[] }) => {
 		if (!release) return;
@@ -89,7 +89,8 @@ function releaseHeading({ release }: MarkdownOptions) {
 		if (first?.type === "heading" && first.depth === 2 &&
 			text(first) === `${version} (${date})` && versionLink?.type === "link" &&
 			typeof versionLink.url === "string" && versionLink.url.startsWith("https://github.com/") &&
-			versionLink.url.includes("/compare/")) {
+			(versionLink.url.includes("/compare/") ||
+				versionLink.url.endsWith(`/commits/${release.tagName}`))) {
 			tree.children.shift();
 		}
 	};

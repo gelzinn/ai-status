@@ -3,6 +3,7 @@ import test from "node:test";
 import {
 	createReleaseReader,
 	fetchGitHubReleases,
+	groupReleasesByDay,
 	selectReleases,
 } from "../apps/web/src/lib/changelog.ts";
 
@@ -264,4 +265,56 @@ test("searches names, versions, and full notes across the entire history before 
 		releases: [], query: "unknown", page: 1, pageCount: 1, total: 0,
 	});
 	assert.equal(selectReleases(releases, { query: "   " }).total, 24);
+});
+
+test("groups UTC publication days once and preserves newest-first publication order", async () => {
+	const releases = await history([
+		release(4, { published_at: "2026-10-11T21:00:00Z" }),
+		release(2, { published_at: "2026-10-12T02:00:00Z" }),
+		release(5, { published_at: "2026-10-10T23:59:00Z" }),
+		release(1, { published_at: "2026-10-11T23:30:00-03:00" }),
+		release(3, { published_at: "2026-10-12T00:30:00+02:00" }),
+	]);
+	const groups = groupReleasesByDay(releases);
+	assert.deepEqual(groups.map(({ day, releases }) => ({ day, ids: releases.map(({ id }) => id) })), [
+		{ day: "2026-10-12", ids: [1, 2] },
+		{ day: "2026-10-11", ids: [3, 4] },
+		{ day: "2026-10-10", ids: [5] },
+	]);
+	assert.deepEqual(groups.flatMap(({ releases }) => releases), releases);
+	assert.notEqual(groups[0].releases, releases);
+	assert.deepEqual(groupReleasesByDay([]), []);
+});
+
+test("groups each selected page without expanding the ten-release limit at day boundaries", async () => {
+	const releases = await history(Array.from({ length: 23 }, (_, i) => release(i + 1, {
+		published_at: i >= 7 ? "2026-10-12T12:00:00Z" : "2026-10-11T12:00:00Z",
+		body: (i + 1) % 2 ? "Windows support" : "Bug fixes",
+	})));
+	const summarize = (selection) => groupReleasesByDay(selection.releases).map(({ day, releases }) => ({
+		day,
+		ids: releases.map(({ id }) => id),
+	}));
+	assert.deepEqual(summarize(selectReleases(releases)), [
+		{ day: "2026-10-12", ids: [23, 22, 21, 20, 19, 18, 17, 16, 15, 14] },
+	]);
+	assert.deepEqual(summarize(selectReleases(releases, { page: 2 })), [
+		{ day: "2026-10-12", ids: [13, 12, 11, 10, 9, 8] },
+		{ day: "2026-10-11", ids: [7, 6, 5, 4] },
+	]);
+	assert.deepEqual(summarize(selectReleases(releases, { page: 3 })), [
+		{ day: "2026-10-11", ids: [3, 2, 1] },
+	]);
+	const search = selectReleases(releases, { query: "windows" });
+	assert.equal(search.total, 12);
+	assert.equal(search.pageCount, 2);
+	assert.equal(search.releases.length, 10);
+	assert.deepEqual(summarize(search), [
+		{ day: "2026-10-12", ids: [23, 21, 19, 17, 15, 13, 11, 9] },
+		{ day: "2026-10-11", ids: [7, 5] },
+	]);
+	assert.deepEqual(summarize(selectReleases(releases, { query: "windows", page: 2 })), [
+		{ day: "2026-10-11", ids: [3, 1] },
+	]);
+	assert.deepEqual(summarize(selectReleases(releases, { query: "unknown" })), []);
 });

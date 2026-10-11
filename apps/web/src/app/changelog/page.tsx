@@ -6,7 +6,7 @@ import { ChangelogShell } from "@/components/changelog-shell";
 import { ChangelogSearch } from "@/components/changelog-search";
 import { PILL_CONTROL } from "@/components/search-input";
 import { getReleases } from "@/lib/releases";
-import { selectReleases } from "@/lib/changelog";
+import { groupReleasesByDay, selectReleases } from "@/lib/changelog";
 import { renderMarkdown } from "@/lib/markdown";
 import { repo, site } from "@/lib/env";
 import "./changelog.css";
@@ -38,20 +38,29 @@ export default async function ChangelogPage({ searchParams }: {
 		query: typeof params.q === "string" ? params.q : "",
 		page: typeof params.page === "string" ? Number(params.page) : 1,
 	});
-	const articles = await Promise.all(selection.releases.map(async (release) => {
-		const id = `release-${release.id}`;
+	const days = await Promise.all(groupReleasesByDay(selection.releases).map(async ({ day, releases }) => {
+		const date = dateFormat.format(new Date(`${day}T00:00:00Z`));
 		return (
-			<article key={release.id} id={id} className="changelog-entry" aria-labelledby={`${id}-title`}>
-				<div className="changelog-date"><a href={`#${id}`}><time dateTime={release.publishedAt}>{dateFormat.format(new Date(release.publishedAt))}</time></a></div>
-				<div className="changelog-article">
-					<h2 id={`${id}-title`} className="changelog-release-title"><a href={release.url}>{release.name}</a></h2>
-					{release.name !== release.tagName && <p className="changelog-version">{release.tagName}</p>}
-					<div className="changelog-prose">
-						{release.body.trim() ? await renderMarkdown(release.body, { release, headingPrefix: `${id}-section-` }) : <p>No release notes were provided. <a href={release.url}>View this release on GitHub.</a></p>}
-					</div>
-					<a href={release.url} className="changelog-release-link">View release on GitHub <ArrowRight size={14} aria-hidden="true" /></a>
+			<section key={day} className="changelog-day" aria-label={`${date} releases`}>
+				<div className="changelog-date"><a href={`#release-${releases[0].id}`}><time dateTime={day}>{date}</time></a></div>
+				<div className="changelog-day-releases">
+					{await Promise.all(releases.map(async (release) => {
+						const id = `release-${release.id}`;
+						return (
+							<article key={release.id} id={id} className="changelog-entry" aria-labelledby={`${id}-title`}>
+								<div className="changelog-article">
+									<h2 id={`${id}-title`} className="changelog-release-title"><a href={release.url}>{release.name}</a></h2>
+									{release.name !== release.tagName && <p className="changelog-version">{release.tagName}</p>}
+									<div className="changelog-prose">
+										{release.body.trim() ? await renderMarkdown(release.body, { release, headingPrefix: `${id}-section-` }) : <p>No release notes were provided. <a href={release.url}>View this release on GitHub.</a></p>}
+									</div>
+									<a href={release.url} className="changelog-release-link">View release on GitHub <ArrowRight size={14} aria-hidden="true" /></a>
+								</div>
+							</article>
+						);
+					}))}
 				</div>
-			</article>
+			</section>
 		);
 	}));
 	return (
@@ -69,7 +78,7 @@ export default async function ChangelogPage({ searchParams }: {
 				</div>
 				<div className="changelog-list">
 					{selection.query && <div className="changelog-search-results"><p>{selection.total} {selection.total === 1 ? "release" : "releases"} matching “{selection.query}”</p><Link href="/changelog">Clear search</Link></div>}
-					{result.status === "unavailable" ? <div className="changelog-empty" role="status"><h2>Release updates are temporarily unavailable</h2><p>Please try again shortly, or <a href={`${repo.url}/releases`}>read the releases on GitHub</a>.</p></div> : articles.length ? articles : <div className="changelog-empty" role="status"><h2>{selection.query ? "No releases found" : "No releases published yet"}</h2><p>{selection.query ? "Try another version, title or keyword." : "Published stable releases will appear here."}</p><a href={`${repo.url}/releases`}>View GitHub Releases <ArrowRight size={14} aria-hidden="true" /></a></div>}
+					{result.status === "unavailable" ? <div className="changelog-empty" role="status"><h2>Release updates are temporarily unavailable</h2><p>Please try again shortly, or <a href={`${repo.url}/releases`}>read the releases on GitHub</a>.</p></div> : days.length ? days : <div className="changelog-empty" role="status"><h2>{selection.query ? "No releases found" : "No releases published yet"}</h2><p>{selection.query ? "Try another version, title or keyword." : "Published stable releases will appear here."}</p><a href={`${repo.url}/releases`}>View GitHub Releases <ArrowRight size={14} aria-hidden="true" /></a></div>}
 				</div>
 				{selection.pageCount > 1 && <nav className="changelog-pagination" aria-label="Release pages">
 					{selection.page > 1 && <Link href={pageHref(selection.page - 1, selection.query)} rel="prev"><ArrowLeft size={14} aria-hidden="true" />Newer updates</Link>}
