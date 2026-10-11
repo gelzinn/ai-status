@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, ChevronDown, KeyRound, Plus, Search } from "lucide-react";
+import { Check, ChevronDown, KeyRound, Plus } from "lucide-react";
+import { PILL_CONTROL, SearchInput } from "@/components/search-input";
 import { repo } from "@/lib/env";
 import { cn } from "@/lib/utils";
 import type { Provider } from "@ai-status/shared";
@@ -22,9 +23,6 @@ const PERIOD_FILTERS: { id: string; label: string; keywords?: string[] }[] = [
 	{ id: "weekly", label: "Weekly", keywords: ["weekly"] },
 	{ id: "monthly", label: "Monthly", keywords: ["monthly"] },
 ];
-
-// Shared control height so the input, chips and dropdown line up.
-const CONTROL = "h-10 rounded-full border text-sm transition-colors";
 
 /**
  * Custom period dropdown — a native <select> renders its text baseline and
@@ -68,7 +66,7 @@ function PeriodDropdown({
 				aria-expanded={open}
 				aria-label="Filter by tracked period"
 				className={cn(
-					CONTROL,
+					PILL_CONTROL,
 					"flex items-center gap-2 pl-4 pr-3 font-medium",
 					active
 						? "border-transparent bg-foreground text-background"
@@ -209,20 +207,13 @@ export function ProviderSearch({ providers }: { providers: Provider[] }) {
 			{/* Search + count */}
 			<div className="flex flex-col gap-4">
 				<div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-					<div className="relative w-full sm:max-w-sm">
-						<Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-						<input
-							type="text"
-							value={query}
-							onChange={(e) => setQuery(e.target.value)}
-							placeholder="Search providers…"
-							aria-label="Search providers"
-							className={cn(
-								CONTROL,
-								"w-full border-border bg-card pl-10 pr-4 text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-foreground/30 focus:bg-card",
-							)}
-						/>
-					</div>
+					<SearchInput
+						wrapperClassName="sm:max-w-sm"
+						value={query}
+						onChange={(e) => setQuery(e.target.value)}
+						placeholder="Search providers…"
+						aria-label="Search providers"
+					/>
 
 					<span className="hidden shrink-0 text-sm text-muted-foreground tabular-nums sm:block">
 						{filtered.length} {filtered.length === 1 ? "provider" : "providers"}
@@ -248,7 +239,7 @@ export function ProviderSearch({ providers }: { providers: Provider[] }) {
 								onClick={() => setAuthFilter(f.id)}
 								aria-pressed={authFilter === f.id}
 								className={cn(
-									CONTROL,
+									PILL_CONTROL,
 									"shrink-0 px-4 font-medium",
 									authFilter === f.id
 										? "border-transparent bg-foreground text-background"

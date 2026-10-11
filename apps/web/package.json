@@ -4,7 +4,9 @@
 	"type": "module",
 	"scripts": {
 		"dev": "next dev -p 7828",
-		"build": "next build"
+		"prebuild": "npm run test",
+		"build": "next build",
+		"test": "node --import tsx --test tests/*.test.tsx ../../tests/test_changelog.mjs"
 	},
 	"dependencies": {
 		"@ai-status/shared": "*",
@@ -34,6 +36,7 @@
 		"@types/react-dom": "^19.2.3",
 		"shadcn": "^4.13.0",
 		"tailwindcss": "^4.3.2",
+		"tsx": "^4.23.15",
 		"typescript": "^5.9.3"
 	}
 }

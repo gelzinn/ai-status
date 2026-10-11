@@ -150,8 +150,8 @@ values. Waybar modules are only reconfigured during an update if you pass
 `--configure-waybar true`.
 
 
-Release notes are available on [GitHub Releases](https://github.com/gelzinn/ai-status/releases)
-and, for releases made with the new workflow, in `packages/lib/CHANGELOG.md`.
+Release notes are available on the [web changelog](https://ai-status.gelzin.com/changelog)
+and [GitHub Releases](https://github.com/gelzinn/ai-status/releases).
 
 ## Checking Your Version
 
