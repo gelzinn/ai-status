@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.12.0](https://github.com/gelzinn/ai-status/compare/v0.11.0...v0.12.0) (2026-10-11)
+
+
+### Features
+
+* **cli:** make commands discoverable and show detected default provider connections alongside saved accounts ([a75ade5](https://github.com/gelzinn/ai-status/commit/a75ade501bce2c95856fdc5e2cdd956b6b5fd149))
+* **web:** add Linux setup and route LLM installation guides by operating system ([6265a58](https://github.com/gelzinn/ai-status/commit/6265a58d1d9c3b4484d2f0c0302cf7320d0ad1d4))
+* **web:** group the provider catalog and publish detailed setup guides for 21 integrations ([6265a58](https://github.com/gelzinn/ai-status/commit/6265a58d1d9c3b4484d2f0c0302cf7320d0ad1d4))
+
+
+### Bug Fixes
+
+* **cli:** preserve command error codes on Windows and report unavailable terminal configuration ([a75ade5](https://github.com/gelzinn/ai-status/commit/a75ade501bce2c95856fdc5e2cdd956b6b5fd149))
+* **web:** make Kilo and Lyceum logos readable across website themes ([6265a58](https://github.com/gelzinn/ai-status/commit/6265a58d1d9c3b4484d2f0c0302cf7320d0ad1d4))
+
 ## [0.11.0](https://github.com/gelzinn/ai-status/compare/v0.10.0...v0.11.0) (2026-10-11)
 
 
