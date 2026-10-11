@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, ArrowUpRight, CircleDot, KeyRound, ShieldCheck } from "lucide-react";
-import { SUPPORTED_PROVIDERS } from "@/lib/providers";
+import { WEB_SUPPORTED_PROVIDERS as SUPPORTED_PROVIDERS } from "@ai-status/shared";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { GithubIcon } from "@/components/github-icon";
@@ -57,7 +57,7 @@ export default async function LinuxPage() {
             </div>
           </section>
 
-          <div className="grid gap-10 lg:grid-cols-[1fr_260px] lg:gap-12">
+          <div className="grid min-w-0 grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_260px] lg:gap-12">
             <article id="install" className="min-w-0 scroll-mt-8">
               <h2 className="mb-4 font-heading text-2xl font-semibold tracking-tight text-foreground">Installation guide</h2>
               <div className="md-guide">{guide}</div>

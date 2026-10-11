@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { SUPPORTED_PROVIDERS } from "@/lib/providers";
+import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
 import { site } from "@/lib/env";
 
 export default function sitemap(): MetadataRoute.Sitemap {

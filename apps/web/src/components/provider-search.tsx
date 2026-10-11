@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Check, ChevronDown, KeyRound, Plus, Search } from "lucide-react";
 import { repo } from "@/lib/env";
 import { cn } from "@/lib/utils";
-import type { Provider } from "@/lib/providers";
+import type { Provider } from "@ai-status/shared";
 
 /** Chips: how each provider authenticates (from `authType`). */
 const AUTH_FILTERS: { id: string; label: string; authType?: string }[] = [

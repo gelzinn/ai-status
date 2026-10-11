@@ -16,5 +16,6 @@ provides additional context. The Windows mark belongs to Microsoft.
 
 `providers/kilo.png` and `providers/lyceum.png` are exact copies of the bundled
 opaque logos in `packages/lib/assets/providers/`. Their existing light backgrounds
-keep the black provider glyphs legible on the website's dark surfaces. The web
-provider metadata in `src/lib/providers.ts` selects these copies for every view.
+keep the black provider glyphs legible on the website's dark surfaces. The shared
+provider registry in `packages/shared/providers/providers.json` selects these
+copies through its web logo variants for every website view.

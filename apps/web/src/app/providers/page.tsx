@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
-import { SUPPORTED_PROVIDERS } from "@/lib/providers";
+import { WEB_SUPPORTED_PROVIDERS as SUPPORTED_PROVIDERS } from "@ai-status/shared";
 import { site, LIB_NAME } from "@/lib/env";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 import { ProviderSearch } from "@/components/provider-search";
