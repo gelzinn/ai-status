@@ -63,6 +63,7 @@ class ResetCreditsTests(unittest.TestCase):
         self.assertEqual(presentation["rows"][0]["remaining"], "12d 2h left")
         self.assertEqual(presentation["rows"][0]["count"], 2)
         self.assertTrue(presentation["rows"][0]["timezone"].startswith("UTC"))
+        self.assertEqual(presentation["timezone"], "Local time · " + presentation["rows"][0]["timezone"])
         self.assertEqual(presentation["rows"][1], {
             "title": "Reset credit", "count": 1, "expires": "Not provided", "remaining": "", "timezone": ""})
         self.assertNotIn("Expired", json.dumps(presentation))
@@ -99,6 +100,7 @@ class ResetCreditsTests(unittest.TestCase):
         presentation = reset_credits.presentation(result["reset_credits"])
         self.assertEqual(presentation["summary"], "2 resets available")
         self.assertEqual(presentation["details"], ["Expiration not reported"])
+        self.assertEqual(presentation["timezone"], "")
 
     def test_codex_filters_redeemed_credits_without_changing_usage_count(self):
         usage = dict(CODEX, rate_limit_reset_credits=dict(CODEX["rate_limit_reset_credits"], credits=DETAILS["credits"]))
