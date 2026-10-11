@@ -191,7 +191,7 @@ class AccountTests(unittest.TestCase):
         record = self.record("work", env={"TEST_TOKEN": "WORK_TOKEN"}, options={"usage": 20, "region": "test-region"})
         result, output, errors = self.run_cli(["add", "--file", "-"], json.dumps(record))
         self.assertEqual((result, errors), (0, ""))
-        result, output, errors = self.run_cli(["list", "--json"])
+        result, output, errors = self.run_cli(["list", "--saved", "--json"])
         public = json.loads(output)
         self.assertEqual(public[0]["env"], {"TEST_TOKEN": {"from_env": "WORK_TOKEN"}})
         self.assertNotIn("test-region", output)
@@ -201,6 +201,28 @@ class AccountTests(unittest.TestCase):
         self.assertEqual(config.load_accounts()[0]["options"]["region"], "test-region")
         self.assertEqual(self.run_cli(["remove", "work"])[0], 0)
         self.assertEqual(config.load_accounts(), [])
+
+    def test_list_discovers_default_codex_from_shared_collector_cache_without_collecting(self):
+        config.save_config(["codex"])
+        self.save([self.record("work", 42, env={"TEST_TOKEN": "WORK_TOKEN"})])
+        data = fetch.fetch_all_data(include_errors=True)
+        state.save_cache(data)
+        self.assertEqual({entry["_connection_id"] for entry in data}, {"codex", "account:work"})
+        previous = {str(path.relative_to(self.root)): path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
+        with patch.object(fetch, "fetch_all_data", side_effect=AssertionError("List must reuse the shared cache")), \
+                patch.object(accounts, "prepare", side_effect=AssertionError("List must not resolve credentials")):
+            result, output, errors = self.run_cli(["list", "--json"])
+            saved_result, saved_output, saved_errors = self.run_cli(["list", "--saved", "--json"])
+        self.assertEqual((result, errors, saved_result, saved_errors), (0, "", 0, ""))
+        rows = {row["connection_id"]: row for row in json.loads(output)}
+        self.assertEqual(set(rows), {"codex", "account:work"})
+        self.assertEqual((rows["codex"]["source"], rows["codex"]["label"], rows["codex"]["usage_status"]),
+                         ("default", "Default", "available"))
+        self.assertEqual(rows["account:work"]["source"], "saved")
+        self.assertEqual(rows["account:work"]["usage_status"], "available")
+        self.assertEqual(json.loads(saved_output), [accounts.public_record(config.load_accounts()[0])])
+        after = {str(path.relative_to(self.root)): path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
+        self.assertEqual(after, previous)
 
     def test_cli_rejects_literal_secrets_and_leaves_previous_file_intact(self):
         self.save([self.record("existing")])
