@@ -1,6 +1,5 @@
 """Desktop adapter. The Waybar daemon and CLI do not import Qt."""
 import logging
-import math
 from functools import lru_cache
 from pathlib import Path
 import subprocess
@@ -43,15 +42,24 @@ QLabel#brand { color: #eeeeee; font-weight: 500; }
 QAbstractButton { border: none; background: transparent; text-align: left; }
 QAbstractButton:hover, QAbstractButton:focus { background: #1c1c1c; border-radius: 8px; }
 QWidget#creditTable { border: 1px solid #262626; border-radius: 8px; }
-QWidget#creditTableHeader { border-bottom: 1px solid #262626; }
+QWidget#creditTableHeader {
+    background: rgba(255, 255, 255, 10);
+    border-top-left-radius: 7px; border-top-right-radius: 7px;
+}
 QWidget#creditRow { border-top: 1px solid #262626; }
+QWidget#creditTableFooter {
+    background: rgba(255, 255, 255, 10); border-top: 1px solid #262626;
+    border-bottom-left-radius: 7px; border-bottom-right-radius: 7px;
+}
 QScrollArea { border: none; background: transparent; }
 QScrollBar:vertical { background: transparent; width: 5px; margin: 6px 0; }
 QScrollBar::handle:vertical { background: #303030; border-radius: 2px; min-height: 24px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 QPushButton { padding: 6px 8px; }
-QAbstractButton#control { padding: 0; border-radius: 6px; }
+QAbstractButton#control, QAbstractButton#control:hover, QAbstractButton#control:focus {
+    padding: 0; border: none; background: transparent; border-radius: 6px;
+}
 QMenu { background: #111111; border: 1px solid #262626; border-radius: 10px; padding: 6px; }
 QMenu::item { color: #888888; padding: 8px 12px; margin: 1px 0; border-radius: 6px; }
 QMenu::item:selected { background: #1c1c1c; color: #eeeeee; }
@@ -290,23 +298,13 @@ class ArrowIcon(QWidget):
     def __init__(self, back=False):
         super().__init__()
         self.back = back
-        self.setFixedSize(16, 16)
+        size = panel_icons()["size"]
+        self.setFixedSize(size, size)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#aaaaaa"), 1.5)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(pen)
-        path = QPainterPath(QPointF(3, 8))
-        path.lineTo(13, 8)
-        tip, tail = (3, 7) if self.back else (13, 9)
-        path.moveTo(tail, 4)
-        path.lineTo(tip, 8)
-        path.lineTo(tail, 12)
-        painter.drawPath(path)
+        draw_control_icon(painter, QRectF(self.rect()), "arrow-left" if self.back else "arrow-right")
 
 
 class ResetCreditsView(QWidget):
@@ -345,24 +343,34 @@ class ResetCreditsView(QWidget):
         header = QWidget()
         header.setObjectName("creditTableHeader")
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(12, 12, 12, 12)
-        self.available = plain_label("", "#dddddd")
-        header_layout.addWidget(self.available)
-        header_layout.addStretch()
-        table_layout.addWidget(header)
-        columns = QHBoxLayout()
-        columns.setContentsMargins(12, 10, 12, 8)
-        columns.setSpacing(12)
+        header_layout.setContentsMargins(12, 10, 12, 8)
+        header_layout.setSpacing(12)
         for text in ("Reset type", "Expires"):
             label = self.secondary_label(text)
-            columns.addWidget(label, 1)
-        table_layout.addLayout(columns)
+            header_layout.addWidget(label, 1)
+        table_layout.addWidget(header)
         self.rows_widget = QWidget()
         self.rows_layout = QVBoxLayout(self.rows_widget)
         self.rows_layout.setContentsMargins(0, 0, 0, 0)
         self.rows_layout.setSpacing(0)
         table_layout.addWidget(self.rows_widget)
+        self.total_footer = QWidget()
+        self.total_footer.setObjectName("creditTableFooter")
+        footer_layout = QHBoxLayout(self.total_footer)
+        footer_layout.setContentsMargins(12, 12, 12, 12)
+        footer_layout.setSpacing(12)
+        self.available_label = plain_label("Available resets", "#888888")
+        self.available_label.setWordWrap(True)
+        footer_layout.addWidget(self.available_label, 1)
+        self.available = plain_label("", "#eeeeee")
+        self.available.setStyleSheet(self.available.styleSheet() + "font-weight: 500;")
+        self.available.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        footer_layout.addWidget(self.available)
+        table_layout.addWidget(self.total_footer)
         layout.addWidget(self.table)
+        self.timezone_note = self.secondary_label("")
+        self.timezone_note.setWordWrap(True)
+        layout.addWidget(self.timezone_note)
         self.empty = plain_label("No reset credits available.")
         self.empty.setWordWrap(True)
         layout.addWidget(self.empty)
@@ -390,8 +398,12 @@ class ResetCreditsView(QWidget):
         self.cached_label.setVisible(bool(entry.get("_cached")))
         self.cached_label.setToolTip(entry.get("_error", "Unable to refresh"))
         data = reset_credits.available_credits(entry.get("reset_credits"))
-        self.available.setText(f"Available {data['available']}")
+        self.available.setText(str(data["available"]))
         self.table.setVisible(bool(data["available"]))
+        timezone_note = reset_credits.local_timezone_summary(
+            item["expires_at"] for item in data["credits"] if item["expires_at"])
+        self.timezone_note.setText(timezone_note)
+        self.timezone_note.setVisible(bool(data["available"] and timezone_note))
         self.empty.setVisible(not data["available"])
         self.notice.setText("Some reset details haven't been provided yet." if data["undetailed"] else "")
         self.notice.setVisible(bool(data["undetailed"]))
@@ -434,9 +446,7 @@ class ResetCreditsView(QWidget):
             if date:
                 stamp, duration = reset_credits.format_expiry(date)
                 expiry.setText(stamp)
-                offset = date.astimezone().strftime("%z")
-                zone = f"UTC{offset[:3]}:{offset[3:]}"
-                remaining.setText(f"{duration}\n{zone}")
+                remaining.setText(duration)
             else:
                 expiry.setText("Not provided")
                 remaining.setText("")
@@ -502,29 +512,24 @@ class ProviderList(QListWidget):
 
 
 @lru_cache(maxsize=1)
-def settings_icon_path():
-    """The shell's Lucide settings outline, with SVG circular arcs mapped to Qt."""
-    path = QPainterPath(QPointF(9.671, 4.136))
-    for dx, dy, sweep in ((4.659, 0, True), (3.319, 1.915, False),
-                          (2.33, 4.033, True), (0, 3.831, False),
-                          (-2.33, 4.033, True), (-3.319, 1.915, False),
-                          (-4.659, 0, True), (-3.32, -1.915, False),
-                          (-2.33, -4.033, True), (0, -3.831, False),
-                          (2.33, -4.033, True), (3.319, -1.915, False)):
-        start = path.currentPosition()
-        distance = math.hypot(dx, dy)
-        radius = max(2.34, distance / 2)
-        offset = math.sqrt(max(0, radius * radius - distance * distance / 4)) / distance
-        sign = 1 if sweep else -1
-        center = start + QPointF(dx / 2 - sign * dy * offset, dy / 2 + sign * dx * offset)
-        angle = math.degrees(math.atan2(center.y() - start.y(), start.x() - center.x()))
-        end_angle = math.degrees(math.atan2(center.y() - start.y() - dy, start.x() + dx - center.x()))
-        span = (end_angle - angle) % 360
-        if sweep:
-            span -= 360
-        path.arcTo(QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2), angle, span)
-    path.closeSubpath()
-    path.addEllipse(QRectF(9, 9, 6, 6))
+def panel_icons():
+    """Geometry shared by the Quickshell, Windows and macOS panels."""
+    return paths.read_json(ASSETS / "panel-icons.json")
+
+
+@lru_cache(maxsize=16)
+def control_icon_path(name):
+    """Render bundled Lucide paths without requiring QtSvg plugins."""
+    path = QPainterPath()
+    for command, *points in panel_icons()["paths"][name]:
+        if command == "M":
+            path.moveTo(*points)
+        elif command == "L":
+            path.lineTo(*points)
+        elif command == "C":
+            path.cubicTo(*points)
+        elif command == "Z":
+            path.closeSubpath()
     return path
 
 
@@ -532,41 +537,16 @@ def draw_control_icon(painter, rect, name, color="#aaaaaa"):
     """Monochrome Lucide vectors; see quickshell/LUCIDE-LICENSE."""
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.translate(rect.center().x() - 8, rect.center().y() - 8)
-    painter.scale(16 / 24, 16 / 24)
-    pen = QPen(QColor(color), 2)
+    icons = panel_icons()
+    size = icons["size"]
+    painter.translate(rect.center().x() - size / 2, rect.center().y() - size / 2)
+    painter.scale(size / icons["viewBox"], size / icons["viewBox"])
+    pen = QPen(QColor(color), icons["strokeWidth"])
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     painter.setPen(pen)
     painter.setBrush(Qt.BrushStyle.NoBrush)
-    path = QPainterPath()
-    if name == "refresh-cw":
-        path.moveTo(3, 12)
-        path.arcTo(QRectF(3, 3, 18, 18), 180, -135)
-        path.lineTo(21, 8)
-        path.moveTo(21, 3)
-        path.lineTo(21, 8)
-        path.lineTo(16, 8)
-        path.moveTo(21, 12)
-        path.arcTo(QRectF(3, 3, 18, 18), 0, -135)
-        path.lineTo(3, 16)
-        path.moveTo(8, 16)
-        path.lineTo(3, 16)
-        path.lineTo(3, 21)
-    elif name == "settings":
-        path = settings_icon_path()
-    else:
-        points = {
-            "arrow-left": ((12, 19), (5, 12), (12, 5), (19, 12), (5, 12)),
-            "arrow-up": ((5, 12), (12, 5), (19, 12), (12, 19), (12, 5)),
-            "arrow-down": ((19, 12), (12, 19), (5, 12), (12, 5), (12, 19)),
-        }[name]
-        path.moveTo(*points[0])
-        path.lineTo(*points[1])
-        path.lineTo(*points[2])
-        path.moveTo(*points[3])
-        path.lineTo(*points[4])
-    painter.drawPath(path)
+    painter.drawPath(control_icon_path(name))
     painter.restore()
 
 
@@ -575,11 +555,14 @@ class ControlButton(QAbstractButton):
         super().__init__()
         self.icon_name = name
         self.setObjectName("control")
-        self.setFixedSize(28, 28)
+        size = panel_icons()["controls"]["size"]
+        self.setFixedSize(size, size)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setToolTip(label)
         self.setAccessibleName(label)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.loading = False
+        self.keyboard_focus_visible = False
         self.rotation = 0.0
         self.spin = QVariantAnimation(self)
         self.spin.setStartValue(0.0)
@@ -609,17 +592,61 @@ class ControlButton(QAbstractButton):
         self.spin.stop()
         self.rotate_icon(0.0)
 
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.click()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def focusInEvent(self, event):
+        self.keyboard_focus_visible = event.reason() in (
+            Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason)
+        super().focusInEvent(event)
+        self.update()
+
+    def setFocus(self, reason=Qt.FocusReason.OtherFocusReason):
+        # Qt skips focusInEvent when this control is already focused.
+        self.keyboard_focus_visible = reason in (
+            Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason)
+        super().setFocus(reason)
+        self.update()
+
+    def focusOutEvent(self, event):
+        self.keyboard_focus_visible = False
+        super().focusOutEvent(event)
+        self.update()
+
+    def mousePressEvent(self, event):
+        self.keyboard_focus_visible = False
+        super().mousePressEvent(event)
+        self.update()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if self.underMouse() or self.hasFocus():
+        controls = panel_icons()["controls"]
+        foreground = QColor("#aaaaaa" if self.isEnabled() else "#444444")
+        keyboard_focus = self.isEnabled() and self.hasFocus() and self.keyboard_focus_visible
+        if keyboard_focus:
+            foreground = QColor("#eeeeee")
+        if self.isEnabled() and self.underMouse():
+            hover = QColor("white")
+            hover.setAlphaF(controls["hoverOpacity"])
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor("#1c1c1c"))
-            painter.drawRoundedRect(QRectF(self.rect()), 6, 6)
+            painter.setBrush(hover)
+            painter.drawRoundedRect(QRectF(self.rect()), controls["radius"], controls["radius"])
+        if keyboard_focus:
+            focus = QColor("white")
+            focus.setAlphaF(controls["focusOpacity"])
+            painter.setPen(QPen(focus, 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5),
+                                    controls["radius"], controls["radius"])
         painter.translate(self.width() / 2, self.height() / 2)
         painter.rotate(self.rotation)
         painter.translate(-self.width() / 2, -self.height() / 2)
-        draw_control_icon(painter, QRectF(self.rect()), self.icon_name, "#aaaaaa" if self.isEnabled() else "#444444")
+        draw_control_icon(painter, QRectF(self.rect()), self.icon_name, foreground)
 
 
 class UsageWorker(QObject):

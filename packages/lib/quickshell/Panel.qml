@@ -18,37 +18,9 @@ Ui.Panel {
     readonly property var resetEntry: resetProvider ? Plugin.Model.snapshot.providers.find(entry => entry.id === resetProvider.id && entry.idx === resetProvider.idx) || null : null
     readonly property string panelFont: bar ? bar.fontFamily : Style.font.family
 
-    component IconButton: Ui.WidgetButton {
-        id: iconButton
-        property string iconName: ""
-        property bool spinning: false
+    component IconButton: Plugin.PanelIconButton {
         bar: root.bar
-        fixedWidth: Style.space(28)
-        fixedHeight: Style.space(28)
-        labelVisible: false
-        hasVisualContent: true
-        opacity: enabled ? 1 : 0.35
-        Accessible.role: Accessible.Button
-        Accessible.name: tooltipText
-        Accessible.onPressAction: if (enabled) triggerPress(Qt.LeftButton)
-        Plugin.PanelIcon {
-            id: controlIcon
-            objectName: iconButton.objectName + "-icon"
-            anchors.centerIn: parent
-            width: Style.space(16)
-            height: Style.space(16)
-            name: iconButton.iconName
-            foreground: iconButton.foreground
-            NumberAnimation on rotation {
-                id: spin
-                from: 0
-                to: 360
-                duration: 1000
-                loops: Animation.Infinite
-                running: iconButton.spinning && iconButton.visible
-                onRunningChanged: if (!running) controlIcon.rotation = 0
-            }
-        }
+        foreground: root.barForeground
     }
 
     function configure() {
@@ -79,7 +51,7 @@ Ui.Panel {
         settingsScrollPosition = scroller.contentY
         aboutPage = true
         scroller.contentY = 0
-        backButton.forceActiveFocus()
+        backButton.focusProgrammatically()
     }
 
     function goBack() {
@@ -98,7 +70,7 @@ Ui.Panel {
         usageScrollPosition = scroller.contentY
         resetProvider = {id: provider, idx: idx}
         scroller.contentY = 0
-        Qt.callLater(() => backButton.forceActiveFocus())
+        Qt.callLater(() => backButton.focusProgrammatically())
     }
 
     function switchPanel(direction) {
@@ -126,15 +98,16 @@ Ui.Panel {
 
         Ui.PanelKeyCatcher {
             id: keyCatcher
+            objectName: "panel-key-catcher"
             anchors.fill: parent
             onCloseRequested: {
                 if (root.configurationPage || root.resetProvider) root.goBack()
                 else root.close()
             }
             onTabRequested: direction => {
-                if (root.aboutPage) backButton.forceActiveFocus()
+                if (root.aboutPage) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
                 else if (root.configurationPage) settings.focusFirstControl()
-                else if (root.resetProvider) backButton.forceActiveFocus()
+                else if (root.resetProvider) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
                 else root.switchPanel(direction)
             }
             onMoveRequested: (dx, dy) => {

@@ -33,4 +33,5 @@ dist/
 .idea/
 .DS_Store
 !packages/shared/providers/providers.json
+!packages/lib/assets/panel-icons.json
 !manifest.json

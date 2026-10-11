@@ -3,7 +3,8 @@ import QtQuick
 Item {
     signal settingsSaved()
     property string errorMessage: ""
-    function action(command) {}
+    property var actions: []
+    function action(command) { actions = actions.concat([command]) }
     property var saved: null
     property var chosen: null
     property bool settingsSaving: false
@@ -13,6 +14,7 @@ Item {
     function saveSettings(settings) { saved = settings }
     function selectMetric(provider, idx, metric) { chosen = {provider: provider, idx: idx, metric: metric} }
     function reset() {
+        actions = []
         saved = null
         chosen = null
         settingsError = ""

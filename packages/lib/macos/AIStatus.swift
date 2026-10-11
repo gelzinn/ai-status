@@ -98,6 +98,7 @@ struct ResetCredits: Decodable {
     let available: Int
     let rows: [CreditRow]
     let undetailed: Int
+    let timezone: String?
 }
 
 struct Provider: Decodable, Identifiable {
@@ -201,6 +202,10 @@ struct SettingsDraft {
 enum Assets {
     static let font = Font.custom("GeistMono-Regular", size: 13)
     static let cache = NSCache<NSString, NSImage>()
+    static let panelIcons: PanelIcons = {
+        do { return try PanelIcons.load() }
+        catch { preconditionFailure("Bundled panel icons are unavailable: \(error)") }
+    }()
     static func url(_ path: String) -> URL? {
         Bundle.main.resourceURL?.appendingPathComponent("assets").appendingPathComponent(path)
     }
@@ -224,14 +229,72 @@ enum Assets {
     }
 }
 
+struct PanelIcons: Decodable {
+    struct Controls: Decodable {
+        let size: CGFloat
+        let radius: CGFloat
+        let hoverOpacity: Double
+        let focusOpacity: Double
+    }
+
+    enum Command: Decodable {
+        case move(CGPoint), line(CGPoint), curve(CGPoint, CGPoint, CGPoint), close
+
+        init(from decoder: Decoder) throws {
+            var values = try decoder.unkeyedContainer()
+            let operation = try values.decode(String.self)
+            func point() throws -> CGPoint {
+                let x = try values.decode(CGFloat.self)
+                let y = try values.decode(CGFloat.self)
+                guard x.isFinite, y.isFinite else { throw AppError.message("Panel icon coordinates must be finite.") }
+                return CGPoint(x: x, y: y)
+            }
+            switch operation {
+            case "M": self = .move(try point())
+            case "L": self = .line(try point())
+            case "C":
+                let first = try point(), second = try point(), end = try point()
+                self = .curve(first, second, end)
+            case "Z": self = .close
+            default: throw AppError.message("Unsupported panel icon command: \(operation)")
+            }
+            guard values.isAtEnd else { throw AppError.message("Unexpected panel icon command coordinates.") }
+        }
+    }
+
+    let viewBox: CGFloat
+    let size: CGFloat
+    let strokeWidth: CGFloat
+    let controls: Controls
+    let paths: [String: [Command]]
+
+    static func load() throws -> PanelIcons {
+        guard let url = Assets.url("panel-icons.json") else { throw AppError.message("Bundled panel icons are missing.") }
+        let icons = try JSONDecoder().decode(PanelIcons.self, from: Data(contentsOf: url))
+        guard icons.viewBox.isFinite, icons.viewBox > 0, icons.size.isFinite, icons.size > 0,
+              icons.strokeWidth.isFinite, icons.strokeWidth > 0,
+              icons.controls.size.isFinite, icons.controls.size >= icons.size,
+              icons.controls.radius.isFinite, icons.controls.radius >= 0,
+              (0...1).contains(icons.controls.hoverOpacity), (0...1).contains(icons.controls.focusOpacity),
+              ["refresh-cw", "settings", "arrow-left", "arrow-right", "arrow-up", "arrow-down", "chevron-down"]
+                .allSatisfy({ icons.paths[$0]?.isEmpty == false }) else {
+            throw AppError.message("Bundled panel icon geometry or controls are invalid.")
+        }
+        return icons
+    }
+}
+
 final class Model: ObservableObject {
     @Published var snapshot: Snapshot?
-    @Published var page: Page = .usage
+    @Published var page: Page = .usage {
+        didSet { if page != oldValue { keyboardFocusVisible = false } }
+    }
     @Published var draft = SettingsDraft()
     @Published var error = ""
     @Published var settingsError = ""
     @Published var settingsSaving = false
     @Published var isPresented = false
+    @Published var keyboardFocusVisible = false
     var changed: (() -> Void)?
     private let runtime: RuntimeConfig?
     private var backend: Process?
@@ -242,6 +305,19 @@ final class Model: ObservableObject {
     private var stopping = false
 
     init(runtime: RuntimeConfig? = nil) { self.runtime = runtime }
+
+    func observeFocusInput(_ event: NSEvent) {
+        guard isPresented else { return }
+        switch event.type {
+        case .keyDown:
+            if event.keyCode == 48 && event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+                keyboardFocusVisible = true
+            }
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            keyboardFocusVisible = false
+        default: break
+        }
+    }
 
     var choices: [Choice] {
         guard let snapshot = snapshot else { return [] }
@@ -480,6 +556,7 @@ private enum Palette {
     static let border = Color.white.opacity(0.10)
     static let bright = Color(red: 238 / 255, green: 238 / 255, blue: 238 / 255)
     static let dim = Color(red: 136 / 255, green: 136 / 255, blue: 136 / 255)
+    static let control = Color(red: 170 / 255, green: 170 / 255, blue: 170 / 255)
 }
 
 struct ProviderLogo: View {
@@ -513,18 +590,79 @@ struct HoverButton<Label: View>: View {
     }
 }
 
+struct PanelIconShape: Shape {
+    let commands: [PanelIcons.Command]
+    let viewBox: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        func scaled(_ point: CGPoint) -> CGPoint {
+            CGPoint(x: rect.minX + point.x * rect.width / viewBox,
+                    y: rect.minY + point.y * rect.height / viewBox)
+        }
+        var path = Path()
+        for command in commands {
+            switch command {
+            case .move(let point): path.move(to: scaled(point))
+            case .line(let point): path.addLine(to: scaled(point))
+            case .curve(let first, let second, let end):
+                path.addCurve(to: scaled(end), control1: scaled(first), control2: scaled(second))
+            case .close: path.closeSubpath()
+            }
+        }
+        return path
+    }
+}
+
+struct PanelIcon: View {
+    let name: String
+    private let icons = Assets.panelIcons
+    var body: some View {
+        PanelIconShape(commands: icons.paths[name] ?? [], viewBox: icons.viewBox)
+            .stroke(style: StrokeStyle(lineWidth: icons.strokeWidth * icons.size / icons.viewBox,
+                                       lineCap: .round, lineJoin: .round))
+            .frame(width: icons.size, height: icons.size)
+            .accessibilityHidden(true)
+    }
+}
+
+private struct ControlKeyboardFocusVisibleKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private extension EnvironmentValues {
+    var controlKeyboardFocusVisible: Bool {
+        get { self[ControlKeyboardFocusVisibleKey.self] }
+        set { self[ControlKeyboardFocusVisibleKey.self] = newValue }
+    }
+}
+
 struct ControlButton: View {
-    let symbol: String
+    let icon: String
     let help: String
     var spinning = false
     let action: () -> Void
+    @State private var hovering = false
+    @FocusState private var focused: Bool
+    @Environment(\.controlKeyboardFocusVisible) private var keyboardFocusVisible
+    @Environment(\.isEnabled) private var enabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let controls = Assets.panelIcons.controls
     var body: some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 14)).rotationEffect(.degrees(spinning && !reduceMotion ? 360 : 0))
+            PanelIcon(name: icon).rotationEffect(.degrees(spinning && !reduceMotion ? 360 : 0))
                 .animation(spinning && !reduceMotion ? .linear(duration: 1).repeatForever(autoreverses: false) : nil, value: spinning)
-                .frame(width: 28, height: 28).contentShape(Rectangle())
-        }.buttonStyle(.plain).help(help).accessibilityLabel(help)
+                .frame(width: controls.size, height: controls.size).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focused($focused)
+        .foregroundColor(focused && keyboardFocusVisible && enabled ? Palette.bright : Palette.control)
+        .background(RoundedRectangle(cornerRadius: controls.radius)
+            .fill(hovering && enabled ? Color.white.opacity(controls.hoverOpacity) : .clear))
+        .overlay(RoundedRectangle(cornerRadius: controls.radius)
+            .stroke(focused && keyboardFocusVisible && enabled ? Color.white.opacity(controls.focusOpacity) : .clear, lineWidth: 1))
+        .opacity(enabled ? 1 : 0.4)
+        .onHover { hovering = $0 }
+        .help(help).accessibilityLabel(help)
     }
 }
 
@@ -616,7 +754,7 @@ struct UsagePage: View {
                             HStack {
                                 Text("Reset credits: \(credits.available) available")
                                 Spacer()
-                                Image(systemName: "arrow.right")
+                                PanelIcon(name: "arrow-right")
                             }
                         }.padding(.leading, 18)
                     }
@@ -671,9 +809,9 @@ struct SettingsPage: View {
                             }
                         }.toggleStyle(.checkbox)
                         Spacer(minLength: 0)
-                        ControlButton(symbol: "arrow.up", help: "Move \(model.providerName(provider)) up",
+                        ControlButton(icon: "arrow-up", help: "Move \(model.providerName(provider)) up",
                                       action: { model.moveProvider(provider, -1) }).disabled(model.draft.order.first == provider)
-                        ControlButton(symbol: "arrow.down", help: "Move \(model.providerName(provider)) down",
+                        ControlButton(icon: "arrow-down", help: "Move \(model.providerName(provider)) down",
                                       action: { model.moveProvider(provider, 1) }).disabled(model.draft.order.last == provider)
                     }.padding(.vertical, 3)
                 }
@@ -683,7 +821,7 @@ struct SettingsPage: View {
                     .font(.custom("GeistMono-Regular", size: 11)).foregroundColor(.orange)
             }
             HoverButton(bordered: true, action: model.showAbout) {
-                HStack { Text("About AI Status"); Spacer(); Image(systemName: "arrow.right") }
+                HStack { Text("About AI Status"); Spacer(); PanelIcon(name: "arrow-right") }
             }
         }.disabled(model.settingsSaving)
     }
@@ -705,10 +843,9 @@ struct ResetCreditsPage: View {
             }
             if let credits = provider.resetCredits, credits.available > 0 {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Available \(credits.available)").foregroundColor(Palette.bright).padding(12)
-                    Divider()
-                    HStack { Text("Reset type").frame(maxWidth: .infinity, alignment: .leading); Text("Expires").frame(maxWidth: .infinity, alignment: .leading) }
+                    HStack(spacing: 12) { Text("Reset type").frame(maxWidth: .infinity, alignment: .leading); Text("Expires").frame(maxWidth: .infinity, alignment: .leading) }
                         .font(.custom("GeistMono-Regular", size: 11)).padding(12)
+                        .background(Palette.bright.opacity(0.04))
                     ForEach(Array(credits.rows.enumerated()), id: \.offset) { _, row in
                         Divider()
                         HStack(alignment: .top, spacing: 12) {
@@ -718,11 +855,22 @@ struct ResetCreditsPage: View {
                             }.frame(maxWidth: .infinity, alignment: .leading)
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(row.expires).foregroundColor(Palette.bright)
-                                Text(row.remaining + (row.timezone.isEmpty ? "" : "\n" + row.timezone)).font(.custom("GeistMono-Regular", size: 11))
+                                Text(row.remaining).font(.custom("GeistMono-Regular", size: 11))
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }.padding(12)
                     }
-                }.overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.border))
+                    Divider()
+                    HStack(spacing: 12) {
+                        Text("Available resets").foregroundColor(Palette.dim)
+                        Spacer()
+                        Text("\(credits.available)").foregroundColor(Palette.bright).fontWeight(.medium)
+                    }.padding(12)
+                        .background(Palette.bright.opacity(0.04))
+                }.clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.border))
+                if let timezone = credits.timezone, !timezone.isEmpty {
+                    Text(timezone).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(Palette.dim)
+                }
                 if credits.undetailed > 0 { Text("Some reset details haven't been provided yet.").font(.custom("GeistMono-Regular", size: 11)) }
             } else { Text("No reset credits available.") }
         }
@@ -742,7 +890,7 @@ struct AboutPage: View {
                 ForEach([(name: "GitHub", url: info.github), (name: "Documentation", url: info.documentation),
                          (name: "Report a bug", url: info.issues)], id: \.name) { link in
                     HoverButton(bordered: true, action: { if let url = URL(string: link.url), url.scheme == "https" { NSWorkspace.shared.open(url) } }) {
-                        HStack { Text(link.name); Spacer(); Image(systemName: "arrow.right") }
+                        HStack { Text(link.name); Spacer(); PanelIcon(name: "arrow-right") }
                     }
                 }
             }
@@ -763,17 +911,17 @@ struct PanelView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 if model.page != .usage {
-                    ControlButton(symbol: "arrow.left", help: model.page == .about ? "Back to settings (Esc)" : "Back to usage (Esc)", action: model.back)
+                    ControlButton(icon: "arrow-left", help: model.page == .about ? "Back to settings (Esc)" : "Back to usage (Esc)", action: model.back)
                         .disabled(model.settingsSaving)
                 }
                 Text(model.page == .about ? "About" : model.page == .settings ? "Settings" : "AI Status").foregroundColor(Palette.bright)
                 Spacer(minLength: 0)
                 Text(model.snapshot.map { "v" + $0.version.current } ?? "").font(.custom("GeistMono-Regular", size: 11))
                 if model.page != .settings && model.page != .about {
-                    ControlButton(symbol: "arrow.clockwise", help: "Refresh usage (R)",
+                    ControlButton(icon: "refresh-cw", help: "Refresh usage (R)",
                                   spinning: model.snapshot?.loading == true && model.isPresented, action: model.refresh)
                         .disabled(model.snapshot?.loading == true)
-                    if model.page == .usage { ControlButton(symbol: "gearshape", help: "Configure (C)", action: model.showSettings) }
+                    if model.page == .usage { ControlButton(icon: "settings", help: "Configure (C)", action: model.showSettings) }
                 }
             }.padding(.horizontal, 16).frame(height: 49)
             Divider().overlay(Palette.border)
@@ -806,6 +954,7 @@ struct PanelView: View {
         }
         .frame(width: 380).frame(maxHeight: .infinity)
         .font(Assets.font).foregroundColor(Palette.dim).background(Palette.surface)
+        .environment(\.controlKeyboardFocusVisible, model.keyboardFocusVisible)
         .preferredColorScheme(.dark)
     }
 }
@@ -814,7 +963,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let model: Model
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
-    private var keyMonitor: Any?
+    private var inputMonitor: Any?
     private var signalSources: [DispatchSourceSignal] = []
     private var spinnerTimer: Timer?
     private var spinnerFrame = 0
@@ -846,9 +995,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             }
         }
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(receiveCommand(_:)), name: commandNotification, object: nil)
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        inputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
             guard let self = self else { return event }
-            return self.handleKey(event)
+            self.model.observeFocusInput(event)
+            return event.type == .keyDown ? self.handleKey(event) : event
         }
         for number in [SIGTERM, SIGINT, SIGHUP, SIGUSR2] {
             signal(number, SIG_IGN)
@@ -899,6 +1049,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func show() {
         guard let button = statusItem.button else { return }
         resize()
+        model.keyboardFocusVisible = false
         model.isPresented = true
         NSApp.activate(ignoringOtherApps: true)
         if !popover.isShown { popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY) }
@@ -952,13 +1103,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         return event
     }
     func popoverDidClose(_ notification: Notification) {
+        model.keyboardFocusVisible = false
         model.isPresented = false
         if !model.settingsSaving { model.page = .usage }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { openUsage(nil); return false }
     func applicationWillTerminate(_ notification: Notification) {
         spinnerTimer?.invalidate()
-        if let monitor = keyMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = inputMonitor { NSEvent.removeMonitor(monitor) }
         DistributedNotificationCenter.default().removeObserver(self)
         model.shutdown()
         NSStatusBar.system.removeStatusItem(statusItem)
@@ -1020,13 +1172,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
          "iconMode":"logo","logoPath":"","loading":false,
          "providers":[{"id":"codex","idx":0,"name":"Codex (Pro)","logoPath":"","loading":false,"cached":false,"error":"",
          "metrics":[{"key":"weekly","name":"Weekly Usage","percentage":27,"detail":"Resets in 3d 14h"}],
-         "resetCredits":{"available":3,"undetailed":0,"rows":[{"title":"5-hour + weekly reset","count":2,"expires":"Oct 15, 14:00","remaining":"5d left","timezone":"UTC+00:00"},
-         {"title":"Weekly reset","count":1,"expires":"Oct 20, 14:00","remaining":"10d left","timezone":"UTC+00:00"}]}},
+         "resetCredits":{"available":3,"undetailed":0,"timezone":"Local time · UTC-03:00","rows":[{"title":"Full reset","count":1,"expires":"Oct 22, 18:05","remaining":"12d 1h left","timezone":"UTC-03:00"},
+         {"title":"Full reset","count":1,"expires":"Oct 29, 18:05","remaining":"18d 23h left","timezone":"UTC-03:00"},
+         {"title":"Full reset","count":1,"expires":"Nov 06, 20:41","remaining":"27d 1h left","timezone":"UTC-03:00"}]}},
          {"id":"claude","idx":0,"name":"Claude (Max)","logoPath":"","loading":false,"cached":false,"error":"",
          "metrics":[{"key":"rolling","name":"Rolling Usage","percentage":9,"detail":"Resets in 34m"},
          {"key":"weekly","name":"Weekly Usage","percentage":46,"detail":"Resets in 3d 12h"},
          {"key":"weekly:Fable","name":"Weekly Usage","percentage":0,"detail":"Fable · Resets in 3d 12h"}],
-         "resetCredits":{"available":1,"undetailed":0,"rows":[{"title":"Usage reset","count":1,"expires":"Oct 15, 14:00","remaining":"5d left","timezone":"UTC+00:00"}]}}],
+         "resetCredits":{"available":1,"undetailed":0,"timezone":"Local time · UTC+00:00","rows":[{"title":"Usage reset","count":1,"expires":"Oct 15, 14:00","remaining":"5d left","timezone":"UTC+00:00"}]}}],
          "settings":{"available":["codex","claude","antigravity","commandcode","copilot","kiro","opencode","zai"],
          "names":{"codex":"Codex","claude":"Claude","antigravity":"Antigravity","commandcode":"Command Code","copilot":"Copilot","kiro":"Kiro","opencode":"OpenCode","zai":"Z.AI"},
          "order":["codex","claude","antigravity","commandcode","copilot","kiro","opencode","zai"],
@@ -1040,6 +1193,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         guard Assets.image() != nil, Assets.url("fonts/GeistMono-Regular.ttf").map({ FileManager.default.isReadableFile(atPath: $0.path) }) == true else {
             throw AppError.message("Bundled app artwork or Geist Mono is missing.")
         }
+        _ = try PanelIcons.load()
+        try smokeFocusInput()
         let model = Model()
         model.accept(Data(sample.utf8))
         guard let snapshot = model.snapshot, snapshot.providers.count == 2,
@@ -1060,7 +1215,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             model.page = page
             try renderSmokePage(model, name: name, directory: previewDirectory)
         }
-        print("AI Status macOS smoke OK: usage, settings, reset credits, about, accounts, metered values, resources, snapshot validation")
+        print("AI Status macOS smoke OK: usage, settings, reset credits, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+    }
+
+    private static func smokeFocusInput() throws {
+        func tabEvent(_ modifiers: NSEvent.ModifierFlags) -> NSEvent? {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
+                             windowNumber: 0, context: nil, characters: "\t", charactersIgnoringModifiers: "\t",
+                             isARepeat: false, keyCode: 48)
+        }
+        guard let tab = tabEvent([]), let backTab = tabEvent(.shift), let commandTab = tabEvent(.command),
+              let click = NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                            windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else {
+            throw AppError.message("Unable to create keyboard focus smoke events.")
+        }
+        let model = Model()
+        guard !model.keyboardFocusVisible else { throw AppError.message("Initial focus showed a keyboard outline.") }
+        model.observeFocusInput(tab)
+        guard !model.keyboardFocusVisible else { throw AppError.message("A hidden panel accepted Tab focus.") }
+        model.isPresented = true
+        model.observeFocusInput(commandTab)
+        guard !model.keyboardFocusVisible else { throw AppError.message("Command-Tab enabled a panel focus outline.") }
+        model.observeFocusInput(tab)
+        guard model.keyboardFocusVisible else { throw AppError.message("Tab navigation did not enable a focus outline.") }
+        model.observeFocusInput(click)
+        guard !model.keyboardFocusVisible else { throw AppError.message("A mouse click retained the keyboard focus outline.") }
+        model.observeFocusInput(backTab)
+        guard model.keyboardFocusVisible else { throw AppError.message("Shift-Tab navigation did not enable a focus outline.") }
+        model.page = .settings
+        guard !model.keyboardFocusVisible else { throw AppError.message("A new page inherited a keyboard focus outline.") }
     }
 
     private static func smokeAccounts(sample: String, directory: URL?) throws {

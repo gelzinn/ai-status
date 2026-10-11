@@ -1,4 +1,8 @@
 import json
+import os
+import time
+import unittest
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import patch
 
@@ -22,6 +26,74 @@ CLAUDE_USAGE = {
 CODEX_USAGE = {"plan_type": "pro", "rate_limit": {"primary_window": {
     "used_percent": 23, "limit_window_seconds": 18000, "reset_after_seconds": 3600}},
     "rate_limit_reset_credits": {"available_count": 2}}
+
+
+@contextmanager
+def local_timezone(zone):
+    try:
+        with patch.dict(os.environ, {"TZ": zone}):
+            time.tzset()
+            yield
+    finally:
+        time.tzset()
+
+
+@unittest.skipUnless(hasattr(time, "tzset"), "Requires a configurable local timezone")
+class ResetCreditsTimezoneTests(unittest.TestCase):
+    def row(self, expires_at, now):
+        block = {"available": 1, "credits": [
+            {"title": "Full reset", "count": 1, "expires_at": expires_at}]}
+        return reset_credits.presentation(block, reset_credits.expiry(now))["rows"][0]
+
+    def test_expiry_uses_local_time_including_half_hour_offsets(self):
+        for zone, stamp, offset in (
+                ("America/Sao_Paulo", "Oct 22, 13:00", "-03:00"),
+                ("Asia/Kolkata", "Oct 22, 21:30", "+05:30")):
+            with self.subTest(zone=zone), local_timezone(zone):
+                row = self.row("2026-10-22T16:00:00Z", "2026-10-10T14:00:00Z")
+                self.assertEqual(row["expires"], stamp)
+                self.assertEqual(row["timezone"], "UTC" + offset)
+                self.assertEqual(row["remaining"], "12d 2h left")
+
+    def test_expiry_includes_year_only_when_local_year_changes(self):
+        with local_timezone("Pacific/Auckland"):
+            for now, expires_at, stamp, remaining in (
+                    ("2026-12-31T10:00:00Z", "2026-12-31T12:00:00Z", "Jan 01, 2027 01:00", "2h 0m left"),
+                    ("2026-12-31T11:00:00Z", "2026-12-31T12:00:00Z", "Jan 01, 01:00", "1h 0m left"),
+                    ("2026-12-31T23:00:00Z", "2027-01-01T00:00:00Z", "Jan 01, 13:00", "1h 0m left")):
+                with self.subTest(now=now, expires_at=expires_at):
+                    row = self.row(expires_at, now)
+                    self.assertEqual(row["expires"], stamp)
+                    self.assertEqual(row["timezone"], "UTC+13:00")
+                    self.assertEqual(row["remaining"], remaining)
+
+    def test_expiry_offset_tracks_daylight_saving_at_expiration(self):
+        with local_timezone("America/Los_Angeles"):
+            for expires_at, now, stamp, offset in (
+                    ("2026-01-10T16:00:00Z", "2026-01-09T14:00:00Z", "Jan 10, 08:00", "-08:00"),
+                    ("2026-07-10T16:00:00Z", "2026-07-09T14:00:00Z", "Jul 10, 09:00", "-07:00")):
+                with self.subTest(expires_at=expires_at):
+                    row = self.row(expires_at, now)
+                    self.assertEqual(row["expires"], stamp)
+                    self.assertEqual(row["timezone"], "UTC" + offset)
+                    self.assertEqual(row["remaining"], "1d 2h left")
+            row = self.row("2026-03-08T10:00:00Z", "2026-03-08T09:00:00Z")
+            self.assertEqual(row["expires"], "Mar 08, 03:00")
+            self.assertEqual(row["timezone"], "UTC-07:00")
+            self.assertEqual(row["remaining"], "1h 0m left")
+            block = {"available": 5, "credits": [
+                {"count": 1, "expires_at": "2026-07-10T16:00:00Z"},
+                {"count": 1, "expires_at": "2026-07-11T16:00:00Z"},
+                {"count": 1, "expires_at": "2026-01-10T16:00:00Z"},
+                {"count": 1, "expires_at": None},
+                {"count": 1, "expires_at": "2025-12-31T16:00:00Z"}]}
+            presentation = reset_credits.presentation(block, reset_credits.expiry("2026-01-01T00:00:00Z"))
+            self.assertEqual(presentation["timezone"], "Local time · UTC-07:00 / UTC-08:00")
+            self.assertEqual(presentation["available"], 4)
+            summer = reset_credits.expiry("2026-07-10T16:00:00Z")
+            self.assertEqual(reset_credits.local_timezone_summary([summer, None, summer]), "Local time · UTC-07:00")
+            self.assertEqual(reset_credits.local_timezone_summary([None]), "")
+            self.assertEqual(reset_credits.local_timezone_summary([]), "")
 
 
 class ResetCreditsTests(IsolatedState):

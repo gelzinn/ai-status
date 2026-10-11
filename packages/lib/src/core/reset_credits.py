@@ -96,6 +96,18 @@ def format_expiry(date, now=None):
     return stamp, duration + " left"
 
 
+def local_timezone(date):
+    """Label the system's local UTC offset at the expiration date."""
+    offset = date.astimezone().strftime("%z")
+    return f"UTC{offset[:3]}:{offset[3:]}"
+
+
+def local_timezone_summary(dates):
+    """Describe the local offsets represented by the available expiration dates."""
+    offsets = dict.fromkeys(local_timezone(date) for date in dates if date)
+    return "Local time · " + " / ".join(offsets) if offsets else ""
+
+
 def display_lines(block, now=None):
     data = available_credits(block, now)
     if not data["available"]:
@@ -140,11 +152,11 @@ def presentation(block, now=None):
     for item in credits:
         date = item["expires_at"]
         stamp, remaining = format_expiry(date, now) if date else ("Not provided", "")
-        offset = date.astimezone().strftime("%z") if date else ""
-        zone = f"UTC{offset[:3]}:{offset[3:]}" if offset else ""
+        zone = local_timezone(date) if date else ""
         rows.append({"title": item["title"], "count": item["count"],
                      "expires": stamp, "remaining": remaining, "timezone": zone})
     available = data["available"]
     return {"available": available,
             "summary": f"{available} reset{'s' if available != 1 else ''} available",
-            "details": details, "rows": rows, "undetailed": data["undetailed"]}
+            "details": details, "rows": rows, "undetailed": data["undetailed"],
+            "timezone": local_timezone_summary(item["expires_at"] for item in data["credits"])}
