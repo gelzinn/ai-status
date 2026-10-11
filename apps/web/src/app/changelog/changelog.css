@@ -82,7 +82,7 @@
 @media (max-width: 380px) {
 	.changelog-page-header h1 { font-size: 38px; letter-spacing: -.8px; }
 }
-.changelog-prose .changelog-section { border-bottom: 1px solid var(--border); margin-top: 32px; }
+.changelog-prose .changelog-section { margin-top: 32px; }
 .changelog-prose .changelog-section + .changelog-section { margin-top: 0; }
 .changelog-section summary { min-height: 56px; display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; color: var(--foreground); }
 .changelog-section summary::-webkit-details-marker { display: none; }
