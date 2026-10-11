@@ -344,36 +344,90 @@ Ui.Panel {
                     }
                 }
             }
-            Row {
+            Item {
                 id: footer
+                objectName: "settings-footer"
                 anchors.bottom: parent.bottom
-                anchors.right: parent.right
-                spacing: Style.space(8)
+                width: parent.width
+                height: footerDivider.height + Style.space(12) + footerActions.height
                 visible: root.configurationPage && !root.aboutPage
-                Text {
-                    visible: settings.saved
-                    text: "Saved"
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: root.barForeground
-                    font.family: root.panelFont
-                    font.pixelSize: Style.font.caption
+                Rectangle {
+                    id: footerDivider
+                    objectName: "settings-footer-divider"
+                    x: -panel.padding
+                    width: parent.width + panel.padding * 2
+                    height: Style.space(1)
+                    color: divider.color
                 }
-                Plugin.PanelButton {
-                    objectName: "settings-cancel"
-                    text: "Cancel"
-                    foreground: root.barForeground
-                    fontFamily: root.panelFont
-                    enabled: !Plugin.Model.settingsSaving
-                    onClicked: root.showUsage()
+                Item {
+                    id: saveStatus
+                    objectName: "settings-status"
+                    anchors.left: parent.left
+                    anchors.right: footerActions.left
+                    anchors.rightMargin: Style.space(12)
+                    anchors.verticalCenter: footerActions.verticalCenter
+                    height: footerActions.height
+                    readonly property bool saving: Plugin.Model.settingsSaving
+                    readonly property bool failed: !saving && Plugin.Model.settingsError !== ""
+                    visible: saving || failed || settings.saved
+                    Plugin.PanelIcon {
+                        id: statusIcon
+                        objectName: "settings-status-icon"
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Style.space(14)
+                        height: width
+                        visible: saveStatus.saving || (!saveStatus.failed && settings.saved)
+                        name: saveStatus.saving ? "loader-circle" : "check"
+                        foreground: root.barForeground
+                        NumberAnimation on rotation {
+                            from: 0
+                            to: 360
+                            duration: 1000
+                            loops: Animation.Infinite
+                            running: saveStatus.saving && saveStatus.visible && footer.visible
+                            onRunningChanged: if (!running) statusIcon.rotation = 0
+                        }
+                    }
+                    Text {
+                        objectName: "settings-status-label"
+                        anchors.left: parent.left
+                        anchors.leftMargin: statusIcon.visible ? statusIcon.width + Style.space(6) : 0
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: saveStatus.saving ? "Saving…" : saveStatus.failed ? "Error" : settings.saved ? "Saved" : ""
+                        textFormat: Text.PlainText
+                        elide: Text.ElideRight
+                        color: saveStatus.failed ? Commons.Color.urgent : root.barForeground
+                        font.family: root.panelFont
+                        font.pixelSize: Style.font.caption
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: text
+                    }
                 }
-                Plugin.PanelButton {
-                    objectName: "settings-save"
-                    text: Plugin.Model.settingsSaving ? "Saving…" : "Save"
-                    foreground: root.barForeground
-                    fontFamily: root.panelFont
-                    outlined: true
-                    enabled: settings.valid && !Plugin.Model.settingsSaving
-                    onClicked: settings.save()
+                Row {
+                    id: footerActions
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    spacing: Style.space(8)
+                    Plugin.PanelButton {
+                        objectName: "settings-cancel"
+                        text: "Cancel"
+                        foreground: root.barForeground
+                        fontFamily: root.panelFont
+                        outlined: true
+                        enabled: !Plugin.Model.settingsSaving
+                        onClicked: root.showUsage()
+                    }
+                    Plugin.PanelButton {
+                        objectName: "settings-save"
+                        text: "Save"
+                        foreground: Commons.Color.popups.background
+                        fontFamily: root.panelFont
+                        primary: true
+                        enabled: settings.valid && !Plugin.Model.settingsSaving
+                        onClicked: settings.save()
+                    }
                 }
             }
         }
