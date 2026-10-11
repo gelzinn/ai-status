@@ -26,7 +26,7 @@ Item {
             Plugin.Model.reset()
             Plugin.Model.settingsSaving = false
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
-            snapshot.providers[1].resetCredits = {available: 2, rows: [
+            snapshot.providers[1].resetCredits = {available: 2, timezone: "Local time · UTC+00:00", rows: [
                 {title: "Full reset", count: 2, expires: "Oct 22, 18:05", remaining: "12d 2h left", timezone: "UTC+00:00"}
             ], undetailed: 0}
             Plugin.Model.snapshot = snapshot

@@ -389,7 +389,7 @@ Item {
         }
         function test_reset_page_matches_windows_and_updates_without_selection_changes() {
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
-            snapshot.providers[1].resetCredits = {available: 5, undetailed: 3, rows: [
+            snapshot.providers[1].resetCredits = {available: 5, undetailed: 3, timezone: "Local time · UTC-03:00", rows: [
                 {title: "Full reset", count: 1, expires: "Oct 22, 18:05", remaining: "12d 2h left", timezone: "UTC-03:00"},
                 {title: "Reset credit", count: 1, expires: "Not provided", remaining: "", timezone: ""}
             ]}
@@ -401,6 +401,13 @@ Item {
             const table = findChild(credits, "reset-table")
             const header = findChild(credits, "reset-column-header")
             const footer = findChild(table, "reset-table-footer")
+            const timezone = findChild(credits, "reset-timezone")
+            compare(timezone.text, "Local time · UTC-03:00")
+            verify(timezone.visible)
+            compare(timezone.parent, credits)
+            verify(findChild(table, "reset-timezone") === null)
+            verify(timezone.y >= table.y + table.height)
+            compare(findChild(table, "reset-remaining").text, "12d 2h left")
             compare(available.text, "5")
             verify(table.visible)
             compare(table.radius, 8)
@@ -413,6 +420,8 @@ Item {
             compare(findChild(header, "reset-expires-header").text, "Expires")
             compare(header.color, Qt.rgba(credits.foreground.r, credits.foreground.g, credits.foreground.b, 0.04))
             compare(header.radius, 7)
+            compare(footer.color, header.color)
+            compare(footer.radius, header.radius)
             const explanation = findChild(credits, "reset-explanation")
             compare(explanation.color, findChild(credits, "reset-section-title").color)
             compare(explanation.opacity, 0.55)
@@ -424,11 +433,14 @@ Item {
             verify(table.visible)
             verify(footer.visible)
             compare(available.text, "3")
+            compare(timezone.text, "")
+            verify(!timezone.visible)
             const empty = JSON.parse(JSON.stringify(snapshot))
             empty.providers[1].resetCredits = null
             Plugin.Model.snapshot = empty
             verify(!findChild(credits, "reset-table").visible)
             verify(!available.visible)
+            verify(!timezone.visible)
             compare(Plugin.Model.snapshot.selected.provider, "claude")
         }
     }

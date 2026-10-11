@@ -139,14 +139,39 @@ Column {
                         width: typeCell.width
                         spacing: Style.space(5)
                         Label { width: parent.width; text: entry.expires }
-                        Secondary { width: parent.width; text: entry.remaining + (entry.timezone ? "\n" + entry.timezone : "") }
+                        Secondary { objectName: "reset-remaining"; width: parent.width; text: entry.remaining }
                     }
                 }
             }
             Item {
+                id: tableFooter
                 objectName: "reset-table-footer"
                 width: table.width
                 implicitHeight: Math.max(availableLabel.implicitHeight, availableValue.implicitHeight) + Style.space(24) + 1
+                readonly property color color: columnHeader.color
+                readonly property real radius: columnHeader.radius
+                Shape {
+                    id: footerBackground
+                    y: 1
+                    width: parent.width
+                    height: parent.height - 1
+                    antialiasing: true
+                    layer.enabled: visible
+                    layer.samples: 4
+                    layer.smooth: true
+                    ShapePath {
+                        strokeColor: "transparent"
+                        fillColor: tableFooter.color
+                        startX: 0
+                        startY: 0
+                        PathLine { x: footerBackground.width; y: 0 }
+                        PathLine { x: footerBackground.width; y: footerBackground.height - tableFooter.radius }
+                        PathQuad { x: footerBackground.width - tableFooter.radius; y: footerBackground.height; controlX: footerBackground.width; controlY: footerBackground.height }
+                        PathLine { x: tableFooter.radius; y: footerBackground.height }
+                        PathQuad { x: 0; y: footerBackground.height - tableFooter.radius; controlX: 0; controlY: footerBackground.height }
+                        PathLine { x: 0; y: 0 }
+                    }
+                }
                 Rectangle {
                     width: parent.width
                     height: 1
@@ -173,6 +198,12 @@ Column {
                 }
             }
         }
+    }
+    Secondary {
+        objectName: "reset-timezone"
+        width: parent.width
+        text: root.inventory.timezone || ""
+        visible: text.length > 0 && root.inventory.available > 0
     }
     Label { width: parent.width; text: "No reset credits available."; visible: root.inventory.available === 0 }
     Secondary { width: parent.width; text: "Some reset details haven't been provided yet."; visible: root.inventory.undetailed > 0 }

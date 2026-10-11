@@ -98,6 +98,7 @@ struct ResetCredits: Decodable {
     let available: Int
     let rows: [CreditRow]
     let undetailed: Int
+    let timezone: String?
 }
 
 struct Provider: Decodable, Identifiable {
@@ -854,7 +855,7 @@ struct ResetCreditsPage: View {
                             }.frame(maxWidth: .infinity, alignment: .leading)
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(row.expires).foregroundColor(Palette.bright)
-                                Text(row.remaining + (row.timezone.isEmpty ? "" : "\n" + row.timezone)).font(.custom("GeistMono-Regular", size: 11))
+                                Text(row.remaining).font(.custom("GeistMono-Regular", size: 11))
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }.padding(12)
                     }
@@ -864,8 +865,12 @@ struct ResetCreditsPage: View {
                         Spacer()
                         Text("\(credits.available)").foregroundColor(Palette.bright).fontWeight(.medium)
                     }.padding(12)
+                        .background(Palette.bright.opacity(0.04))
                 }.clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.border))
+                if let timezone = credits.timezone, !timezone.isEmpty {
+                    Text(timezone).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(Palette.dim)
+                }
                 if credits.undetailed > 0 { Text("Some reset details haven't been provided yet.").font(.custom("GeistMono-Regular", size: 11)) }
             } else { Text("No reset credits available.") }
         }
@@ -1167,13 +1172,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
          "iconMode":"logo","logoPath":"","loading":false,
          "providers":[{"id":"codex","idx":0,"name":"Codex (Pro)","logoPath":"","loading":false,"cached":false,"error":"",
          "metrics":[{"key":"weekly","name":"Weekly Usage","percentage":27,"detail":"Resets in 3d 14h"}],
-         "resetCredits":{"available":3,"undetailed":0,"rows":[{"title":"5-hour + weekly reset","count":2,"expires":"Oct 15, 14:00","remaining":"5d left","timezone":"UTC+00:00"},
-         {"title":"Weekly reset","count":1,"expires":"Oct 20, 14:00","remaining":"10d left","timezone":"UTC+00:00"}]}},
+         "resetCredits":{"available":3,"undetailed":0,"timezone":"Local time · UTC-03:00","rows":[{"title":"Full reset","count":1,"expires":"Oct 22, 18:05","remaining":"12d 1h left","timezone":"UTC-03:00"},
+         {"title":"Full reset","count":1,"expires":"Oct 29, 18:05","remaining":"18d 23h left","timezone":"UTC-03:00"},
+         {"title":"Full reset","count":1,"expires":"Nov 06, 20:41","remaining":"27d 1h left","timezone":"UTC-03:00"}]}},
          {"id":"claude","idx":0,"name":"Claude (Max)","logoPath":"","loading":false,"cached":false,"error":"",
          "metrics":[{"key":"rolling","name":"Rolling Usage","percentage":9,"detail":"Resets in 34m"},
          {"key":"weekly","name":"Weekly Usage","percentage":46,"detail":"Resets in 3d 12h"},
          {"key":"weekly:Fable","name":"Weekly Usage","percentage":0,"detail":"Fable · Resets in 3d 12h"}],
-         "resetCredits":{"available":1,"undetailed":0,"rows":[{"title":"Usage reset","count":1,"expires":"Oct 15, 14:00","remaining":"5d left","timezone":"UTC+00:00"}]}}],
+         "resetCredits":{"available":1,"undetailed":0,"timezone":"Local time · UTC+00:00","rows":[{"title":"Usage reset","count":1,"expires":"Oct 15, 14:00","remaining":"5d left","timezone":"UTC+00:00"}]}}],
          "settings":{"available":["codex","claude","antigravity","commandcode","copilot","kiro","opencode","zai"],
          "names":{"codex":"Codex","claude":"Claude","antigravity":"Antigravity","commandcode":"Command Code","copilot":"Copilot","kiro":"Kiro","opencode":"OpenCode","zai":"Z.AI"},
          "order":["codex","claude","antigravity","commandcode","copilot","kiro","opencode","zai"],

@@ -47,7 +47,10 @@ QWidget#creditTableHeader {
     border-top-left-radius: 7px; border-top-right-radius: 7px;
 }
 QWidget#creditRow { border-top: 1px solid #262626; }
-QWidget#creditTableFooter { border-top: 1px solid #262626; background: transparent; }
+QWidget#creditTableFooter {
+    background: rgba(255, 255, 255, 10); border-top: 1px solid #262626;
+    border-bottom-left-radius: 7px; border-bottom-right-radius: 7px;
+}
 QScrollArea { border: none; background: transparent; }
 QScrollBar:vertical { background: transparent; width: 5px; margin: 6px 0; }
 QScrollBar::handle:vertical { background: #303030; border-radius: 2px; min-height: 24px; }
@@ -365,6 +368,9 @@ class ResetCreditsView(QWidget):
         footer_layout.addWidget(self.available)
         table_layout.addWidget(self.total_footer)
         layout.addWidget(self.table)
+        self.timezone_note = self.secondary_label("")
+        self.timezone_note.setWordWrap(True)
+        layout.addWidget(self.timezone_note)
         self.empty = plain_label("No reset credits available.")
         self.empty.setWordWrap(True)
         layout.addWidget(self.empty)
@@ -394,6 +400,10 @@ class ResetCreditsView(QWidget):
         data = reset_credits.available_credits(entry.get("reset_credits"))
         self.available.setText(str(data["available"]))
         self.table.setVisible(bool(data["available"]))
+        timezone_note = reset_credits.local_timezone_summary(
+            item["expires_at"] for item in data["credits"] if item["expires_at"])
+        self.timezone_note.setText(timezone_note)
+        self.timezone_note.setVisible(bool(data["available"] and timezone_note))
         self.empty.setVisible(not data["available"])
         self.notice.setText("Some reset details haven't been provided yet." if data["undetailed"] else "")
         self.notice.setVisible(bool(data["undetailed"]))
@@ -436,9 +446,7 @@ class ResetCreditsView(QWidget):
             if date:
                 stamp, duration = reset_credits.format_expiry(date)
                 expiry.setText(stamp)
-                offset = date.astimezone().strftime("%z")
-                zone = f"UTC{offset[:3]}:{offset[3:]}"
-                remaining.setText(f"{duration}\n{zone}")
+                remaining.setText(duration)
             else:
                 expiry.setText("Not provided")
                 remaining.setText("")

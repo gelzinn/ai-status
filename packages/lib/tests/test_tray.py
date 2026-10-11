@@ -592,12 +592,17 @@ class DesktopTests(IsolatedState):
         text = "\n".join(label.text() for label in self.dashboard.credits_view.findChildren(QLabel))
         self.assertIn("Full reset", text)
         self.assertIn("Oct 22, 2099", text)
+        self.assertIn("Local time · UTC", view.timezone_note.text())
+        self.assertIs(view.timezone_note.parentWidget(), view)
+        self.assertFalse(view.table.isAncestorOf(view.timezone_note))
+        self.assertTrue(all("UTC" not in remaining.text() for _, remaining in view.rows))
         self.assertIn("Not provided", text)  # The second credit's details are unavailable.
         self.assertEqual(state.load_selected(), selected)
         self.dashboard.data["codex"][0]["reset_credits"]["available"] = 0
         self.dashboard.draw()
         self.assertEqual(self.dashboard.credits_view.available.text(), "0")
         self.assertTrue(self.dashboard.credits_view.table.isHidden())
+        self.assertTrue(self.dashboard.credits_view.timezone_note.isHidden())
         self.assertFalse(self.dashboard.credits_view.empty.isHidden())
         self.assertFalse(self.dashboard.back_button.isHidden())
         self.assertEqual(self.dashboard.credits_view.heading.findChildren(tray.QAbstractButton), [])
@@ -639,6 +644,7 @@ class DesktopTests(IsolatedState):
         heading.credits.click()
         self.app.processEvents()
         view = self.dashboard.credits_view
+        self.assertTrue(view.timezone_note.isHidden())
         self.assertEqual(self.dashboard.geometry().bottom(), bottom)
         self.assertIs(self.dashboard.focusWidget(), self.dashboard.back_button)
         self.assertFalse(view.notice.isHidden())
