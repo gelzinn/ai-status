@@ -365,7 +365,12 @@ def format_loading_provider_block(
         if recede:
             label = _dim(label, recede)
         lines.append(label)
-        lines.append(f"    {make_shimmer_bar(frame_index, spinner)}")
+        if metric_percentage(metric) is not None:
+            lines.append(f"    {make_shimmer_bar(frame_index, spinner)}")
+        else:
+            # Cached balances/text statuses have no quota bar to animate.
+            value = escape(metric_value(metric)) + " " + spinner
+            lines.append("    " + (_dim(value, recede) if recede else value))
         if detail:
             lines.append("    " + _dim(detail, recede if recede else DIM_RESET))
         lines.append("")
