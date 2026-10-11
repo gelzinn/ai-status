@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Shapes
 import qs.Commons
 import "." as Plugin
 import "StableList.js" as StableList
@@ -50,19 +51,15 @@ Column {
     Column {
         width: parent.width
         spacing: Style.space(8)
-        Label { text: "Usage limit resets"; font.bold: true }
+        Label { objectName: "reset-section-title"; text: "Usage limit resets"; font.bold: true }
         Label {
+            objectName: "reset-explanation"
             width: parent.width
+            opacity: 0.55
             text: root.provider && root.provider.id === "codex"
                 ? "Restore your 5-hour or weekly limit,\nor both, depending on the reset type."
                 : "Restore eligible usage limits.\nCredits expire on the dates below."
         }
-    }
-    Label {
-        objectName: "reset-available"
-        width: parent.width
-        text: "Available " + root.inventory.available
-        visible: root.inventory.available > 0
     }
     Rectangle {
         id: resetTable
@@ -71,7 +68,7 @@ Column {
         implicitHeight: table.implicitHeight + 2
         color: "transparent"
         border.width: 1
-        radius: Style.space(3)
+        radius: Style.space(8)
         border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15)
         visible: root.inventory.available > 0
         Column {
@@ -79,12 +76,32 @@ Column {
             x: 1
             y: 1
             width: parent.width - 2
-            Rectangle {
+            Item {
+                id: columnHeader
                 objectName: "reset-column-header"
                 width: parent.width
                 height: columnHeadings.implicitHeight + Style.space(18)
-                color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.04)
-                radius: Math.max(0, resetTable.radius - 1)
+                readonly property color color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.04)
+                readonly property real radius: Math.max(0, resetTable.radius - 1)
+                Shape {
+                    anchors.fill: parent
+                    antialiasing: true
+                    layer.enabled: visible
+                    layer.samples: 4
+                    layer.smooth: true
+                    ShapePath {
+                        strokeColor: "transparent"
+                        fillColor: columnHeader.color
+                        startX: 0
+                        startY: columnHeader.radius
+                        PathLine { x: 0; y: columnHeader.height }
+                        PathLine { x: columnHeader.width; y: columnHeader.height }
+                        PathLine { x: columnHeader.width; y: columnHeader.radius }
+                        PathQuad { x: columnHeader.width - columnHeader.radius; y: 0; controlX: columnHeader.width; controlY: 0 }
+                        PathLine { x: columnHeader.radius; y: 0 }
+                        PathQuad { x: 0; y: columnHeader.radius; controlX: 0; controlY: 0 }
+                    }
+                }
                 Row {
                     id: columnHeadings
                     x: Style.space(12)
@@ -123,6 +140,35 @@ Column {
                         spacing: Style.space(5)
                         Label { width: parent.width; text: entry.expires }
                         Secondary { width: parent.width; text: entry.remaining + (entry.timezone ? "\n" + entry.timezone : "") }
+                    }
+                }
+            }
+            Item {
+                objectName: "reset-table-footer"
+                width: table.width
+                implicitHeight: Math.max(availableLabel.implicitHeight, availableValue.implicitHeight) + Style.space(24) + 1
+                Rectangle {
+                    width: parent.width
+                    height: 1
+                    color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.09)
+                }
+                Row {
+                    x: Style.space(12)
+                    y: Style.space(12) + 1
+                    width: parent.width - x * 2
+                    spacing: Style.space(12)
+                    Label {
+                        id: availableLabel
+                        objectName: "reset-available-label"
+                        width: Math.max(0, parent.width - availableValue.implicitWidth - parent.spacing)
+                        text: "Available resets"
+                        opacity: 0.55
+                    }
+                    Label {
+                        id: availableValue
+                        objectName: "reset-available"
+                        text: String(root.inventory.available)
+                        font.weight: Font.Medium
                     }
                 }
             }

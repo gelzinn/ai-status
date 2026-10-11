@@ -583,8 +583,10 @@ class DesktopTests(IsolatedState):
         self.assertEqual(self.dashboard.reset_provider, ("codex", 0))
         self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.credits_scroll)
         view = self.dashboard.credits_view
-        self.assertEqual(view.available.text(), "Available 2")
-        self.assertIs(view.available.parentWidget(), view)
+        self.assertEqual(view.available.text(), "2")
+        self.assertEqual(view.available_label.text(), "Available resets")
+        self.assertIs(view.available.parentWidget(), view.total_footer)
+        self.assertTrue(view.table.isAncestorOf(view.available))
         header = view.table.findChild(tray.QWidget, "creditTableHeader")
         self.assertEqual([label.text() for label in header.findChildren(QLabel)], ["Reset type", "Expires"])
         text = "\n".join(label.text() for label in self.dashboard.credits_view.findChildren(QLabel))
@@ -594,7 +596,7 @@ class DesktopTests(IsolatedState):
         self.assertEqual(state.load_selected(), selected)
         self.dashboard.data["codex"][0]["reset_credits"]["available"] = 0
         self.dashboard.draw()
-        self.assertEqual(self.dashboard.credits_view.available.text(), "Available 0")
+        self.assertEqual(self.dashboard.credits_view.available.text(), "0")
         self.assertTrue(self.dashboard.credits_view.table.isHidden())
         self.assertFalse(self.dashboard.credits_view.empty.isHidden())
         self.assertFalse(self.dashboard.back_button.isHidden())

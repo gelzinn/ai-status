@@ -43,10 +43,11 @@ QAbstractButton { border: none; background: transparent; text-align: left; }
 QAbstractButton:hover, QAbstractButton:focus { background: #1c1c1c; border-radius: 8px; }
 QWidget#creditTable { border: 1px solid #262626; border-radius: 8px; }
 QWidget#creditTableHeader {
-    background: rgba(255, 255, 255, 10); border-bottom: 1px solid #262626;
+    background: rgba(255, 255, 255, 10);
     border-top-left-radius: 7px; border-top-right-radius: 7px;
 }
 QWidget#creditRow { border-top: 1px solid #262626; }
+QWidget#creditTableFooter { border-top: 1px solid #262626; background: transparent; }
 QScrollArea { border: none; background: transparent; }
 QScrollBar:vertical { background: transparent; width: 5px; margin: 6px 0; }
 QScrollBar::handle:vertical { background: #303030; border-radius: 2px; min-height: 24px; }
@@ -331,8 +332,6 @@ class ResetCreditsView(QWidget):
         self.explanation.setWordWrap(True)
         intro.addWidget(self.explanation)
         layout.addLayout(intro)
-        self.available = plain_label("", "#dddddd")
-        layout.addWidget(self.available)
         self.table = QWidget()
         self.table.setObjectName("creditTable")
         table_layout = QVBoxLayout(self.table)
@@ -352,6 +351,19 @@ class ResetCreditsView(QWidget):
         self.rows_layout.setContentsMargins(0, 0, 0, 0)
         self.rows_layout.setSpacing(0)
         table_layout.addWidget(self.rows_widget)
+        self.total_footer = QWidget()
+        self.total_footer.setObjectName("creditTableFooter")
+        footer_layout = QHBoxLayout(self.total_footer)
+        footer_layout.setContentsMargins(12, 12, 12, 12)
+        footer_layout.setSpacing(12)
+        self.available_label = plain_label("Available resets", "#888888")
+        self.available_label.setWordWrap(True)
+        footer_layout.addWidget(self.available_label, 1)
+        self.available = plain_label("", "#eeeeee")
+        self.available.setStyleSheet(self.available.styleSheet() + "font-weight: 500;")
+        self.available.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        footer_layout.addWidget(self.available)
+        table_layout.addWidget(self.total_footer)
         layout.addWidget(self.table)
         self.empty = plain_label("No reset credits available.")
         self.empty.setWordWrap(True)
@@ -380,7 +392,7 @@ class ResetCreditsView(QWidget):
         self.cached_label.setVisible(bool(entry.get("_cached")))
         self.cached_label.setToolTip(entry.get("_error", "Unable to refresh"))
         data = reset_credits.available_credits(entry.get("reset_credits"))
-        self.available.setText(f"Available {data['available']}")
+        self.available.setText(str(data["available"]))
         self.table.setVisible(bool(data["available"]))
         self.empty.setVisible(not data["available"])
         self.notice.setText("Some reset details haven't been provided yet." if data["undetailed"] else "")

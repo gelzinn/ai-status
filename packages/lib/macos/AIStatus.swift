@@ -841,9 +841,8 @@ struct ResetCreditsPage: View {
                      "Restore eligible usage limits.\nCredits expire on the dates below.")
             }
             if let credits = provider.resetCredits, credits.available > 0 {
-                Text("Available \(credits.available)").foregroundColor(Palette.bright)
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack { Text("Reset type").frame(maxWidth: .infinity, alignment: .leading); Text("Expires").frame(maxWidth: .infinity, alignment: .leading) }
+                    HStack(spacing: 12) { Text("Reset type").frame(maxWidth: .infinity, alignment: .leading); Text("Expires").frame(maxWidth: .infinity, alignment: .leading) }
                         .font(.custom("GeistMono-Regular", size: 11)).padding(12)
                         .background(Palette.bright.opacity(0.04))
                     ForEach(Array(credits.rows.enumerated()), id: \.offset) { _, row in
@@ -859,6 +858,12 @@ struct ResetCreditsPage: View {
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }.padding(12)
                     }
+                    Divider()
+                    HStack(spacing: 12) {
+                        Text("Available resets").foregroundColor(Palette.dim)
+                        Spacer()
+                        Text("\(credits.available)").foregroundColor(Palette.bright).fontWeight(.medium)
+                    }.padding(12)
                 }.clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.border))
                 if credits.undetailed > 0 { Text("Some reset details haven't been provided yet.").font(.custom("GeistMono-Regular", size: 11)) }

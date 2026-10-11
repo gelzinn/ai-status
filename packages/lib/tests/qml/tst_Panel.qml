@@ -190,7 +190,7 @@ Item {
             const heading = findChild(panel, "reset-provider-heading")
             verify(!heading.activeFocusOnTab)
             verify(findChild(panel, "reset-back") === null)
-            verify(findChild(panel, "reset-table").radius > 0)
+            compare(findChild(panel, "reset-table").radius, 8)
             mouseClick(heading)
             compare(panel.resetProvider.id, "codex")
             compare(JSON.stringify(Plugin.Model.snapshot.selected), selected)

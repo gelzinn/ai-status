@@ -389,7 +389,7 @@ Item {
         }
         function test_reset_page_matches_windows_and_updates_without_selection_changes() {
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
-            snapshot.providers[1].resetCredits = {available: 2, undetailed: 1, rows: [
+            snapshot.providers[1].resetCredits = {available: 5, undetailed: 3, rows: [
                 {title: "Full reset", count: 1, expires: "Oct 22, 18:05", remaining: "12d 2h left", timezone: "UTC-03:00"},
                 {title: "Reset credit", count: 1, expires: "Not provided", remaining: "", timezone: ""}
             ]}
@@ -400,17 +400,30 @@ Item {
             const available = findChild(credits, "reset-available")
             const table = findChild(credits, "reset-table")
             const header = findChild(credits, "reset-column-header")
-            compare(available.text, "Available 2")
+            const footer = findChild(table, "reset-table-footer")
+            compare(available.text, "5")
             verify(table.visible)
-            compare(available.parent, credits)
-            verify(available.y + available.height < table.y)
-            verify(findChild(table, "reset-available") === null)
+            compare(table.radius, 8)
+            compare(findChild(footer, "reset-available"), available)
+            compare(findChild(footer, "reset-available-label").text, "Available resets")
+            compare(available.font.weight, Font.Medium)
+            verify(footer.y > header.y + header.height)
+            verify(findChild(header, "reset-available") === null)
             compare(findChild(header, "reset-type-header").text, "Reset type")
             compare(findChild(header, "reset-expires-header").text, "Expires")
             compare(header.color, Qt.rgba(credits.foreground.r, credits.foreground.g, credits.foreground.b, 0.04))
-            compare(header.children.length, 1)
-            verify(header.radius > 0)
+            compare(header.radius, 7)
+            const explanation = findChild(credits, "reset-explanation")
+            compare(explanation.color, findChild(credits, "reset-section-title").color)
+            compare(explanation.opacity, 0.55)
+            compare(explanation.font.pixelSize, 13)
             compare(Plugin.Model.chosen, null)
+            const undetailed = JSON.parse(JSON.stringify(snapshot))
+            undetailed.providers[1].resetCredits = {available: 3, undetailed: 3, rows: []}
+            Plugin.Model.snapshot = undetailed
+            verify(table.visible)
+            verify(footer.visible)
+            compare(available.text, "3")
             const empty = JSON.parse(JSON.stringify(snapshot))
             empty.providers[1].resetCredits = null
             Plugin.Model.snapshot = empty
