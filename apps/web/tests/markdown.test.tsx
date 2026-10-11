@@ -65,13 +65,22 @@ test("release images have valid SSR markup and linked images preserve their dest
 	assert.match(html, /href="https:\/\/example.com\/full-image.png"[^>]*><img/);
 });
 
-test("expandable maintenance sections preserve every note and later feature headings", async () => {
-	const notes = "### Bug Fixes\n\n* A correction.\n\n### Features\n\nA visible improvement.\n\n### Dependencies\n\n* Updated dependency.";
+test("feature sections start open, maintenance sections start closed, and unrelated headings remain plain", async () => {
+	const notes = "### Bug Fixes\n\n* A correction.\n\n### Features\n\nA visible improvement. " +
+		"[Jump to features](#features)\n\n`ai-status update`\n\n### Details\n\nMore context.\n\n" +
+		"### Dependencies\n\n* Updated dependency.";
 	const html = renderToStaticMarkup(await renderMarkdown(notes, { release, headingPrefix: "release-1-" }));
 	assert.match(html, /<details class="changelog-section"><summary><h3 id="release-1-bug-fixes">Bug Fixes/);
 	assert.match(html, /A correction/);
-	assert.match(html, /<\/details>[\s\S]*<h3 id="release-1-features">Features/);
+	assert.match(html, /<details class="changelog-section" open=""><summary><h3 id="release-1-features">Features/);
+	assert.match(html, /A visible improvement/);
+	assert.match(html, /href="#release-1-features"/);
+	assert.match(html, /<code>ai-status update<\/code>/);
+	assert.match(html, /<\/details>[\s\S]*<h3 id="release-1-details">Details<\/h3>/);
+	assert.match(html, /More context/);
+	assert.match(html, /<details class="changelog-section"><summary><h3 id="release-1-dependencies">Dependencies/);
 	assert.match(html, /Updated dependency/);
+	assert.equal((html.match(/open=""/g) ?? []).length, 1);
 });
 
 test("GFM footnotes and accessible references stay within their own release", async () => {

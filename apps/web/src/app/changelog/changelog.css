@@ -88,7 +88,7 @@
 .changelog-section summary::-webkit-details-marker { display: none; }
 .changelog-section summary::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-top: 1.5px solid currentColor; transform: rotate(45deg); margin-right: 4px; transition: transform 150ms; }
 .changelog-section[open] summary::before { transform: rotate(135deg); }
-.changelog-prose .changelog-section summary :is(h2, h3) { display: inline; font-size: 15px; line-height: 24px; font-weight: 510; letter-spacing: 0; margin: 0; }
+.changelog-prose .changelog-section summary :is(h2, h3) { display: inline; margin: 0; }
 .changelog-section > div { padding-bottom: 24px; }
 .changelog-section > div > :first-child { margin-top: 0; }
 .changelog-section li > strong:first-child { display: inline; padding: 2px 5px; border-radius: 4px; background: var(--muted); font-size: .8em; font-weight: 510; }

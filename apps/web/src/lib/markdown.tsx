@@ -116,7 +116,7 @@ function releaseSections({ enabled }: { enabled: boolean }) {
 			for (const child of node.children ?? []) markLinkedImages(child, insideLink || node.tagName === "a");
 		}
 		markLinkedImages(tree);
-		const sections = new Set(["Bug Fixes", "Fixes", "Improvements", "Performance Improvements", "Dependencies", "Reverts"]);
+		const sections = new Set(["Features", "Bug Fixes", "Fixes", "Improvements", "Performance Improvements", "Dependencies", "Reverts"]);
 		const children = tree.children;
 		const grouped: any[] = [];
 		for (let index = 0; index < children.length; index++) {
@@ -131,7 +131,10 @@ function releaseSections({ enabled }: { enabled: boolean }) {
 				if (next.type === "element" && /^h[1-6]$/.test(next.tagName) && next.tagName <= heading.tagName) break;
 				body.push(children[++index]);
 			}
-			grouped.push({ type: "element", tagName: "details", properties: { className: ["changelog-section"] }, children: [
+			grouped.push({ type: "element", tagName: "details", properties: {
+				className: ["changelog-section"],
+				...(hastText(heading) === "Features" ? { open: true } : {}),
+			}, children: [
 				{ type: "element", tagName: "summary", properties: {}, children: [heading] },
 				{ type: "element", tagName: "div", properties: {}, children: body },
 			] });
