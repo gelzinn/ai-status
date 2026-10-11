@@ -58,7 +58,7 @@ Update the plugin with:
 omarchy plugin update io.github.gelzinn.ai-status
 ```
 
-[Dependencies, placement and configuration →](packages/lib/INSTALL.md#omarchy-quickshell-plugin)
+[Dependencies, placement and configuration →](packages/lib/LINUX.md#omarchy-quickshell-plugin)
 
 ### Linux with Waybar
 
@@ -70,7 +70,7 @@ The installer walks you through provider selection and appearance, then configur
 
 Run the same command to update to the latest stable release. Existing preferences are preserved, and the installer keeps a backup of your Waybar configuration. The installer also supports Omarchy; omit `--bar waybar` to detect your active bar automatically.
 
-[Installation options →](packages/lib/INSTALL.md) · [Updates and rollback →](packages/lib/UPDATES.md)
+[Installation options →](packages/lib/LINUX.md) · [Updates and rollback →](packages/lib/UPDATES.md)
 
 <details>
 <summary>Manual Waybar configuration</summary>
@@ -106,7 +106,7 @@ Then reference it in whichever bar section you use — a module that's defined b
 }
 ```
 
-**Want the provider's logo too?** Install with `--icon-mode logo` (or add it by hand — see [INSTALL.md](packages/lib/INSTALL.md)). It adds an `image#ai-status` module next to the text that shows the same tooltip on hover; just remember to list `"image#ai-status"` in `modules-right` alongside `"custom/ai-status"`.
+**Want the provider's logo too?** Install with `--icon-mode logo` (or add it by hand — see [LINUX.md](packages/lib/LINUX.md)). It adds an `image#ai-status` module next to the text that shows the same tooltip on hover; just remember to list `"image#ai-status"` in `modules-right` alongside `"custom/ai-status"`.
 
 </details>
 
@@ -140,7 +140,7 @@ The installer builds a native SwiftUI/AppKit menu bar app with the same usage, S
 
 Requires macOS 13+, Python 3.10+ and Xcode Command Line Tools (`xcode-select --install`). The native integration does not require SwiftBar. Re-run to update while keeping your preferences. Existing SwiftBar users can select `--mode stream` or `--mode periodic` instead.
 
-[macOS installation, branch testing and SwiftBar options →](packages/lib/MACOS.md)
+[macOS installation, updates and SwiftBar options →](packages/lib/MACOS.md)
 
 </details>
 
@@ -231,7 +231,7 @@ ai-status accounts add openrouter --id work-router --label "Work API" \
 Here `OPENROUTER_WORK_KEY` must contain your key and be available to the AI Status
 process. The connection stores the variable reference, not the key value.
 
-[CLI usage and account commands →](packages/lib/INSTALL.md#command-line) ·
+[CLI usage and account commands →](packages/lib/LINUX.md#command-line) ·
 [Credential sources and multiple accounts →](packages/lib/PROVIDERS.md#multiple-accounts-and-connections)
 
 ## What you get
@@ -277,7 +277,7 @@ Save applies preferences and keeps Settings open. Back sits before the panel tit
 | **Windows** | Windows 10 version 1809+ or Windows 11, x64 | Native tray app, usage panel and settings |
 | **macOS** | macOS 13 or newer | Native menu bar app; optional SwiftBar integration |
 
-Linux integration currently supports **Waybar and Omarchy Quickshell only**. The Quickshell plugin requires the Omarchy Quattro shell and its plugin CLI; standalone Quickshell configurations and other bars are not supported. See [Linux requirements](packages/lib/INSTALL.md).
+Linux integration currently supports **Waybar and Omarchy Quickshell only**. The Quickshell plugin requires the Omarchy Quattro shell and its plugin CLI; standalone Quickshell configurations and other bars are not supported. See [Linux requirements](packages/lib/LINUX.md).
 
 The Windows package includes its runtime. The macOS installer requires Python 3.10+ and Xcode Command Line Tools; see [macOS requirements](packages/lib/MACOS.md#requirements).
 
@@ -321,9 +321,10 @@ Available metrics depend on the account, plan and upstream API. Providers withou
 
 | Guide | What you will find |
 | --- | --- |
+| [Install and configure](packages/lib/INSTALL.md) | Choose the Linux, Windows or macOS setup guide |
 | [Linux](https://ai-status.gelzin.com/linux) | Waybar and Omarchy Quickshell requirements, installation and configuration |
-| [Windows](packages/lib/WINDOWS.md) | Installer, portable app, sign-in option, compatibility and local builds |
-| [macOS](packages/lib/MACOS.md) | Native menu bar app, local builds, sign-in startup and optional SwiftBar modes |
+| [Windows](packages/lib/WINDOWS.md) | Installer, portable app, sign-in option, updates and provider compatibility |
+| [macOS](packages/lib/MACOS.md) | Native menu bar app, installation, updates, sign-in startup and optional SwiftBar modes |
 | [Guide for LLMs](https://ai-status.gelzin.com/llms.txt) | Select the Linux, Windows or macOS instructions for your system |
 | [Providers and authentication](packages/lib/PROVIDERS.md) | Credential sources, account setup and troubleshooting |
 | [Updates and rollback](packages/lib/UPDATES.md) | Stable releases, version selection, checksums and recovery |
@@ -349,6 +350,7 @@ Credentials come from your local provider authentication stores or explicitly co
 | `packages/lib/macos/` | Native macOS menu bar app and local build |
 | `packages/shared/providers/` | Provider names, logos and metadata |
 | `apps/web/` | Website, interactive preview and documentation |
+| `docs/development/` | Platform build and development validation instructions |
 | `manifest.json` | Omarchy plugin contract |
 
 </details>

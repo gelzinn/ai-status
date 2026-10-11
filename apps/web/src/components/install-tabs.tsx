@@ -24,10 +24,8 @@ export function InstallTabs({
 
 	return (
 		<div className="flex w-full min-w-0 flex-col items-start gap-4 motion-safe:animate-fade-up [animation-delay:200ms]">
-			<div className="w-full">
-				<div className={activeOs === "Linux" ? "block" : "hidden"}>{linux}</div>
-				<div className={activeOs === "macOS" ? "block" : "hidden"}>{mac}</div>
-				<div className={activeOs === "Windows" ? "block" : "hidden"}>{win}</div>
+			<div className="w-full min-w-0">
+				{activeOs === "Windows" ? win : activeOs === "macOS" ? mac : linux}
 			</div>
 
 			<div className="mt-1 flex flex-wrap items-center gap-3 text-sm font-medium">

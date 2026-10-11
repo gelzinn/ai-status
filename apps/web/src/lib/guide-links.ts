@@ -1,7 +1,7 @@
 import { repo, site } from "./env";
 
 const guidePages: Record<string, string> = {
-  "INSTALL.md": "/linux",
+  "LINUX.md": "/linux",
   "LLMS.md": "/llms.txt",
   "MACOS.md": "/macos",
   "WINDOWS.md": "/windows",

@@ -24,7 +24,7 @@ export function Hero() {
 						code={installCmd}
 						lang="bash"
 						label="bash"
-						className="w-full"
+						className="w-full [&_pre]:leading-[21px]"
 					/>
 				}
 				mac={
@@ -32,7 +32,7 @@ export function Hero() {
 						code={installCmdMac}
 						lang="bash"
 						label="bash"
-						className="w-full"
+						className="w-full [&_pre]:leading-[21px]"
 					/>
 				}
 				win={<WindowsInstall />}

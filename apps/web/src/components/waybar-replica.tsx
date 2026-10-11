@@ -1,12 +1,13 @@
 "use client";
 
-import { Bot, Wifi, Bluetooth, ChevronUp, Volume2 } from "lucide-react";
+import { Bot, Wifi, Bluetooth, ChevronUp, Volume2, BatteryMedium, Search, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useEffect, useRef, useId } from "react";
 import { WEB_PROVIDERS as PROVIDERS } from "@ai-status/shared";
 import { site } from "@/lib/env";
 import { useInstallPlatform } from "@/components/install-platform";
 import { WindowsIcon } from "@/components/os-icons";
+import { MacDock, MacMenu } from "@/components/macos-desktop";
 
 type Stat = {
   label: string;
@@ -194,12 +195,13 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
     <div
       ref={cardRef}
       className={cn(
-        "relative w-full h-full rounded-2xl border border-border bg-black bg-no-repeat bg-center shadow-[0_0_60px_rgba(0,0,0,0.6)] font-mono text-xs flex flex-col overflow-hidden transition-all duration-300 ease-out group",
+        "relative w-full h-full rounded-2xl border border-border bg-black bg-no-repeat bg-center shadow-[0_0_60px_rgba(0,0,0,0.6)] font-mono text-xs flex flex-col overflow-hidden transition-transform duration-300 ease-out group",
         compact && "text-[11px] sm:text-xs",
         isWindows
           ? "bg-[url('/windows-11-wallpaper.webp')] bg-cover"
           : isMac
-          ? "bg-background"
+          // Big Sur Color Nights wallpaper, via applewalls.com.
+          ? "bg-[url('/macos-wallpaper.webp')] bg-cover"
           : "bg-[url('/omarchy-wallpaper.jpeg')] bg-contain",
       )}
       style={{ transform, transformStyle: "preserve-3d" }}
@@ -208,11 +210,13 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
     >
       <div
         role="group"
-        aria-label={isWindows ? "Windows taskbar preview" : isMac ? "Shared usage panel preview" : "Waybar preview"}
+        aria-label={isWindows ? "Windows taskbar preview" : isMac ? "macOS menu bar preview" : "Waybar preview"}
         className={cn(
           "relative w-full shrink-0 flex items-center border-border z-20",
           isWindows
             ? "order-last h-12 justify-between border-t bg-card/90 backdrop-blur-2xl px-3"
+            : isMac
+            ? "h-8 justify-between gap-3 border-b border-white/10 bg-black/20 backdrop-blur-2xl px-3 text-white"
             : "h-10 justify-between border-b bg-card backdrop-blur-md px-4",
           compact && "px-2 sm:px-3",
         )}
@@ -222,7 +226,7 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
             <WindowsIcon alt="" className="size-6" />
           </div>
         ) : isMac ? (
-          <span className="font-sans text-muted-foreground">Usage panel preview</span>
+          <MacMenu compact={compact} />
         ) : (
           <div aria-hidden="true" className={cn("flex items-center gap-3 opacity-50", compact && "gap-1.5")}>
             {Array.from({ length: compact ? 3 : 6 }).map((_, idx) => (
@@ -234,7 +238,7 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
           </div>
         )}
 
-        <div className={cn("flex items-center", isWindows ? "gap-0" : "gap-4")}>
+        <div className={cn("flex shrink-0 items-center", isWindows ? "gap-0" : isMac ? "gap-3" : "gap-4", isMac && compact && "gap-2")}>
           {isWindows && (
             <div
               aria-hidden="true"
@@ -254,7 +258,7 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
               aria-describedby={isWindows ? tooltipId : undefined}
               className={cn(
                 "relative flex items-center justify-center gap-2 hover:bg-foreground/10 rounded-md transition-colors select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground/40",
-                isWindows ? "size-8" : "px-2 py-1 -mx-2",
+                isWindows ? "size-8" : isMac ? "px-1.5 py-1 font-sans text-[11px]" : "px-2 py-1 -mx-2",
               )}
               onClick={() => setIsOpen((open) => !open)}
               onKeyDown={(e) => {
@@ -288,7 +292,7 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
               </div>
 
               {!isWindows && (
-                <span className="text-foreground font-medium">{trayLabel}</span>
+                <span className={cn("font-medium", isMac ? "max-w-[120px] truncate text-white" : "text-foreground", isMac && compact && "max-w-[68px]")}>{trayLabel}</span>
               )}
             </button>
 
@@ -302,6 +306,20 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
               </span>
             )}
           </div>
+
+          {isMac && (
+            <div aria-hidden="true" className="flex items-center gap-2.5 font-sans text-[10px] text-white/95">
+              {!compact && (
+                <>
+                  <BatteryMedium className="hidden h-4 w-5 xl:block" />
+                  <Wifi className="size-3.5" />
+                  <Search className="hidden size-3 xl:block" />
+                </>
+              )}
+              <SlidersHorizontal className="size-3.5" />
+              <span className="whitespace-nowrap tabular-nums">{compact ? "11:23" : "Mon 11:23"}</span>
+            </div>
+          )}
 
           {!isMac && (
           <div
@@ -340,7 +358,8 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
       <div
         className={cn(
           "relative min-h-0 flex-1 flex justify-end z-10 overflow-hidden",
-          isWindows ? "items-end px-3 pt-4 pb-2" : "p-4",
+          isWindows ? "items-end px-3 pt-4 pb-2" : isMac ? "px-4 pt-3 pb-20" : "p-4",
+          isMac && compact && "px-3 pb-17",
         )}
       >
         {/* AI Status Usage Panel */}
@@ -349,9 +368,9 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
           aria-hidden={!isOpen}
           inert={!isOpen}
           className={cn(
-            "relative h-full rounded-xl bg-card/95 backdrop-blur-2xl border border-border shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden transition-all duration-350 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            "relative h-full rounded-xl bg-card/95 backdrop-blur-2xl border border-border shadow-[0_0_50px_rgba(0,0,0,0.5)] flex flex-col overflow-hidden transition-[opacity,transform,translate,scale] duration-350 ease-[cubic-bezier(0.16,1,0.3,1)]",
             compact ? "w-full max-w-sm sm:w-[80%]" : "w-[65%]",
-            isWindows ? "origin-bottom-right motion-safe:animate-fade-up" : "origin-top-right",
+            isWindows ? "origin-bottom-right" : "origin-top-right",
             !isOpen && "opacity-0 scale-95 pointer-events-none",
             !isOpen && (isWindows ? "translate-y-2" : "-translate-y-2"),
           )}
@@ -520,6 +539,7 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
           </div>
         </div>
       </div>
+      <MacDock compact={compact} visible={isMac} />
     </div>
   );
 }

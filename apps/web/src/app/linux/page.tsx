@@ -18,10 +18,10 @@ export const metadata: Metadata = {
   description: "Install AI Status on Linux with Waybar or the native Omarchy Quattro Quickshell widget, then connect your providers and monitor usage.",
 };
 
-const guideSource = `${repo.url}/blob/main/packages/lib/INSTALL.md`;
+const guideSource = `${repo.url}/blob/main/packages/lib/LINUX.md`;
 
 export default async function LinuxPage() {
-  const markdown = await readFile(path.resolve(process.cwd(), "../../packages/lib/INSTALL.md"), "utf-8");
+  const markdown = await readFile(path.resolve(process.cwd(), "../../packages/lib/LINUX.md"), "utf-8");
   const guide = await renderMarkdown(resolveLibGuideLinks(markdown.replace(/^# .+\r?\n\r?\n/, "")));
 
   return (
@@ -82,15 +82,6 @@ export default async function LinuxPage() {
                   <span className="font-medium text-foreground">Native Omarchy widget</span>
                   <p className="leading-relaxed text-muted-foreground">The Quickshell plugin runs inside Omarchy Quattro with its own usage panel and settings. Start the Omarchy shell before installing.</p>
                 </div>
-              </div>
-
-              <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                <Link href="/windows" className="flex items-center justify-between gap-2 p-4 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                  Windows setup <ArrowRight className="size-3.5 shrink-0" />
-                </Link>
-                <Link href="/macos" className="flex items-center justify-between gap-2 border-t border-border p-4 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                  macOS setup <ArrowRight className="size-3.5 shrink-0" />
-                </Link>
               </div>
 
               <div className="overflow-hidden rounded-2xl border border-border bg-card">
