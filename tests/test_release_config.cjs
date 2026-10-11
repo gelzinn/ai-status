@@ -19,6 +19,14 @@ function commit(message, files, sha = "f".repeat(40)) {
   return { message, files, sha };
 }
 
+function assertNoChangelogUpdates(pr) {
+  assert.equal(
+    pr.updates.some(update => /(^|\/)CHANGELOG\.md$/i.test(update.path)),
+    false,
+    "Release PRs must keep notes in their body without creating a changelog file",
+  );
+}
+
 async function manifest(commits, merged = []) {
   const github = {
     repository: { owner: "gelzinn", repo: "ai-status" },
@@ -45,6 +53,9 @@ test("release config is valid and starts from the current VERSION", () => {
   const ajv = new Ajv({ strict: false, validateFormats: false });
   assert.equal(ajv.validate(configSchema, config), true, JSON.stringify(ajv.errors));
   assert.equal(fs.readFileSync(path.join(root, "packages/lib/VERSION"), "utf8").trim(), previousVersion);
+  assert.equal(config.packages["."]["skip-changelog"], true);
+  assert.equal(Object.hasOwn(config.packages["."], "changelog-path"), false);
+  assert.equal(fs.existsSync(path.join(root, "packages/lib/CHANGELOG.md")), false);
 });
 
 test("web-only features and routine maintenance do not propose a release", async () => {
@@ -62,6 +73,7 @@ test("library fixes propose a patch with notes and a matching VERSION", async ()
   assert.match(pr.body.toString(), new RegExp(`${major}\\.${minor}\\.${patch + 1}`));
   assert.match(pr.body.toString(), /Bug Fixes/);
   assert.match(pr.body.toString(), /preserve failed downloads/);
+  assertNoChangelogUpdates(pr);
   const version = pr.updates.find(update => update.path === "packages/lib/VERSION");
   assert.equal(version.updater.updateContent(previousVersion), `${major}.${minor}.${patch + 1}\n`);
   const plugin = pr.updates.find(update => update.path === "manifest.json");
@@ -85,7 +97,7 @@ test("features and fixes accumulate in one PR, including shared metadata", async
   assert.match(notes, /add a provider/);
   assert.match(notes, /pin stable versions/);
   assert.doesNotMatch(notes, /redesign the site|historical feature/);
-  assert.ok(pr.updates.some(update => update.path === "packages/lib/CHANGELOG.md"));
+  assertNoChangelogUpdates(pr);
   assert.ok(pr.updates.some(update => update.path === ".release-please-manifest.json"));
 
   // Ordinary merges publish nothing. Only the generated release PR is eligible.
@@ -130,4 +142,5 @@ test("user-written PR entries replace internal commit wording in release notes",
   assert.match(notes, /Features/);
   assert.match(notes, /Bug Fixes/);
   assert.doesNotMatch(notes, /refactor all the installer internals|Offline tests/);
+  assertNoChangelogUpdates(pr);
 });
