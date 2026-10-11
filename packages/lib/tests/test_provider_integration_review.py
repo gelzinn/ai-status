@@ -116,8 +116,21 @@ class ProviderIntegrationReview(unittest.TestCase):
 
     def test_openrouter_key_limit_and_month_spend_are_separately_selectable(self):
         parsed = load("openrouter", "parse").parse(json.dumps({"data": {
-            "limit": 100, "limit_remaining": 88, "limit_reset": "monthly", "usage_monthly": 12}}))
+            "limit": 100, "limit_remaining": 80, "limit_reset": "monthly", "usage_monthly": 12}}))
         self.assert_selectable(parsed["metrics"])
+        self.assertEqual([metric["amount"] for metric in parsed["metrics"]], [20, 12])
+        self.assertEqual([render.metric_key(metric) for metric in parsed["metrics"]], [
+            "monthly:Key spend / monthly key limit (USD)",
+            "monthly:Month spend (this key) (USD)"])
+
+    def test_openrouter_matching_month_spend_retains_key_limit_selection(self):
+        parsed = load("openrouter", "parse").parse(json.dumps({"data": {
+            "limit": 100, "limit_remaining": 88, "limit_reset": "monthly", "usage_monthly": 12}}))
+        self.assertEqual(len(parsed["metrics"]), 1)
+        metric = parsed["metrics"][0]
+        self.assertEqual(metric["amount"], 12)
+        self.assertEqual(metric["limit"], 100)
+        self.assertEqual(render.metric_key(metric), "monthly:Key spend / monthly key limit (USD)")
 
     def test_costs_in_different_currencies_are_separately_selectable(self):
         parsed = load("openai-api", "parse").parse(json.dumps({"data": [{"results": [
