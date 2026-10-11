@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.13.0](https://github.com/gelzinn/ai-status/compare/v0.12.1...v0.13.0) (2026-10-11)
+
+
+### Features
+
+* **updates:** open platform-specific update guides and start optional desktop updates ([d6198a2](https://github.com/gelzinn/ai-status/commit/d6198a21be156dbb3f024d1a7caa813b15cee58f))
+
+
+### Bug Fixes
+
+* **docs:** preserve transparent corners in Quickshell panel previews ([0235a11](https://github.com/gelzinn/ai-status/commit/0235a11632ab476f2439e17d46645ac277ec314a))
+* **quickshell:** follow shell rounding and balance panel header spacing ([eb75e56](https://github.com/gelzinn/ai-status/commit/eb75e56efd6c6488877222cc5bba69205b669550))
+* **quickshell:** group usage limits by provider and account with concise labels ([eb75e56](https://github.com/gelzinn/ai-status/commit/eb75e56efd6c6488877222cc5bba69205b669550))
+* **quickshell:** keep focused controls visible during keyboard navigation ([eb75e56](https://github.com/gelzinn/ai-status/commit/eb75e56efd6c6488877222cc5bba69205b669550))
+* **quickshell:** preserve scroll and focus when returning from detail pages ([eb75e56](https://github.com/gelzinn/ai-status/commit/eb75e56efd6c6488877222cc5bba69205b669550))
+* **ui:** align Back and Refresh icon footprints ([eb75e56](https://github.com/gelzinn/ai-status/commit/eb75e56efd6c6488877222cc5bba69205b669550))
+* **ui:** align rounded reset tables with single dividers and availability footers ([0235a11](https://github.com/gelzinn/ai-status/commit/0235a11632ab476f2439e17d46645ac277ec314a))
+* **ui:** clarify local reset credit expiration times ([0235a11](https://github.com/gelzinn/ai-status/commit/0235a11632ab476f2439e17d46645ac277ec314a))
+* **ui:** increase back-button spacing and keep copy controls inside terminal commands ([d6198a2](https://github.com/gelzinn/ai-status/commit/d6198a21be156dbb3f024d1a7caa813b15cee58f))
+* **ui:** show panel header button backgrounds only on hover ([0235a11](https://github.com/gelzinn/ai-status/commit/0235a11632ab476f2439e17d46645ac277ec314a))
+* **ui:** use consistent panel control icons on Linux, Windows and macOS ([0235a11](https://github.com/gelzinn/ai-status/commit/0235a11632ab476f2439e17d46645ac277ec314a))
+* **updates:** only announce newer stable releases and verify Windows installers before opening setup ([d6198a2](https://github.com/gelzinn/ai-status/commit/d6198a21be156dbb3f024d1a7caa813b15cee58f))
+
 ## [0.12.1](https://github.com/gelzinn/ai-status/compare/v0.12.0...v0.12.1) (2026-10-11)
 
 
