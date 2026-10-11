@@ -149,8 +149,31 @@ class OpenRouterTests(unittest.TestCase):
         self.assertEqual(metrics[0]["amount"], 12)
         self.assertEqual(metrics[0]["limit"], 100)
         self.assertEqual(metrics[0]["value_format"], "amount_ratio")
-        self.assertIsNone(metrics[1]["percentage"])
-        self.assertEqual(len({m["name"] for m in metrics}), 2)
+        self.assertEqual(metrics[0]["name"], "Key · monthly")
+        self.assertEqual(metrics[0]["detail"], "")
+        self.assertEqual(len(metrics), 1)
+        self.assertEqual(render.metric_key(metrics[0]), "monthly:Key spend / monthly key limit (USD)")
+
+    def test_duplicate_monthly_usage_tolerates_subtraction_rounding(self):
+        metrics = load("openrouter", "parse").parse(json.dumps({"data": {"usage_monthly": 0.1, "limit": 10, "limit_remaining": 9.9, "limit_reset": "monthly"}}))["metrics"]
+        self.assertEqual(len(metrics), 1)
+
+    def test_different_monthly_cap_spend_keeps_reported_monthly_usage(self):
+        metrics = load("openrouter", "parse").parse(json.dumps({"data": {"usage_monthly": 12, "limit": 100, "limit_remaining": 80, "limit_reset": "monthly"}}))["metrics"]
+        self.assertEqual([m["amount"] for m in metrics], [20, 12])
+        self.assertEqual([m["name"] for m in metrics], ["Key · monthly", "Monthly key spend"])
+        self.assertEqual(metrics[1]["detail"], "Reported separately from cap")
+        self.assertEqual(render.metric_key(metrics[1]), "monthly:Month spend (this key) (USD)")
+
+    def test_equal_amounts_in_different_windows_keep_monthly_usage(self):
+        for reset, period in (("daily", "generic"), ("weekly", "weekly"), (None, "generic")):
+            with self.subTest(reset=reset):
+                metrics = load("openrouter", "parse").parse(json.dumps({"data": {"usage_monthly": 12, "limit": 100, "limit_remaining": 88, "limit_reset": reset}}))["metrics"]
+                self.assertEqual([m["amount"] for m in metrics], [12, 12])
+                self.assertEqual([m["type"] for m in metrics], [period, "monthly"])
+                self.assertEqual(metrics[0]["name"], f"Key · {reset or 'total'}")
+                self.assertEqual(metrics[1]["name"], "Monthly key spend")
+                self.assertEqual(render.metric_key(metrics[0]), f"{period}:Key spend / {reset or 'total'} key limit (USD)")
 
     def test_account_spend_ratio_and_balance_use_account_scope(self):
         parser = load("openrouter", "parse").parse
@@ -160,7 +183,22 @@ class OpenRouterTests(unittest.TestCase):
         self.assertEqual([m["percentage"] for m in metrics], [None, 25, None])
         self.assertEqual(metrics[1]["limit"], 100)
         self.assertEqual(metrics[1]["value_format"], "amount_ratio")
-        self.assertIn("Account spend", metrics[1]["detail"])
+        self.assertEqual(metrics[1]["name"], "Account credits")
+        self.assertEqual(metrics[1]["detail"], "Spent / total purchased")
+        self.assertEqual(metrics[2]["name"], "Available balance")
+        self.assertEqual(metrics[2]["detail"], "")
+        self.assertEqual([metrics[1]["display_order"], metrics[2]["display_order"]], [-2, -1])
+        self.assertEqual(render.metric_key(metrics[1]), "credits:Account spend / total credits (USD)")
+        self.assertEqual(render.metric_key(metrics[2]), "credits:Account credit balance (USD)")
+        self.assertEqual(len({render.metric_key(m) for m in metrics}), 3)
+
+    def test_equal_account_and_key_spend_keep_their_independent_scopes(self):
+        metrics = load("openrouter", "parse").parse(json.dumps({"key": {"data": {"usage_monthly": 25, "limit": 100, "limit_remaining": 75, "limit_reset": "monthly"}},
+                                                                  "credits": {"data": {"total_credits": 100, "total_usage": 25}}}))["metrics"]
+        self.assertEqual([m["amount"] for m in metrics], [25, 25, 75])
+        self.assertEqual([m["name"] for m in metrics], ["Key · monthly", "Account credits", "Available balance"])
+        ordered = sorted(metrics, key=render.metric_sort_key)
+        self.assertEqual([m["name"] for m in ordered], ["Account credits", "Available balance", "Key · monthly"])
         self.assertEqual(len({render.metric_key(m) for m in metrics}), 3)
 
     def test_missing_or_invalid_credit_totals_never_invent_balance(self):
@@ -216,6 +254,15 @@ class OpenRouterTests(unittest.TestCase):
         metrics = load("openrouter", "parse").parse(json.dumps(result))["metrics"]
         self.assertEqual(metrics[0]["amount"], 2)
         self.assertIn("OPENROUTER_MANAGEMENT_KEY", metrics[0]["detail"])
+
+    def test_management_guidance_appears_once_for_distinct_key_metrics(self):
+        raw = {"key": {"data": {"usage_monthly": 12, "limit": 100, "limit_remaining": 80, "limit_reset": "monthly"}},
+               "_ai_status": {"credits_hint": "Set OPENROUTER_MANAGEMENT_KEY to track account credits."}}
+        metrics = load("openrouter", "parse").parse(json.dumps(raw))["metrics"]
+        self.assertEqual([m["amount"] for m in metrics], [20, 12])
+        self.assertIn("OPENROUTER_MANAGEMENT_KEY", metrics[0]["detail"])
+        self.assertEqual(metrics[1]["detail"], "Reported separately from cap")
+        self.assertEqual(sum("OPENROUTER_MANAGEMENT_KEY" in m["detail"] for m in metrics), 1)
 
     def test_explicit_management_key_reads_account_credits(self):
         query = load("openrouter", "query")

@@ -67,6 +67,32 @@ def metric_value(metric):
     return f"${amount:.2f}" if unit == "USD" else f"{amount:,.2f} {unit}".strip()
 
 
+def metric_title(metric):
+    title = metric.get("name") or TYPE_NAMES.get(metric.get("type", "generic"), "Usage")
+    unit = metric.get("unit")
+    if unit and (metric_percentage(metric) is None or metric.get("value_format") == "amount_ratio"):
+        title = title.removesuffix(f" ({unit})")
+    return title
+
+
+def metric_detail(metric):
+    detail = metric.get("detail")
+    if detail is None:
+        return format_reset_time(metric.get("reset_in_seconds"), metric.get("type"))
+    name = metric.get("name") or ""
+    unit = metric.get("unit")
+    if unit:
+        name = name.removesuffix(f" ({unit})")
+    if detail.strip().casefold() in {name.strip().casefold(), metric_title(metric).strip().casefold()}:
+        return ""
+    return detail
+
+
+def metric_sort_key(metric):
+    order = metric.get("display_order")
+    return order if type(order) is int else TYPE_ORDER.get(metric.get("type", "generic"), 4)
+
+
 def _dim(text, alpha):
     return f"<span alpha='{alpha}%'>{text}</span>"
 
@@ -140,9 +166,9 @@ def get_selected_metric_text(latest_data, selected, spinner=None):
             m = item
             break
     if not m and metrics:
-        m = metrics[0]
+        m = sorted(metrics, key=metric_sort_key)[0]
 
-    metric_name = TYPE_NAMES.get(m.get("type", "generic"), "Usage") if m else "Usage"
+    metric_name = metric_title(m) if m else "Usage"
 
     if spinner is not None:
         # While loading the percentage isn't known yet — show the spinner in
@@ -259,18 +285,12 @@ def format_provider_block(
     # Dim non-selected providers so the selected one stands out (like the replica)
     if not is_selected:
         header = _dim(header, DIM_INACTIVE)
-    sorted_metrics = sorted(
-        metrics, key=lambda m: TYPE_ORDER.get(m.get("type", "generic"), 4)
-    )
+    sorted_metrics = sorted(metrics, key=metric_sort_key)
     lines = [header, ""]
     for metric in sorted_metrics:
-        mtype = metric.get("type", "generic")
-        name = escape(metric.get("name") or TYPE_NAMES.get(mtype, "Usage"))
+        name = escape(metric_title(metric))
         is_active = is_selected and metric_key(metric) == selected_metric
-        seconds = metric.get("reset_in_seconds")
-        detail = metric.get("detail")
-        if detail is None:
-            detail = format_reset_time(seconds, mtype)
+        detail = metric_detail(metric)
 
         # Only the active metric of the selected provider stays bright.
         recede = None if is_active else DIM_INACTIVE
@@ -322,18 +342,12 @@ def format_loading_provider_block(
     if not is_selected:
         header = _dim(header, DIM_INACTIVE)
 
-    sorted_metrics = sorted(
-        metrics, key=lambda m: TYPE_ORDER.get(m.get("type", "generic"), 4)
-    )
+    sorted_metrics = sorted(metrics, key=metric_sort_key)
     lines = [header, ""]
     for metric in sorted_metrics:
-        mtype = metric.get("type", "generic")
-        name = escape(metric.get("name") or TYPE_NAMES.get(mtype, "Usage"))
+        name = escape(metric_title(metric))
         is_active = is_selected and metric_key(metric) == selected_metric
-        seconds = metric.get("reset_in_seconds")
-        detail = metric.get("detail")
-        if detail is None:
-            detail = format_reset_time(seconds, mtype)
+        detail = metric_detail(metric)
 
         recede = None if is_active else DIM_INACTIVE
         label = f"•   {name}:" if is_active else f"    {name}:"

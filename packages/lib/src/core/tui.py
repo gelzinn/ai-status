@@ -18,13 +18,16 @@ def get_selectable_items():
             idx = p.get("_idx", 0)
             p_name = render.entry_name(p)
             metrics = p.get("metrics", [])
-            for m in metrics:
+            for m in sorted(metrics, key=render.metric_sort_key):
                 mtype = render.metric_key(m)
+                title = render.metric_title(m)
+                if not m.get("name") and ":" in mtype:
+                    title += f" ({mtype.split(':', 1)[1]})"
                 items.append({
                     "provider": dir_name,
                     "idx": idx,
                     "metric": mtype,
-                    "label": f"{p_name} ({mtype})"
+                    "label": f"{p_name} · {title}"
                 })
     if not items:
         for p in config.available_connections():

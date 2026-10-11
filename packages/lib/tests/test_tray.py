@@ -301,6 +301,59 @@ class DesktopTests(IsolatedState):
             self.assertLessEqual(right, viewport.width())
             self.assertGreaterEqual(value.width(), value.fontMetrics().horizontalAdvance(value.text()))
 
+    def test_metric_values_align_above_full_width_bars_and_amounts_have_no_bar_row(self):
+        config.save_config(["openrouter"])
+        self.dashboard.on_result("openrouter", [{"provider": "OpenRouter", "metrics": [
+            {"type": "credits", "name": "Account credits", "percentage": 25,
+             "amount": 25, "limit": 100, "unit": "USD", "value_format": "amount_ratio"},
+            {"type": "monthly", "name": "Key limit", "percentage": 12,
+             "amount": 12, "limit": 100, "unit": "USD", "value_format": "amount_ratio"},
+            {"type": "balance", "name": "Available balance", "percentage": None,
+             "amount": 75, "unit": "USD"},
+        ]}])
+        self.dashboard.show()
+        self.app.processEvents()
+        rows = self.dashboard.metric_buttons
+        right_edges = [row.percentage.mapTo(self.dashboard.scroll.widget(),
+                       tray.QPoint(row.percentage.width(), 0)).x() for row in rows]
+        self.assertEqual(len(set(right_edges)), 1)
+        for row in rows:
+            self.assertEqual(row.title.parentWidget(), row.percentage.parentWidget())
+            if row.bar_container.isHidden():
+                self.assertTrue(row.bar.isHidden())
+            else:
+                self.assertGreater(row.bar_container.y(), row.percentage.y())
+                self.assertGreater(row.bar.width(), row.title.width())
+        rows[-1].click()
+        self.assertEqual(state.load_selected()["metric"], rows[-1].value[2])
+        self.assertEqual(rows[-1].bullet.text(), "•")
+
+    def test_two_openrouter_accounts_fit_without_scrolling(self):
+        from core import accounts
+        accounts.save_document({"version": 1, "accounts": [
+            {"id": "personal", "provider": "openrouter", "label": "Personal"},
+            {"id": "work", "provider": "openrouter", "label": "Work"},
+        ]}, config.accounts_file())
+        config.save_config([])
+        for identity, label in (("personal", "Personal"), ("work", "Work")):
+            self.dashboard.on_result("account:" + identity, [{"provider": "OpenRouter",
+                "_dir": "openrouter", "_connection_id": "account:" + identity,
+                "_account_label": label, "metrics": [
+                    {"type": "credits", "name": "Account credits", "percentage": 25,
+                     "amount": 25, "limit": 100, "unit": "USD", "value_format": "amount_ratio"},
+                    {"type": "monthly", "name": "Key limit", "percentage": 12,
+                     "amount": 12, "limit": 100, "unit": "USD", "value_format": "amount_ratio"},
+                    {"type": "balance", "name": "Available balance", "percentage": None,
+                     "amount": 75, "unit": "USD"},
+                ]}])
+        self.dashboard.show()
+        self.app.processEvents()
+        self.assertEqual(len(self.dashboard.metric_buttons), 6)
+        self.assertLessEqual(self.dashboard.height(), 720)
+        self.assertEqual(self.dashboard.scroll.verticalScrollBar().maximum(), 0)
+        self.dashboard.metric_buttons[-1].click()
+        self.assertEqual(state.load_selected()["provider"], "account:work")
+
     def test_refresh_keeps_rows_and_geometry_while_providers_finish_independently(self):
         from core import fetch
         self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [

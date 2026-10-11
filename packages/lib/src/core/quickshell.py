@@ -170,15 +170,13 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
         entries = [p for p in data if render.connection_key(p) == name]
         for entry in entries:
             metrics = []
-            for metric in sorted(usable_metrics(entry), key=lambda m: render.TYPE_ORDER.get(m.get("type"), 4)):
+            for metric in sorted(usable_metrics(entry), key=render.metric_sort_key):
                 percentage = render.metric_percentage(metric)
-                detail = metric.get("detail")
-                if detail is None:
-                    detail = render.format_reset_time(metric.get("reset_in_seconds"), metric.get("type"))
+                detail = render.metric_detail(metric)
                 metrics.append({
                     "key": render.metric_key(metric),
                     "type": metric.get("type", "generic"),
-                    "name": metric.get("name") or render.TYPE_NAMES.get(metric.get("type"), "Usage"),
+                    "name": render.metric_title(metric),
                     "percentage": percentage,
                     "value": render.metric_value(metric),
                     "hasPercentage": percentage is not None,

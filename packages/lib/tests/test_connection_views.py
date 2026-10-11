@@ -1,6 +1,7 @@
 """Connection identity and amount presentation across desktop adapters."""
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -100,6 +101,44 @@ class ConnectionViewsTests(unittest.TestCase):
             with self.subTest(limit=limit):
                 metric = dict(amount=0, limit=limit, percentage=None, unit="USD", value_format="amount_ratio")
                 self.assertEqual(render.metric_value(metric), "$0.00")
+
+    def test_compact_amount_labels_keep_units_values_and_distinct_details(self):
+        metric = dict(type="balance", name="Available balance (USD)", detail="Available balance",
+                      amount=75, percentage=None, unit="USD")
+        snapshot = quickshell.build_snapshot([dict(self.data[0], metrics=[metric])], self.selected)
+        visible = snapshot["providers"][0]["metrics"][0]
+        self.assertEqual(visible["name"], "Available balance")
+        self.assertEqual(visible["value"], "$75.00")
+        self.assertEqual(visible["detail"], "")
+        self.assertEqual(visible["key"], "balance:Available balance (USD)")
+        for detail in ("Resets tomorrow", "Project A · us-central1", "Set a management key to see credits"):
+            with self.subTest(detail=detail):
+                self.assertEqual(render.metric_detail(dict(metric, detail=detail)), detail)
+
+    def test_account_summary_priority_preserves_selection_and_metric_text(self):
+        key = dict(type="monthly", name="Key · monthly", percentage=12, amount=12, limit=100,
+                   unit="USD", value_format="amount_ratio", id="key-spend")
+        credits = dict(type="credits", name="Account credits", percentage=25, amount=25, limit=100,
+                       unit="USD", value_format="amount_ratio", display_order=-2, id="account-credits")
+        balance = dict(type="credits", name="Available balance", percentage=None, amount=75,
+                       unit="USD", detail="", display_order=-1, id="account-balance")
+        entry = dict(self.data[0], metrics=[key, credits, balance])
+        snapshot = quickshell.build_snapshot([entry], dict(provider="account:personal", idx=0, icon_mode="off"))
+        self.assertEqual([metric["name"] for metric in snapshot["providers"][0]["metrics"]],
+                         ["Account credits", "Available balance", "Key · monthly"])
+        self.assertEqual(snapshot["selected"]["metric"], "credits:account-credits")
+        choice = dict(provider="account:personal", idx=0, metric="credits:account-credits",
+                      icon_mode="off", show_metric=True)
+        self.assertIn("Account credits $25.00 / $100.00", render.get_selected_metric_text([entry], choice))
+
+    @unittest.skipIf(sys.platform == "win32", "Windows configuration uses the tray dialog")
+    def test_terminal_choices_use_readable_titles_and_preserve_selection_ids(self):
+        from core import tui
+        metric = dict(type="credits", name="Account credits", id="Account spend / total credits (USD)")
+        with patch.object(state, "load_cache", return_value=[dict(self.data[0], metrics=[metric])]):
+            options = tui.get_selectable_items()
+        self.assertEqual(options[0]["metric"], "credits:Account spend / total credits (USD)")
+        self.assertEqual(options[0]["label"], "OpenRouter · Personal · Account credits")
 
 
 if __name__ == "__main__":

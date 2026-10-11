@@ -778,8 +778,8 @@ class ProviderSettings(QWidget):
                 metrics = entry.get("metrics") or [{"type": "rolling"}]
                 for metric in metrics:
                     key = render.metric_key(metric)
-                    title = metric.get("name") or render.TYPE_NAMES.get(metric.get("type"), "Usage")
-                    detail = " (" + key.split(":", 1)[1] + ")" if ":" in key else ""
+                    title = render.metric_title(metric)
+                    detail = " (" + key.split(":", 1)[1] + ")" if ":" in key and not metric.get("id") and not metric.get("name") else ""
                     self.active.addItem(provider_icon(name), f"{Dashboard.entry_name(name, entry)} · {title}{detail}",
                                         [name, entry.get("_idx", 0), key])
         index = self.active.findData(choice)
@@ -1295,7 +1295,7 @@ class Dashboard(QWidget):
         self.visible_metrics = []
         for name in config.enabled_connection_order():
             for entry in self.data.get(name) or []:
-                for metric in sorted(entry.get("metrics", []), key=lambda m: render.TYPE_ORDER.get(m.get("type"), 4)):
+                for metric in sorted(entry.get("metrics", []), key=render.metric_sort_key):
                     value = (name, entry.get("_idx", 0), render.metric_key(metric))
                     self.visible_metrics.append((name, entry, metric, value))
         self.metric_values = [value for _, _, _, value in self.visible_metrics]
@@ -1314,16 +1314,16 @@ class Dashboard(QWidget):
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setContentsMargins(16, 18, 16, 18)
-        layout.setSpacing(26)
+        layout.setSpacing(20)
         for name in config.enabled_connection_order():
             for entry in self.data.get(name) or []:
-                metrics = sorted(entry.get("metrics", []), key=lambda m: render.TYPE_ORDER.get(m.get("type"), 4))
+                metrics = sorted(entry.get("metrics", []), key=render.metric_sort_key)
                 if not metrics:
                     continue
                 group = QWidget()
                 group_layout = QVBoxLayout(group)
                 group_layout.setContentsMargins(0, 0, 0, 0)
-                group_layout.setSpacing(16)
+                group_layout.setSpacing(12)
                 active_provider = (name, entry.get("_idx", 0)) == self.selected_value()[:2]
                 heading = UsageButton()
                 self.provider_buttons[(name, entry.get("_idx", 0))] = heading
@@ -1349,7 +1349,7 @@ class Dashboard(QWidget):
                 heading.cached_label = plain_label("    Cached data", "#666666")
                 group_layout.addWidget(heading.cached_label)
                 for metric in metrics:
-                    title = metric.get("name") or render.TYPE_NAMES.get(metric.get("type"), "Usage")
+                    title = render.metric_title(metric)
                     value = (name, entry.get("_idx", 0), render.metric_key(metric))
                     active = value == self.selected_value()
                     color = "#eeeeee" if active else "#888888"
@@ -1363,16 +1363,20 @@ class Dashboard(QWidget):
                     metric_layout.setContentsMargins(4, 4, 4, 4)
                     metric_layout.setSpacing(4)
                     title_row = QHBoxLayout()
-                    title_row.setSpacing(0)
+                    title_row.setSpacing(8)
                     bullet = plain_label("•" if active else "", color)
                     bullet.setFixedWidth(20)
                     button.bullet = bullet
                     title_row.addWidget(bullet)
-                    button.title = plain_label(title + ":", color)
+                    button.title = plain_label(title, color)
                     button.title.setWordWrap(True)
                     title_row.addWidget(button.title, 1)
+                    button.percentage = plain_label(render.metric_value(metric), color)
+                    button.percentage.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                    title_row.addWidget(button.percentage)
                     metric_layout.addLayout(title_row)
-                    bar_row = QHBoxLayout()
+                    button.bar_container = QWidget()
+                    bar_row = QHBoxLayout(button.bar_container)
                     bar_row.setContentsMargins(20, 0, 0, 0)
                     bar_row.setSpacing(4)
                     button.open_bracket = plain_label("[", color)
@@ -1381,14 +1385,9 @@ class Dashboard(QWidget):
                     bar_row.addWidget(button.bar, 1)
                     button.close_bracket = plain_label("]", color)
                     bar_row.addWidget(button.close_bracket)
-                    button.percentage = plain_label(render.metric_value(metric), color)
-                    button.percentage.setFixedSize(38, self.fontMetrics().height())
-                    button.percentage.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                    bar_row.addWidget(button.percentage)
-                    metric_layout.addLayout(bar_row)
-                    seconds = metric.get("reset_in_seconds")
-                    reset = render.format_reset_time(seconds, metric.get("type")) if seconds is not None else "no reset available"
-                    button.description = plain_label("    " + (metric.get("detail") or reset), "#666666")
+                    metric_layout.addWidget(button.bar_container)
+                    button.description = plain_label(render.metric_detail(metric), "#666666")
+                    button.description.setContentsMargins(20, 0, 0, 0)
                     button.description.setWordWrap(True)
                     metric_layout.addWidget(button.description)
                     group_layout.addWidget(button)
@@ -1438,19 +1437,20 @@ class Dashboard(QWidget):
             loading = name in self.pending
             color = "#eeeeee" if active else "#888888"
             pct = render.metric_percentage(metric)
-            title = metric.get("name") or render.TYPE_NAMES.get(metric.get("type"), "Usage")
+            title = render.metric_title(metric)
             button.bullet.setText("•" if active else "")
-            button.title.setText(title + ":")
+            button.title.setText(title)
             button.bar.set_usage(pct or 0, active, loading, group_indices[value[:2]])
+            button.bar_container.setVisible(pct is not None)
             for item in (button.bar, button.open_bracket, button.close_bracket):
                 item.setVisible(pct is not None)
             button.percentage.setFixedWidth(max(38, self.fontMetrics().horizontalAdvance(render.metric_value(metric)) + 4))
             button.percentage.setText(render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else render.metric_value(metric))
             for label in (button.bullet, button.title, button.open_bracket, button.close_bracket, button.percentage):
                 label.setStyleSheet(f"color: {color};")
-            seconds = metric.get("reset_in_seconds")
-            reset = render.format_reset_time(seconds, metric.get("type")) if seconds is not None else "no reset available"
-            button.description.setText("    " + (metric.get("detail") or reset))
+            detail = render.metric_detail(metric)
+            button.description.setText(detail)
+            button.description.setVisible(bool(detail))
             button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {render.metric_value(metric)}")
         if not self.metric_values:
             self.empty_message.setText("Checking your connected providers…" if self.busy else

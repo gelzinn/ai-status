@@ -59,7 +59,7 @@ Item {
             const snapshot = Plugin.Model.snapshot
             snapshot.selected = {provider: "account:work", idx: 0, metric: "balance:credits"}
             snapshot.providers = [{id: "account:work", providerId: "openrouter", idx: 0, name: "OpenRouter · Work", logoPath: "", loading: false, cached: false, error: "", metrics: [
-                {key: "balance:credits", name: "Available credits", percentage: null, hasPercentage: false, value: "$42.50", detail: "Credit balance"}
+                {key: "balance:credits", name: "Available credits", percentage: null, hasPercentage: false, value: "$42.50", detail: ""}
             ]}]
             Plugin.Model.snapshot = Object.assign({}, snapshot)
             usage.visible = true
@@ -70,6 +70,12 @@ Item {
             const value = findChild(usage, "usage-value-account:work-0-balance:credits")
             compare(value.text, "$42.50")
             verify(value.visible)
+            const title = findChild(usage, "usage-title-account:work-0-balance:credits")
+            compare(title.mapToItem(usage, 0, 0).y, value.mapToItem(usage, 0, 0).y)
+            verify(title.mapToItem(usage, title.width, 0).x < value.mapToItem(usage, 0, 0).x)
+            verify(Math.abs(value.mapToItem(usage, value.width, 0).x - usage.width) < 0.1)
+            compare(bar.parent.visible, false)
+            compare(title.parent.parent.implicitHeight, title.parent.height)
         }
         function test_reorder_and_save() {
             settings.moveProvider(1, -1)
@@ -79,7 +85,7 @@ Item {
             compare(Plugin.Model.saved.selected.metric, "weekly:Fable")
             compare(Plugin.Model.saved.iconMode, "logo")
         }
-        function test_account_credit_ratio_fits_next_to_progress_bar() {
+        function test_account_credit_ratio_aligns_with_title_above_full_width_progress() {
             settings.visible = false
             const snapshot = Plugin.Model.snapshot
             snapshot.selected = {provider: "account:work", idx: 0, metric: "credits:account"}
@@ -95,7 +101,21 @@ Item {
             verify(value.width >= value.implicitWidth)
             verify(bar.visible && bar.width > 0)
             verify(Math.abs(value.mapToItem(usage, value.width, 0).x - usage.width) < 0.1)
-            verify(bar.mapToItem(usage, bar.width, 0).x < value.mapToItem(usage, 0, 0).x)
+            const title = findChild(usage, "usage-title-account:work-0-credits:account")
+            verify(title.mapToItem(usage, title.width, 0).x < value.mapToItem(usage, 0, 0).x)
+            compare(title.mapToItem(usage, 0, 0).y, value.mapToItem(usage, 0, 0).y)
+            verify(bar.mapToItem(usage, 0, 0).y >= value.mapToItem(usage, 0, value.height).y)
+            verify(bar.width > usage.width * 0.85)
+            verify(title.implicitHeight > value.implicitHeight)
+            verify(bar.mapToItem(usage, 0, 0).y >= title.mapToItem(usage, 0, title.height).y)
+            const valueWidth = value.width
+            const titleWidth = title.width
+            snapshot.providers[0].loading = true
+            Plugin.Model.snapshot = Object.assign({}, snapshot)
+            wait(20)
+            compare(value.width, valueWidth)
+            compare(title.width, titleWidth)
+            compare(value.text, Plugin.Model.spinner)
         }
         function test_disabling_active_provider_selects_an_enabled_one() {
             settings.toggleProvider("claude")
@@ -218,7 +238,7 @@ Item {
             }
         }
         function test_usage_layout_has_content_and_stable_metric_alignment() {
-            verify(usage.implicitHeight > 300)
+            verify(usage.implicitHeight > 200)
             const rightEdges = []
             function walk(item) {
                 // QQmlListProperty gained JS iteration in later Qt versions.
