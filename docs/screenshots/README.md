@@ -40,10 +40,12 @@ platform instructions, release links, and a copy control inside the terminal
 command box when a command is available. All previews use sample data.
 
 - `updates-linux-*.png` renders the production QML with the dark Omarchy test
-  theme and an older sample plugin installation.
+  theme and an older sample plugin installation. Linux and Windows previews
+  were regenerated from the same commit as the macOS artifact, after merging
+  the shared control geometry from `main`.
 - `updates-windows-*.png` renders the production Qt adapter offscreen with
   instructions for an installed Windows copy. This flow opens the installer,
   so no terminal command is shown.
 - `updates-macos-*.png` is unchanged from the native `macos-panel-preview`
-  artifact for commit `c087ffff880485fef12308e5eae5716d42831718` in
-  [the macOS CI run](https://github.com/gelzinn/ai-status/actions/runs/38161008294).
+  artifact for commit `beb14e5d6fd20d9d27a244a6b776b452bf32cea4` in
+  [the macOS CI run](https://github.com/gelzinn/ai-status/actions/runs/38161568853).
