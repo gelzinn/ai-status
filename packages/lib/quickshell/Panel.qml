@@ -140,6 +140,14 @@ Ui.Panel {
     })
     onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; aboutPage = false; updatePage = false; resetProvider = null }
 
+    Connections {
+        target: keyCatcher.Window.window
+        function onActiveFocusItemChanged() {
+            // Wait for the focus chain and any page layout changes to settle.
+            Qt.callLater(root.revealFocusedControl)
+        }
+    }
+
     Ui.KeyboardPanel {
         id: panel
         objectName: "panel-surface"
@@ -150,14 +158,6 @@ Ui.Panel {
         focusTarget: keyCatcher
         contentWidth: panel.fittedContentWidth(Style.space(380))
         contentHeight: panel.fittedContentHeight(header.height + panel.padding + Style.space(13) + content.implicitHeight + (footer.visible ? footer.height + Style.space(12) : 0), Style.space(680))
-
-        Connections {
-            target: keyCatcher.Window.window
-            function onActiveFocusItemChanged() {
-                // Wait for the focus chain and any page layout changes to settle.
-                Qt.callLater(root.revealFocusedControl)
-            }
-        }
 
         Ui.PanelKeyCatcher {
             id: keyCatcher

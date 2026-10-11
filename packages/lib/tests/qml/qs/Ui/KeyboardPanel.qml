@@ -9,7 +9,8 @@ Rectangle {
     property real contentWidth
     property real contentHeight
     property real padding: 16
-    default property alias contentData: holder.data
+    // Match Omarchy: panel content accepts visual items only.
+    default property alias contentItem: holder.children
     width: contentWidth
     height: contentHeight
     color: "#111111"
