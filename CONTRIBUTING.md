@@ -109,9 +109,23 @@ survives updates to the generated release PR; see
 [Release Please's documentation](https://github.com/googleapis/release-please#how-can-i-fix-release-notes).
 Keep the generated release PR labels and version metadata intact.
 
-The workflow uses the existing `BOT_TOKEN` secret with repository contents,
-pull request, and issue-label permissions. Using a bot token allows CI to
-run on generated PRs. The `main` branch rules require `pr-metadata`, `lint`,
+Release Please uses `GITHUB_TOKEN`, so newly opened release PRs are authored
+by `github-actions[bot]`. Enable **Allow GitHub Actions to create and approve
+pull requests** in the repository's Actions settings; permissions are granted
+explicitly to each job, and no personal access token is required.
+
+When GitHub holds a bot-created PR's workflows for approval, a maintainer with
+write access must select **Approve workflows to run** in the PR's merge box.
+This starts the existing CI and Windows `pull_request` workflows; updated bot
+commits can require approval again. See [GitHub's token documentation](https://docs.github.com/en/actions/concepts/security/github_token).
+These checks use `pull_request` events because [checks from `workflow_dispatch`
+do not satisfy required status checks in a branch ruleset](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks#checks-from-some-workflow-jobs-are-not-evaluated).
+
+Retry failed jobs from their Actions run. Rerun Release manually on `main` to
+resume a draft after an upload or verification failure. Wait for the required
+PR checks before merging the generated release PR.
+
+The `main` branch rules require `pr-metadata`, `lint`,
 `python-syntax`, `installer`, `release-config`, and `release-package`, with
 the PR branch up to date before merging. Tests validate versioning, note
 generation, installation failures and recovery, and publication retries
