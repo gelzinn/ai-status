@@ -1,15 +1,35 @@
-# Installing AI Status
+# Installing AI Status on Linux
 
 For the native Windows 10/11 tray app and bundled installer, follow the
 [Windows guide](WINDOWS.md). For the native macOS menu bar app, see
-[macOS setup](MACOS.md). The Bash/Waybar instructions below are for Linux.
+[macOS setup](MACOS.md). The Linux instructions below cover Waybar and the
+Omarchy Quattro Quickshell widget.
+
+## Requirements and desktop integration
+
+Use a Linux Wayland desktop with **Waybar**, or the **Omarchy Quattro
+Quickshell shell** with its plugin CLI. The Quickshell integration is an Omarchy
+plugin; arbitrary standalone Quickshell configurations are outside its scope.
+
+The Linux installer and backend require Bash, `python3`, `jq`, and `curl`.
+Omarchy plugin installation also needs `git`. For Waybar provider logos,
+install an optional SVG rasterizer (`imagemagick` or `librsvg`); text continues
+to work without one. Omarchy renders logos directly with Qt. The Waybar
+configuration TUI needs an available terminal; Omarchy provides native settings
+inside the widget. See [Providers and authentication](PROVIDERS.md) for your
+provider's existing session or API credentials.
+
+The [Linux web guide](https://ai-status.gelzin.com/linux) and
+[Linux LLM guide](https://ai-status.gelzin.com/linux/llms.txt) both use this
+document. Start at the [platform directory](https://ai-status.gelzin.com/llms.txt)
+if the operating system is unknown.
 
 ## One-command install (recommended for LLMs)
 
 Copy and run this single command. It detects your active bar and configures Waybar or Omarchy Quickshell with sensible defaults (provider logo, name, model, and percentage shown):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gelzinn/ai-status/main/packages/lib/install.sh | bash -s -- \
+curl -fsSL https://ai-status.gelzin.com/install | bash -s -- \
   --icon-mode logo \
   --show-provider true \
   --show-model true \
@@ -28,7 +48,7 @@ On updates, existing display preferences and provider selection are preserved un
 
 ## Omarchy Quickshell plugin
 
-This integration targets the new Omarchy shell (Quattro), not arbitrary standalone Quickshell configurations. Start the Omarchy shell before installing.
+This integration targets the Omarchy Quattro Quickshell shell. Start the Omarchy shell before installing.
 
 ```bash
 omarchy plugin add https://github.com/gelzinn/ai-status.git --enable
@@ -73,7 +93,7 @@ See [Updating AI Status](UPDATES.md) for details and rollback.
 Prefer to choose each option manually? Run the wizard:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/gelzinn/ai-status/main/packages/lib/install.sh)
+bash <(curl -fsSL https://ai-status.gelzin.com/install)
 ```
 
 Arrow keys toggle Yes/No, Enter confirms. When both integrations are available and no explicit bar flag was passed, the wizard first offers Quickshell or Waybar. It then asks:
@@ -84,20 +104,6 @@ Arrow keys toggle Yes/No, Enter confirms. When both integrations are available a
 4. Show metric type? (e.g. "Rolling Usage")
 5. Show percentage? (e.g. "4%")
 6. Add/enable the widget in the selected bar automatically?
-
-## macOS menu bar app
-
-```bash
-curl -fsSL https://ai-status.gelzin.com/install/macos | bash
-```
-
-The default native mode builds a SwiftUI/AppKit menu bar app with the shared Python backend. It follows the same Usage, Settings, reset-credit and About page layout as Windows and Omarchy Quickshell. Click the menu bar item to open the panel, then choose a provider or limit. Refresh and Settings stay in the header.
-
-Requires macOS 13+, Python 3.10+ and Xcode Command Line Tools (`xcode-select --install`). SwiftBar is optional. The installer uses the latest stable release with checksum verification; running it from a checkout installs that checkout's code. Re-run to update while preserving your preferences. A user LaunchAgent starts the native app at sign-in.
-
-For the SwiftBar dropdown integration, pass `--mode stream` (animated) or `--mode periodic`. Those modes also require [SwiftBar](https://swiftbar.app).
-
-See [MACOS.md](MACOS.md) for requirements, branch testing, menu actions and validation on a Mac.
 
 ## Manual Waybar config
 

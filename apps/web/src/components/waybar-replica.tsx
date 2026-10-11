@@ -3,7 +3,7 @@
 import { Bot, Wifi, Bluetooth, ChevronUp, Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useEffect, useRef, useId } from "react";
-import { PROVIDERS } from "@ai-status/shared";
+import { WEB_PROVIDERS as PROVIDERS } from "@ai-status/shared";
 import { site } from "@/lib/env";
 import { useInstallPlatform } from "@/components/install-platform";
 import { WindowsIcon } from "@/components/os-icons";

@@ -4,202 +4,237 @@
     "logo": "https://svgl.app/library/claude-ai-icon.svg",
     "tracks": "Session (5h) and weekly usage, including per-model weekly limits",
     "auth": "Claude Code OAuth (OpenCode fallback)",
-    "authType": "cli"
+    "authType": "cli",
+    "category": "assistants"
   },
   "codex": {
     "name": "Codex",
     "logo": "https://svgl.app/library/codex_dark.svg",
     "tracks": "5-hour and weekly limits (a single monthly window on free plans)",
     "auth": "~/.codex/auth.json",
-    "authType": "cli"
+    "authType": "cli",
+    "category": "assistants"
   },
   "opencode": {
     "name": "OpenCode",
     "logo": "https://svgl.app/library/opencode-dark.svg",
     "tracks": "Rolling, weekly, and monthly usage",
     "auth": "OPENCODE_GO_API_KEY or OpenCode auth",
-    "authType": "apiKey"
+    "authType": "apiKey",
+    "category": "assistants"
   },
   "antigravity": {
     "name": "Antigravity",
     "logo": "https://svgl.app/library/antigravity.svg",
     "tracks": "Weekly and 5-hour limits per model (Gemini and Claude/GPT)",
     "auth": "agy CLI session",
-    "authType": "cli"
+    "authType": "cli",
+    "category": "assistants"
   },
   "copilot": {
     "name": "Copilot",
     "logo": "https://svgl.app/library/copilot_dark.svg",
     "tracks": "Chat and completions usage",
     "auth": "GITHUB_COPILOT_TOKEN, gh auth token, or OpenCode session",
-    "authType": "opencode"
+    "authType": "opencode",
+    "category": "assistants"
   },
   "zai": {
     "name": "Z.AI",
     "logo": "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
     "tracks": "Rolling, weekly, and monthly usage",
     "auth": "ZAI_API_KEY or OpenCode account key",
-    "authType": "opencode"
+    "authType": "opencode",
+    "category": "assistants"
   },
   "kiro": {
     "name": "Kiro",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=kiro.dev",
     "tracks": "Usage percentage and reset timer",
     "auth": "kiro-cli session",
-    "authType": "cli"
+    "authType": "cli",
+    "category": "assistants"
   },
   "commandcode": {
     "name": "Command Code",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=commandcode.ai",
     "tracks": "5-hour and weekly spend limits; monthly spend and available credits",
     "auth": "~/.commandcode/auth.json (cmd login)",
-    "authType": "cli"
+    "authType": "cli",
+    "category": "assistants"
   },
   "anthropic-api": {
     "name": "Anthropic API",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=anthropic.com",
     "tracks": "Monthly organization API spend",
     "auth": "ANTHROPIC_ADMIN_KEY (admin-compatible key) or ANTHROPIC_ADMIN_TOKEN (org:admin OAuth)",
-    "authType": "apiKey"
+    "authType": "apiKey",
+    "category": "apis"
   },
   "openai-api": {
     "name": "OpenAI API",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=openai.com",
     "tracks": "Monthly organization API spend",
     "auth": "OPENAI_ADMIN_KEY (organization Admin key)",
-    "authType": "apiKey"
+    "authType": "apiKey",
+    "category": "apis"
   },
   "google-cloud": {
     "name": "Google Cloud",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=cloud.google.com",
     "tracks": "Project quotas; optional billing-export monthly cost",
     "auth": "gcloud or GOOGLE_CLOUD_ACCESS_TOKEN; project_id option",
-    "authType": "cli"
+    "authType": "cli",
+    "category": "cloud"
   },
   "openrouter": {
     "name": "OpenRouter",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=openrouter.ai",
-    "tracks": "Key usage, monthly spend, remaining limit and prepaid credits",
-    "auth": "OPENROUTER_API_KEY",
-    "authType": "apiKey"
+    "tracks": "Key usage and limits; account spend, total credits and remaining balance",
+    "auth": "OPENROUTER_API_KEY for key usage; OPENROUTER_MANAGEMENT_KEY for account credits",
+    "authType": "apiKey",
+    "category": "apis"
   },
   "deepseek": {
     "name": "DeepSeek",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=deepseek.com",
     "tracks": "Available prepaid balance",
     "auth": "DEEPSEEK_API_KEY",
-    "authType": "apiKey"
+    "authType": "apiKey",
+    "category": "apis"
   },
   "deepinfra": {
     "name": "DeepInfra",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=deepinfra.com",
     "tracks": "Prepaid balance and current-month spend",
     "auth": "DEEPINFRA_API_KEY",
-    "authType": "apiKey"
+    "authType": "apiKey",
+    "category": "apis"
   },
   "kimi": {
     "name": "Kimi",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=kimi.com",
     "tracks": "Coding subscription quota and rolling limits",
     "auth": "KIMI_API_KEY or Kimi CLI login",
-    "authType": "cli"
+    "authType": "cli",
+    "category": "assistants"
   },
   "minimax": {
     "name": "MiniMax",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=minimax.io",
     "tracks": "Token Plan quota windows",
     "auth": "MINIMAX_API_KEY (Token Plan key)",
-    "authType": "apiKey"
+    "authType": "apiKey",
+    "category": "assistants"
   },
   "kilo": {
     "name": "Kilo",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=kilo.ai",
     "tracks": "Personal or organization credit balance",
     "auth": "KILO_API_KEY; optional organization_id",
-    "authType": "apiKey"
+    "authType": "apiKey",
+    "category": "assistants",
+    "logoVariants": {
+      "web": "/providers/kilo.png"
+    }
   },
   "lyceum": {
     "name": "Lyceum",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=lyceum.technology",
     "tracks": "Available USD balance and reported spend",
     "auth": "LYCEUM_API_KEY",
-    "authType": "apiKey"
+    "authType": "apiKey",
+    "category": "apis",
+    "logoVariants": {
+      "web": "/providers/lyceum.png"
+    }
   },
   "novita": {
     "name": "Novita",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=novita.ai",
     "tracks": "Available prepaid balance",
     "auth": "NOVITA_API_KEY",
-    "authType": "apiKey"
+    "authType": "apiKey",
+    "category": "apis"
   },
   "moonshot": {
     "name": "Moonshot",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=moonshot.ai",
     "tracks": "Available USD or CNY balance",
     "auth": "MOONSHOT_API_KEY; region option",
-    "authType": "apiKey"
+    "authType": "apiKey",
+    "category": "apis"
   },
   "grok": {
     "name": "Grok API (xAI)",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=x.ai",
     "tracks": "Team prepaid balance",
     "auth": "XAI_MANAGEMENT_KEY; team_id for organization-scoped keys",
-    "authType": "apiKey"
+    "authType": "apiKey",
+    "category": "apis"
   },
   "supergrok": {
     "name": "SuperGrok",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=grok.com",
     "tracks": "Subscription credits and product usage",
     "auth": "Grok Build login or SUPERGROK_ACCESS_TOKEN",
-    "authType": "cli"
+    "authType": "cli",
+    "category": "assistants"
   },
   "grok-bot": {
     "name": "Grok Bot",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=grok.com",
     "tracks": "Weekly included usage",
     "auth": "Grok Bot desktop login or GROK_BOT_ACCESS_TOKEN",
-    "authType": "cli"
+    "authType": "cli",
+    "category": "assistants"
   },
   "cursor": {
     "name": "Cursor",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=cursor.com",
     "tracks": "Included usage pools and on-demand spend",
     "auth": "Cursor IDE/agent login or CURSOR_ACCESS_TOKEN",
-    "authType": "cli"
+    "authType": "cli",
+    "category": "assistants"
   },
   "nous": {
     "name": "Nous Research",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=nousresearch.com",
     "tracks": "Subscription and top-up credits",
     "auth": "NOUS_ACCESS_TOKEN or existing OAuth credentials",
-    "authType": "cli"
+    "authType": "cli",
+    "category": "assistants"
   },
   "ollama": {
     "name": "Ollama Cloud",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=ollama.com",
     "tracks": "Cloud session/weekly or monthly quota",
     "auth": "OLLAMA_API_KEY (cloud key)",
-    "authType": "apiKey"
+    "authType": "apiKey",
+    "category": "cloud"
   },
   "orcarouter": {
     "name": "OrcaRouter",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=orcarouter.ai",
     "tracks": "Credit limit, spend and remaining balance",
     "auth": "ORCAROUTER_API_KEY",
-    "authType": "apiKey"
+    "authType": "apiKey",
+    "category": "apis"
   },
   "modelstudio": {
     "name": "Alibaba Model Studio",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=alibabacloud.com",
     "tracks": "Token Plan rolling and weekly quota",
     "auth": "bl auth login --console",
-    "authType": "cli"
+    "authType": "cli",
+    "category": "cloud"
   },
   "devin": {
     "name": "Devin",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=devin.ai",
     "tracks": "Daily and weekly CLI quota; optional overage balance",
     "auth": "Official Devin CLI credentials",
-    "authType": "cli"
+    "authType": "cli",
+    "category": "assistants"
   }
 }

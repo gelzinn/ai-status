@@ -17,6 +17,7 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(site.url),
   title: `${site.name} | AI Usage Monitor`,
   description,
   icons: {

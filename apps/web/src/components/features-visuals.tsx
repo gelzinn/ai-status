@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Download, GripVertical, Layers, RefreshCw } from "lucide-react";
 import { WindowsIcon } from "@/components/os-icons";
 import { cn } from "@/lib/utils";
-import { PROVIDERS, type Provider } from "@ai-status/shared";
+import { WEB_PROVIDERS as PROVIDERS, type Provider } from "@ai-status/shared";
 
 // ── base building blocks ────────────────────────────────────────────
 // Small, presentational pieces shared across the feature visuals below.

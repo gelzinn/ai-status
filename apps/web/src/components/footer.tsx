@@ -13,9 +13,10 @@ export function Footer() {
 
 			<div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
 				<nav aria-label="Setup guides" className="flex items-center gap-4">
-					<Link href="/llms.txt" className="transition-colors hover:text-foreground">Linux</Link>
+					<Link href="/linux" className="transition-colors hover:text-foreground">Linux</Link>
 					<Link href="/windows" className="transition-colors hover:text-foreground">Windows</Link>
 					<Link href="/macos" className="transition-colors hover:text-foreground">macOS</Link>
+					<Link href="/llms.txt" className="transition-colors hover:text-foreground">LLM guide</Link>
 				</nav>
 
 				<a href={`${repo.url}/blob/main/LICENSE`} target="_blank" rel="noreferrer" className="font-mono text-xs opacity-50 hover:text-foreground hover:opacity-100 transition-colors">

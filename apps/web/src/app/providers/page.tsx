@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
-import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
+import { WEB_SUPPORTED_PROVIDERS as SUPPORTED_PROVIDERS } from "@ai-status/shared";
 import { site, LIB_NAME } from "@/lib/env";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 import { ProviderSearch } from "@/components/provider-search";
@@ -24,8 +24,8 @@ export default function ProvidersPage() {
 						Supported Providers
 					</h1>
 					<p className="max-w-2xl text-lg text-muted-foreground">
-						Every AI service {LIB_NAME} can track in Waybar and Omarchy Quickshell — what each one
-						reports, and where it reads your credentials from.
+						Every AI service {LIB_NAME} can track on Linux, Windows and macOS —
+						what each one reports, and where it reads your credentials from.
 					</p>
 				</section>
 
@@ -38,11 +38,11 @@ export default function ProvidersPage() {
 						<ShieldCheck className="mt-0.5 size-5 shrink-0 text-foreground/70" />
 						<p className="leading-relaxed text-muted-foreground">
 							<span className="font-medium text-foreground">
-								Your credentials never leave your machine.
+								Credentials are read locally.
 							</span>{" "}
-							{site.name} ships zero API keys — it reads tokens from your local
-							auth files and talks straight to each provider. No server, no
-							telemetry, no storage.
+							{site.name} reads existing sessions or configured key sources
+							and sends authenticated requests directly to each provider.
+							No intermediary server or telemetry.
 						</p>
 					</div>
 
