@@ -136,7 +136,7 @@ def _find_selected_provider(latest_data, selected):
     count = 0
     for p in latest_data:
         if connection_key(p) == dir_name:
-            if count == idx:
+            if p.get("_idx", count) == idx:
                 return p
             count += 1
     return None

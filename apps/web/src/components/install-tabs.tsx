@@ -18,7 +18,7 @@ export function InstallTabs({
 
 	const platforms: { name: string; available: boolean; id: InstallPlatform; icon: React.ReactNode }[] = [
 		{ name: "Linux", available: true, id: "Linux", icon: <LinuxIcon className="size-4" /> },
-		{ name: "macOS", available: false, id: "macOS", icon: <AppleIcon className="size-4" /> },
+		{ name: "macOS", available: true, id: "macOS", icon: <AppleIcon className="size-4" /> },
 		{ name: "Windows", available: true, id: "Windows", icon: <WindowsIcon className="size-4" /> },
 	];
 

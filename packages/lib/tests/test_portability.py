@@ -104,12 +104,18 @@ class PlatformTests(IsolatedState):
     def test_linux_refresh_keeps_signal_protocol(self):
         pid_file = self.root / "pids"
         pid_file.write_text("123\n", encoding="utf-8")
-        # Simulate the Unix file-lock API too when this runs on Windows.
-        with patch.object(paths, "IS_WINDOWS", False), patch.object(state, "PID_FILE", str(pid_file)), patch.object(state, "fcntl", create=True) as locks, patch("os.kill") as kill:
+        # Simulate Linux's file-lock API and refresh signal on every host.
+        with (
+            patch.object(paths, "IS_WINDOWS", False),
+            patch.object(state, "PID_FILE", str(pid_file)),
+            patch.object(state, "fcntl", create=True) as locks,
+            patch.object(state.signal, "SIGUSR1", 10, create=True),
+            patch("os.kill") as kill,
+        ):
             state.trigger_refresh()
             locks.flock.assert_called_once()
             self.assertEqual(locks.flock.call_args.args[1], locks.LOCK_SH)
-            kill.assert_called_once_with(123, 10)
+            kill.assert_called_once_with(123, state.signal.SIGUSR1)
 
     def test_python_scripts_use_interpreter_and_frozen_sibling(self):
         query = str(SRC / "providers/codex/query.py")

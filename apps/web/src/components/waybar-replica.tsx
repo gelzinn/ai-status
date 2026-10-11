@@ -90,6 +90,7 @@ const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', 
 export function WaybarReplica({ version, compact = false }: { version: string; compact?: boolean }) {
   const { activeOs } = useInstallPlatform();
   const isWindows = activeOs === "Windows";
+  const isMac = activeOs === "macOS";
   const panelId = useId();
   const tooltipId = useId();
   const [mounted, setMounted] = useState(false);
@@ -197,6 +198,8 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
         compact && "text-[11px] sm:text-xs",
         isWindows
           ? "bg-[url('/windows-11-wallpaper.webp')] bg-cover"
+          : isMac
+          ? "bg-background"
           : "bg-[url('/omarchy-wallpaper.jpeg')] bg-contain",
       )}
       style={{ transform, transformStyle: "preserve-3d" }}
@@ -205,7 +208,7 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
     >
       <div
         role="group"
-        aria-label={isWindows ? "Windows taskbar preview" : "Waybar preview"}
+        aria-label={isWindows ? "Windows taskbar preview" : isMac ? "Shared usage panel preview" : "Waybar preview"}
         className={cn(
           "relative w-full shrink-0 flex items-center border-border z-20",
           isWindows
@@ -218,6 +221,8 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
           <div aria-hidden="true" className="flex size-8 items-center justify-center">
             <WindowsIcon alt="" className="size-6" />
           </div>
+        ) : isMac ? (
+          <span className="font-sans text-muted-foreground">Usage panel preview</span>
         ) : (
           <div aria-hidden="true" className={cn("flex items-center gap-3 opacity-50", compact && "gap-1.5")}>
             {Array.from({ length: compact ? 3 : 6 }).map((_, idx) => (
@@ -298,6 +303,7 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
             )}
           </div>
 
+          {!isMac && (
           <div
             aria-hidden="true"
             className={cn(
@@ -317,6 +323,7 @@ export function WaybarReplica({ version, compact = false }: { version: string; c
               <Bluetooth className="size-3.5" />
             )}
           </div>
+          )}
           {isWindows && (
             <span
               aria-hidden="true"

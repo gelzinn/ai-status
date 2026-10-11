@@ -294,7 +294,7 @@ def prepare(connection, environ=None):
     env = dict(os.environ if environ is None else environ)
     # A parent collector context must never leak into another/default connection.
     for key in list(env):
-        if key.startswith("AI_STATUS_ACCOUNT_") or key == "AI_STATUS_AUTH_FILE":
+        if key.startswith("AI_STATUS_ACCOUNT_") or key in ("AI_STATUS_AUTH_FILE", "AI_STATUS_CLAUDE_CREDENTIALS"):
             del env[key]
     source_env = dict(env)
     for key, source in connection.get("options", {}).items():
@@ -382,6 +382,26 @@ def prepare(connection, environ=None):
                         credential_secrets.append(value)
             except OSError:
                 digest.update(b"missing-or-unreadable")
+    if (connection["provider"] == "claude" and sys.platform == "darwin"
+            and not auth_file and not env.get("CLAUDE_ACCESS_TOKEN")
+            and (not connection.get("account_id") or env.get("CLAUDE_CONFIG_DIR"))):
+        # Resolve the effective Keychain/file login before cache lookup. The
+        # subprocess receives this in-memory snapshot so a concurrent login
+        # change cannot save new-account usage under the previous fingerprint.
+        from .macos_credentials import claude_credentials
+        from .provider_http import QueryError
+        configured_root = env.get("CLAUDE_CONFIG_DIR")
+        home = env.get("HOME") or env.get("USERPROFILE")
+        root = Path(configured_root) if configured_root else (Path(home) if home else Path.home()) / ".claude"
+        try:
+            credentials = claude_credentials(root, scoped=bool(configured_root), environ=env)
+        except QueryError as error:
+            # Keychain errors are safe and must bypass all earlier-login caches.
+            raise AccountError(str(error)) from None
+        snapshot = json.dumps(credentials, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        digest.update(hashlib.sha256(snapshot.encode("utf-8")).digest())
+        credential_secrets.extend(_secret_values(credentials))
+        env["AI_STATUS_CLAUDE_CREDENTIALS"] = snapshot
     if (connection["provider"] == "cursor" and not connection.get("account_id") and sys.platform == "darwin"
             and not env.get("CURSOR_ACCESS_TOKEN") and not credential_secrets):
         # The macOS Cursor CLI may keep its sole credential in the login

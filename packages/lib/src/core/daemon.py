@@ -47,15 +47,15 @@ def update_task(output_format="waybar"):
                 def on_result(dir_name, providers):
                     if providers:
                         _results_by_dir[dir_name] = providers
-                    elif output_format == "quickshell":
+                    elif output_format in ("quickshell", "macos"):
                         _results_by_dir.pop(dir_name, None)
-                    if output_format == "quickshell":
+                    if output_format in ("quickshell", "macos"):
                         # Clicks must be able to select newly streamed metrics
                         # while another provider is still being queried.
                         state.save_cache(_ordered_merged(cfgmod.enabled_connection_order()))
                     _pending.discard(dir_name)
 
-                data = fetch.fetch_all_data(on_result=on_result, include_errors=output_format == "quickshell")
+                data = fetch.fetch_all_data(on_result=on_result, include_errors=output_format in ("quickshell", "macos"))
                 latest_data = data
                 state.save_cache(data)
             finally:
@@ -96,12 +96,16 @@ def _run(output_format="waybar"):
     if output_format == "waybar":
         logos.update_current(state.load_selected())
 
-    logo_cache = quickshell.LogoCache() if output_format == "quickshell" else None
+    if output_format == "macos":
+        from .macos import LogoCache
+        logo_cache = LogoCache()
+    else:
+        logo_cache = quickshell.LogoCache() if output_format == "quickshell" else None
     last_snapshot = None
 
     def emit(data, selected, frame=None):
         nonlocal last_snapshot
-        if output_format == "quickshell":
+        if output_format in ("quickshell", "macos"):
             logo_paths = {name: logo_cache.get(name) for name in cfgmod.available_providers()}
             logo = logo_paths.get((cfgmod.connection_info(selected.get("provider", "")) or {}).get("provider", ""), "") if state.get_icon_mode(selected) == "logo" else ""
             output = quickshell.build_snapshot(data, selected, pending=_pending.copy(), logo_path=logo, logo_paths=logo_paths)
@@ -125,9 +129,9 @@ def _run(output_format="waybar"):
     last_selected_mtime = 0
     last_refresh = paths.read_json(state.REFRESH_FILE)
     should_update = True
-    selected = state.load_selected()
+    selected = state.load_selected() or {}
 
-    if output_format == "quickshell":
+    if output_format in ("quickshell", "macos"):
         _pending = set(cfgmod.enabled_connection_order())
         emit(latest_data, selected)
 
@@ -157,7 +161,7 @@ def _run(output_format="waybar"):
             # Only re-parse selected.json when it changed — keeps the fast poll
             # cheap (the idle hot path is just two getmtime calls).
             if selected_mtime != last_selected_mtime:
-                selected = state.load_selected()
+                selected = state.load_selected() or {}
 
             if should_update and not is_updating:
                 should_update = False
@@ -196,14 +200,14 @@ def _run(output_format="waybar"):
                 if output_format == "waybar":
                     logos.update_current(selected)
 
-            elif output_format == "quickshell":
+            elif output_format in ("quickshell", "macos"):
                 # Publish asynchronously downloaded logos without a new fetch.
                 emit(latest_data, selected)
 
             # Short poll so the text reacts to a scroll/selection change almost
             # as fast as the logo (which updates instantly via its signal),
             # keeping the two in sync. The per-iteration work is tiny.
-            time.sleep(0.15 if output_format == "quickshell" else 0.02)
+            time.sleep(0.15 if output_format in ("quickshell", "macos") else 0.02)
             if now - last_auto_update >= 300:
                 should_update = True
                 
@@ -223,6 +227,12 @@ def _terminate(signum, frame):
 
 
 def run(output_format="waybar"):
+    if output_format == "macos":
+        from .macos import configure_environment
+        configure_environment()
+        if os.getpgrp() != os.getpid():
+            # The native host terminates the whole collector group on app exit.
+            os.setsid()
     state.register_pid()
     previous = signal.signal(signal.SIGTERM, _terminate)
     previous_refresh = signal.signal(signal.SIGUSR1, handle_signal) if not paths.IS_WINDOWS else None

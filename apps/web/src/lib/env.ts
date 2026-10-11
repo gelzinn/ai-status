@@ -19,6 +19,8 @@ export const site = {
 	url: SITE_ORIGIN,
 	/** Short install URL — the /install route serves packages/lib/install.sh. */
 	installUrl: `${SITE_ORIGIN}/install`,
+	/** macOS install URL — the /install/macos route serves install-macos.sh. */
+	installUrlMac: `${SITE_ORIGIN}/install/macos`,
 } as const;
 
 /** The GitHub repository. */
@@ -30,4 +32,6 @@ export const repo = {
 	apiUrl: `https://api.github.com/repos/${REPO_SLUG}/releases/latest`,
 	/** Canonical raw URL for install.sh (mirrored by site.installUrl). */
 	rawInstallUrl: `https://raw.githubusercontent.com/${REPO_SLUG}/main/packages/lib/install.sh`,
+	/** Canonical raw URL for install-macos.sh (mirrored by site.installUrlMac). */
+	rawInstallUrlMac: `https://raw.githubusercontent.com/${REPO_SLUG}/main/packages/lib/install-macos.sh`,
 } as const;

@@ -8,6 +8,7 @@ import { PlatformContent } from "@/components/install-platform";
 
 export function Hero() {
 	const installCmd = `curl -fsSL ${site.installUrl} | bash`;
+	const installCmdMac = `curl -fsSL ${site.installUrlMac} | bash`;
 	return (
 		<section className="flex flex-col gap-8">
 			<h1 className="font-heading max-w-2xl text-4xl font-semibold tracking-tight text-balance sm:text-5xl motion-safe:animate-fade-up">
@@ -28,7 +29,7 @@ export function Hero() {
 				}
 				mac={
 					<HighlightedCodeBlock
-						code="# macOS support is coming soon! Stay tuned."
+						code={installCmdMac}
 						lang="bash"
 						label="bash"
 						className="w-full"
@@ -39,6 +40,7 @@ export function Hero() {
 
       <PlatformContent
         linux={<Link href="/llms.txt" className="inline-flex w-fit items-center gap-1 text-sm font-medium transition-colors hover:text-muted-foreground">Copy-paste install guide for LLMs <ArrowRight className="size-3.5" /></Link>}
+        mac={<Link href="/macos/llms.txt" className="inline-flex w-fit items-center gap-1 text-sm font-medium transition-colors hover:text-muted-foreground">Copy-paste macOS guide for LLMs <ArrowRight className="size-3.5" /></Link>}
         windows={<Link href="/windows/llms.txt" className="inline-flex w-fit items-center gap-1 text-sm font-medium transition-colors hover:text-muted-foreground">Copy-paste Windows guide for LLMs <ArrowRight className="size-3.5" /></Link>}
       />
 		</section>

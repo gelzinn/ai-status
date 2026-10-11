@@ -16,7 +16,7 @@ export function InstallPlatformProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       const saved = localStorage.getItem(PLATFORM_STORAGE_KEY);
-      if (saved === "Linux" || saved === "Windows") {
+      if (saved === "Linux" || saved === "macOS" || saved === "Windows") {
         updateActiveOs(saved);
         return;
       }
@@ -27,11 +27,12 @@ export function InstallPlatformProvider({ children }: { children: ReactNode }) {
     const platform = (navigator as Navigator & { userAgentData?: { platform: string } }).userAgentData?.platform;
     if (platform === "Windows" || /^Win/i.test(navigator.platform) || /Windows NT/i.test(navigator.userAgent)) {
       updateActiveOs("Windows");
+    } else if (platform === "macOS" || /^Mac/i.test(navigator.platform) || /Macintosh/i.test(navigator.userAgent)) {
+      updateActiveOs("macOS");
     }
   }, []);
 
   function setActiveOs(platform: InstallPlatform) {
-    if (platform === "macOS") return;
     updateActiveOs(platform);
     try {
       localStorage.setItem(PLATFORM_STORAGE_KEY, platform);
@@ -54,7 +55,8 @@ export function useInstallPlatform() {
 }
 
 /** Select server-rendered content without sending its rendering logic to the client. */
-export function PlatformContent({ linux, windows }: { linux: ReactNode; windows: ReactNode }) {
+export function PlatformContent({ linux, mac, windows }: { linux: ReactNode; mac: ReactNode; windows: ReactNode }) {
   const { activeOs } = useInstallPlatform();
+  if (activeOs === "macOS") return mac;
   return activeOs === "Windows" ? windows : linux;
 }

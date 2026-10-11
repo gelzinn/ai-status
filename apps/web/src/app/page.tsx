@@ -6,6 +6,7 @@ import { Features } from "@/components/features";
 import { InstallPlatformProvider, PlatformContent } from "@/components/install-platform";
 import { WaybarConfiguration } from "@/components/waybar-configuration";
 import { WindowsConfiguration } from "@/components/windows-configuration";
+import { MacosConfiguration } from "@/components/macos-configuration";
 import { WaybarReplica } from "@/components/waybar-replica";
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, Plus, ShieldCheck } from "lucide-react";
@@ -32,6 +33,7 @@ export default async function Homepage() {
 
           <PlatformContent
             linux={<><QuickshellConfiguration /><WaybarConfiguration /></>}
+            mac={<MacosConfiguration />}
             windows={<WindowsConfiguration />}
           />
 

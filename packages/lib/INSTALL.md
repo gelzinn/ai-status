@@ -1,7 +1,8 @@
 # Installing AI Status
 
 For the native Windows 10/11 tray app and bundled installer, follow the
-[Windows guide](WINDOWS.md). The Bash/Waybar instructions below are for Linux.
+[Windows guide](WINDOWS.md). For the native macOS menu bar app, see
+[macOS setup](MACOS.md). The Bash/Waybar instructions below are for Linux.
 
 ## One-command install (recommended for LLMs)
 
@@ -83,6 +84,20 @@ Arrow keys toggle Yes/No, Enter confirms. When both integrations are available a
 4. Show metric type? (e.g. "Rolling Usage")
 5. Show percentage? (e.g. "4%")
 6. Add/enable the widget in the selected bar automatically?
+
+## macOS menu bar app
+
+```bash
+curl -fsSL https://ai-status.gelzin.com/install/macos | bash
+```
+
+The default native mode builds a SwiftUI/AppKit menu bar app with the shared Python backend. It follows the same Usage, Settings, reset-credit and About page layout as Windows and Omarchy Quickshell. Click the menu bar item to open the panel, then choose a provider or limit. Refresh and Settings stay in the header.
+
+Requires macOS 13+, Python 3.10+ and Xcode Command Line Tools (`xcode-select --install`). SwiftBar is optional. The installer uses the latest stable release with checksum verification; running it from a checkout installs that checkout's code. Re-run to update while preserving your preferences. A user LaunchAgent starts the native app at sign-in.
+
+For the SwiftBar dropdown integration, pass `--mode stream` (animated) or `--mode periodic`. Those modes also require [SwiftBar](https://swiftbar.app).
+
+See [MACOS.md](MACOS.md) for requirements, branch testing, menu actions and validation on a Mac.
 
 ## Manual Waybar config
 

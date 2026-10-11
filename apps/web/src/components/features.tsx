@@ -7,6 +7,8 @@ import { useInstallPlatform } from "@/components/install-platform";
 export function Features({ latestVersion }: { latestVersion: string }) {
   const { activeOs } = useInstallPlatform();
   const windows = activeOs === "Windows";
+  const mac = activeOs === "macOS";
+  const nativePanel = windows || mac;
   const features = [
     {
       title: "Multi-Provider",
@@ -16,18 +18,20 @@ export function Features({ latestVersion }: { latestVersion: string }) {
     {
       title: "Usage Refresh",
       description: "Usage refreshes every five minutes. Refresh manually whenever you need an update.",
-      visual: <FeatureVisuals.LiveUpdates windows={windows} />,
+      visual: <FeatureVisuals.LiveUpdates windows={nativePanel} />,
     },
     {
-      title: windows ? "Usage Panel" : "Tooltip Detail",
-      description: windows
-        ? "Click the tray icon for usage bars, reset timers and Claude/Codex reset-credit details."
+      title: nativePanel ? "Usage Panel" : "Tooltip Detail",
+      description: nativePanel
+        ? `Click the ${mac ? "menu bar item" : "tray icon"} for usage bars, reset timers and Claude/Codex reset-credit details.`
         : "Per-provider breakdown with progress bars, percentages, and reset timers.",
-      visual: <FeatureVisuals.TooltipDetail windows={windows} />,
+      visual: <FeatureVisuals.TooltipDetail windows={nativePanel} />,
     },
     {
       title: "Configurable",
-      description: windows
+      description: mac
+        ? "Enable, disable or reorder providers in the native Settings page. Choose the limit and menu bar display."
+        : windows
         ? "Enable, disable or drag to reorder providers in Settings. Choose whether to start at sign-in."
         : "Enable, disable, or reorder providers via an interactive TUI (right-click).",
       visual: <FeatureVisuals.Configurable />,
@@ -43,6 +47,8 @@ export function Features({ latestVersion }: { latestVersion: string }) {
       title: windows ? "Standalone App" : "Lightweight Runtime",
       description: windows
         ? "The installer includes the app runtime. No Python, Bash or WSL setup required."
+        : mac
+        ? "Native SwiftUI menu bar app with the shared Python backend. Requires Python 3.10+ and Xcode Command Line Tools."
         : "Runs with Python 3, Bash and Waybar. Connect providers through their apps or CLIs.",
       visual: windows ? <FeatureVisuals.Standalone /> : <FeatureVisuals.Lightweight />,
     },

@@ -2,6 +2,7 @@ import os
 import json
 import time
 import uuid
+import signal
 import threading
 from . import paths
 
@@ -152,7 +153,7 @@ def trigger_refresh():
             for line in lines:
                 try:
                     pid = int(line.strip())
-                    os.kill(pid, 10) # SIGUSR1
+                    os.kill(pid, signal.SIGUSR1)
                 except (ValueError, OSError):
                     pass
         except Exception:

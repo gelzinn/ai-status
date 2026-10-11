@@ -2,7 +2,7 @@
   <img src="packages/lib/assets/app.png" alt="AI Status logo" width="72" height="72" />
   <h1>AI Status</h1>
   <p><strong>Your AI usage, at a glance.</strong></p>
-  <p>Track usage limits, reset timers and available reset credits from your desktop.<br />Native panels for Omarchy Quickshell and Windows, plus Waybar integration.</p>
+  <p>Track usage limits, reset timers and available reset credits from your desktop.<br />Native panels for Omarchy Quickshell, Windows and macOS, plus Waybar integration.</p>
   <p>
     <a href="https://github.com/gelzinn/ai-status/releases/latest"><img src="https://img.shields.io/github/v/release/gelzinn/ai-status?style=flat-square&amp;label=release" alt="Latest stable release" /></a>
     <a href="https://github.com/gelzinn/ai-status/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/gelzinn/ai-status/ci.yml?branch=main&amp;style=flat-square&amp;label=checks" alt="CI status on main" /></a>
@@ -36,6 +36,7 @@
 | **Omarchy Quickshell** | Native bar widget, usage panel and settings | [Install the plugin](#omarchy-quickshell) |
 | **Linux with Waybar** | Status module with a detailed usage tooltip | [Run the installer](#linux-with-waybar) |
 | **Windows 10/11 x64** | Native tray app, usage panel and settings | [Download the installer or portable ZIP](#windows-1011) |
+| **macOS 13+** | Native menu bar app, usage panel and settings | [Run the macOS installer](#macos-13) |
 
 Sign in to the providers you want to monitor using their apps or CLIs, then follow the setup for your desktop. See [provider authentication](packages/lib/PROVIDERS.md) for the credentials and additional setup each integration needs.
 
@@ -107,6 +108,18 @@ Then reference it in whichever bar section you use — a module that's defined b
 
 </details>
 
+### macOS 13+
+
+```bash
+curl -fsSL https://ai-status.gelzin.com/install/macos | bash
+```
+
+The installer builds a native SwiftUI/AppKit menu bar app with the same usage, Settings, reset-credit and About page structure as Windows and Quickshell. Click the menu bar item to open the panel, choose a provider or limit, and use the header's **Refresh** and **Settings** controls.
+
+Requires macOS 13+, Python 3.10+ and Xcode Command Line Tools (`xcode-select --install`). The native integration does not require SwiftBar. Re-run to update while keeping your preferences. Existing SwiftBar users can select `--mode stream` or `--mode periodic` instead.
+
+[macOS installation, branch testing and SwiftBar options →](packages/lib/MACOS.md)
+
 ### Windows 10/11
 
 1. Open the [latest release](https://github.com/gelzinn/ai-status/releases/latest).
@@ -120,12 +133,12 @@ The packaged app includes its runtime. Installation needs no administrator acces
 ## What you get
 
 - **29 providers in one view.** Track subscription limits, API costs and prepaid balances, including separate rolling, weekly, monthly and per-model windows.
-- **Choose what stays visible.** Pick the active provider and limit, then choose the provider name, plan, limit name, percentage and icon shown in the bar. On Windows, the tray logo and tooltip follow your selection.
+- **Choose what stays visible.** Pick the active provider and limit, then choose the provider name, plan, limit name, percentage and icon shown in the bar. The Windows tray and macOS menu bar follow your selection.
 - **Multiple accounts.** Add as many connections as you need for each provider, with independent labels, credentials, caches and selected metrics. Manage connections with `ai-status accounts`; enable and reorder them in the desktop Settings.
-- **Native settings.** Enable providers, reorder them and select limits inside the Omarchy and Windows panels. Windows also supports drag and drop; Waybar uses an interactive configuration TUI.
+- **Native settings.** Enable providers, reorder them and select limits inside the Omarchy, Windows and macOS panels. Windows also supports drag and drop; Waybar uses an interactive configuration TUI.
 - **Useful reset details.** See reset countdowns and available Claude/Codex reset credits, with expiry dates, remaining time and time zones when reported. Redeem credits in the provider's own app.
 - **Refresh when you need it.** Usage updates every five minutes, with manual refresh and loading feedback. Usable cached data remains visible when a refresh fails.
-- **A desktop runtime.** The Omarchy widget runs inside the existing shell with one backend across monitors. Windows uses Qt widgets with a bundled runtime. Desktop installation requires no Node or NPM.
+- **A desktop runtime.** The Omarchy widget runs inside the existing shell with one backend across monitors. Windows uses Qt widgets with a bundled runtime. macOS uses SwiftUI/AppKit and the same Python backend. Desktop installation requires no Node or NPM.
 
 <details>
 <summary>More views: settings, reset credits and Waybar</summary>
@@ -193,6 +206,7 @@ Available metrics depend on the account, plan and upstream API. Providers withou
 | --- | --- |
 | [Install and configure](packages/lib/INSTALL.md) | Dependencies, bar placement, display options and manual setup |
 | [Windows](packages/lib/WINDOWS.md) | Installer, portable app, sign-in option, compatibility and local builds |
+| [macOS](packages/lib/MACOS.md) | Native menu bar app, local builds, sign-in startup and optional SwiftBar modes |
 | [Providers and authentication](packages/lib/PROVIDERS.md) | Credential sources, account setup and troubleshooting |
 | [Updates and rollback](packages/lib/UPDATES.md) | Stable releases, version selection, checksums and recovery |
 | [Changelog](packages/lib/CHANGELOG.md) | Changes in each published release |
@@ -200,7 +214,7 @@ Available metrics depend on the account, plan and upstream API. Providers withou
 
 ## How it works
 
-A shared Python backend queries enabled connections with bounded parallel workers every five minutes. Each provider has its own collector and parser. Waybar consumes JSON with a Pango tooltip; the Omarchy plugin consumes structured snapshots through a shared QML model. The Windows adapter renders the same provider data in a native Qt tray panel.
+A shared Python backend queries enabled connections with bounded parallel workers every five minutes. Each provider has its own collector and parser. Waybar consumes JSON with a Pango tooltip; the Omarchy plugin consumes structured snapshots through a shared QML model. The Windows adapter renders the same provider data in a native Qt tray panel; macOS uses a SwiftUI/AppKit menu bar panel backed by the shared JSON daemon.
 
 Credentials come from your local provider authentication stores or explicitly configured keys. AI Status does not ship credentials, perform provider sign-in or modify provider credential files. Authenticate through the provider's own app or CLI. [Read the security overview →](https://ai-status.gelzin.com/security)
 
@@ -214,6 +228,7 @@ Credentials come from your local provider authentication stores or explicitly co
 | `packages/lib/src/providers/` | Provider collectors and parsers |
 | `packages/lib/quickshell/` | Native Omarchy widget, panels and shared model |
 | `packages/lib/windows/` | Windows packaging and installer |
+| `packages/lib/macos/` | Native macOS menu bar app and local build |
 | `packages/shared/providers/` | Provider names, logos and metadata |
 | `apps/web/` | Website, interactive preview and documentation |
 | `manifest.json` | Omarchy plugin contract |

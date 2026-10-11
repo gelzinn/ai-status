@@ -72,6 +72,28 @@ jobs:
       - name: Test stable installs and updates
         run: python3 -m unittest discover -s tests -v
 
+  macos-native:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test the macOS backend and read-only Keychain adapter
+        run: python3 -m unittest discover -s packages/lib/tests -p 'test_macos*.py' -v
+      - name: Build and smoke-test the native app without provider requests
+        run: |
+          AI_STATUS_TEST_HOME="$RUNNER_TEMP/ai-status-macos-home"
+          mkdir -p "$AI_STATUS_TEST_HOME"
+          HOME="$AI_STATUS_TEST_HOME" bash packages/lib/install-macos.sh --no-start --no-interactive
+          HOME="$AI_STATUS_TEST_HOME" "$AI_STATUS_TEST_HOME/Applications/AI Status.app/Contents/MacOS/AIStatus" --check-runtime
+          HOME="$AI_STATUS_TEST_HOME" "$AI_STATUS_TEST_HOME/Applications/AI Status.app/Contents/MacOS/AIStatus" --smoke --preview-directory "$RUNNER_TEMP/macos-preview"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-panel-preview
+          path: ${{ runner.temp }}/macos-preview/*.png
+          if-no-files-found: error
+
   release-package:
     runs-on: ubuntu-latest
     steps:

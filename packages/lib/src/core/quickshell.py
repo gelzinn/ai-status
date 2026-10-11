@@ -153,6 +153,9 @@ def select_metric(selection):
     if not isinstance(selection, dict):
         raise ValueError("Invalid metric selection")
     provider, idx, key = selection.get("provider"), selection.get("idx"), selection.get("metric")
+    if (not isinstance(provider, str) or type(idx) is not int or idx < 0
+            or not isinstance(key, str) or not key):
+        raise ValueError("Invalid metric selection")
     for entry in state.load_cache():
         if render.connection_key(entry) == provider and entry.get("_idx", 0) == idx and provider in config.enabled_connection_order():
             if key in [render.metric_key(metric) for metric in usable_metrics(entry)]:

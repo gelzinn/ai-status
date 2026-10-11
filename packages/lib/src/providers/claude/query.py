@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import time
+import sys
 from core.paths import opencode_file, read_json
 from core.provider_http import output, request, require_token
 
@@ -12,26 +13,41 @@ USAGE_USER_AGENT = "claude-cli/2.1.281 (external, cli)"
 
 def query():
     explicit = bool(os.environ.get("AI_STATUS_ACCOUNT_ID"))
-    if explicit and not os.environ.get("AI_STATUS_AUTH_FILE") and not os.environ.get("CLAUDE_CONFIG_DIR") and not os.environ.get("CLAUDE_ACCESS_TOKEN"):
-        require_token(None, "Set auth_file, CLAUDE_CONFIG_DIR or CLAUDE_ACCESS_TOKEN for this Claude account.")
+    auth_file = os.environ.get("AI_STATUS_AUTH_FILE")
+    configured_root = os.environ.get("CLAUDE_CONFIG_DIR")
     direct = os.environ.get("CLAUDE_ACCESS_TOKEN")
-    use_file = not direct or os.environ.get("AI_STATUS_AUTH_FILE") or os.environ.get("CLAUDE_CONFIG_DIR")
+    if explicit and not auth_file and not configured_root and not direct:
+        require_token(None, "Set auth_file, CLAUDE_CONFIG_DIR or CLAUDE_ACCESS_TOKEN for this Claude account.")
     creds = {}
-    if use_file:
-        path = os.environ.get("AI_STATUS_AUTH_FILE")
-        if not path:
-            configured_root = os.environ.get("CLAUDE_CONFIG_DIR")
+    if not direct or auth_file or configured_root:
+        if auth_file:
+            creds = read_json(auth_file).get("claudeAiOauth") or {}
+        elif sys.platform == "darwin" and not direct:
+            prepared = os.environ.get("AI_STATUS_CLAUDE_CREDENTIALS")
+            if prepared is not None:
+                # The parent fingerprinted this exact Keychain/file snapshot.
+                # Reading again could bind a rotated login to the old cache.
+                try:
+                    creds = json.loads(prepared)
+                except (TypeError, ValueError):
+                    require_token(None, "Claude credentials could not be read; refresh and try again.")
+                if not isinstance(creds, dict):
+                    require_token(None, "Claude credentials could not be read; refresh and try again.")
+            else:
+                from core.macos_credentials import claude_credentials
+                root = Path(configured_root) if configured_root else Path.home() / ".claude"
+                creds = claude_credentials(root, scoped=bool(configured_root))
+        else:
             root = Path(configured_root) if configured_root else Path.home() / ".claude"
-            path = root / ".credentials.json"
-        creds = read_json(path).get("claudeAiOauth") or {}
+            creds = read_json(root / ".credentials.json").get("claudeAiOauth") or {}
     token = direct or creds.get("accessToken")
-    expiry = creds.get("expiresAt") or 0
+    expiry = 0 if direct else creds.get("expiresAt") or 0
     try:
         expired = float(expiry) > 0 and float(expiry) <= time.time() * 1000
     except (TypeError, ValueError):
         expired = True
     plan = creds.get("subscriptionType") or ""
-    if expired and not os.environ.get("CLAUDE_ACCESS_TOKEN") and explicit:
+    if expired and explicit:
         require_token(None, "This Claude session expired; sign in again using its own CLI configuration.")
     if (not token or expired) and not explicit:
         auth = read_json(opencode_file("auth.json"))
