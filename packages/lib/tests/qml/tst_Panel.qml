@@ -48,6 +48,41 @@ Item {
             Plugin.Model.snapshot = snapshot
             wait(20)
         }
+        function test_update_back_preserves_manually_scrolled_usage() {
+            prepareUpdate(true)
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            const original = snapshot.providers[0].metrics[0]
+            for (let index = 0; index < 20; index++) {
+                const metric = Object.assign({}, original, {key: "rolling:long-" + index, name: "Usage " + index})
+                snapshot.providers[0].metrics.push(metric)
+            }
+            Plugin.Model.snapshot = snapshot
+            wait(20)
+            const link = findChild(panel, "update-available")
+            const scroller = findChild(panel, "panel-scroller")
+            verify(scroller.contentHeight > scroller.height * 2)
+            link.forceActiveFocus(Qt.TabFocusReason)
+            wait(20)
+            verify(link.activeFocus)
+            scroller.contentY = 200
+            wait(20)
+            compare(scroller.contentY, 200)
+            verify(link.activeFocus)
+            verify(link.mapToItem(scroller, 0, 0).y + link.height < 0)
+            keyClick(Qt.Key_Return)
+            wait(20)
+            verify(panel.updatePage)
+            compare(panel.usageScrollPosition, 200)
+            keyClick(Qt.Key_Escape)
+            wait(20)
+            verify(!panel.updatePage)
+            verify(link.activeFocus)
+            compare(scroller.contentY, 200)
+            const next = link.nextItemInFocusChain(true)
+            keyClick(Qt.Key_Tab)
+            tryVerify(() => next.activeFocus)
+            verifyControlInViewport(next, scroller)
+        }
         function test_update_link_opens_guide_only_and_back_restores_focus() {
             prepareUpdate(true)
             const selected = JSON.stringify(Plugin.Model.snapshot.selected)

@@ -60,7 +60,7 @@ Column {
         Rectangle {
             width: parent.width
             implicitHeight: Math.max(command.implicitHeight + Style.space(20), Style.space(50))
-            radius: Style.space(3)
+            radius: Style.cornerRadius
             color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.04)
             border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
             TextEdit {

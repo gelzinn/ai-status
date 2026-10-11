@@ -122,7 +122,7 @@ Column {
     function focusFirstControl() {
         providerSelector.forceActiveFocus(Qt.TabFocusReason)
     }
-    function focusAboutControl() { aboutButton.forceActiveFocus() }
+    function focusAboutControl() { aboutButton.forceActiveFocus(); return aboutButton }
 
     function toggleProvider(name) {
         enabledProviders = enabledProviders.indexOf(name) === -1 ? enabledProviders.concat([name]) : enabledProviders.filter(item => item !== name)
