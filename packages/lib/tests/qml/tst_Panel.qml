@@ -35,6 +35,32 @@ Item {
             wait(20)
         }
         function cleanup() { Plugin.Model.settingsSaving = false; panel.close(); panel.bar = null }
+        function test_codex_usage_credits_are_selectable_and_separate_from_resets() {
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            const codex = snapshot.providers[1]
+            const key = "credits:Usage credits (credits)"
+            codex.metrics.push({key: key, type: "credits", name: "Usage credits",
+                value: "62,500.00 credits", amount: 62500, unit: "credits",
+                percentage: null, hasPercentage: false, isAmount: true,
+                detail: "", resetInSeconds: null})
+            Plugin.Model.snapshot = snapshot
+            wait(20)
+            const prefix = "codex-0-" + key
+            const title = findChild(panel, "usage-title-" + prefix)
+            const value = findChild(panel, "usage-value-" + prefix)
+            compare(title.text, "Usage credits:")
+            compare(value.text, "62,500.00 credits")
+            verify(value.visible)
+            verify(!findChild(panel, "usage-bar-" + prefix).visible)
+            compare(findChild(panel, "reset-credits-codex-0").text, "Reset credits: 2 available")
+            const metric = findChild(panel, "usage-metric-" + prefix)
+            mouseClick(metric)
+            compare(Plugin.Model.chosen.provider, "codex")
+            compare(Plugin.Model.chosen.metric, key)
+            mouseClick(findChild(panel, "reset-credits-codex-0"))
+            compare(panel.resetProvider.id, "codex")
+            verify(findChild(panel, "reset-table").visible)
+        }
         function prepareUpdate(canUpdate) {
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
             snapshot.version = {current: "0.11.0", latest: "0.12.1", has_update: true}

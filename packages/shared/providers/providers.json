@@ -10,7 +10,7 @@
   "codex": {
     "name": "Codex",
     "logo": "https://svgl.app/library/codex_dark.svg",
-    "tracks": "5-hour and weekly limits (a single monthly window on free plans)",
+    "tracks": "5-hour and weekly limits (a single monthly window on free plans), usage-credit balance and banked resets",
     "auth": "~/.codex/auth.json",
     "authType": "cli",
     "category": "assistants"

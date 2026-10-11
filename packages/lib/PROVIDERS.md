@@ -10,7 +10,7 @@ For Windows credential locations and native CLI compatibility, see the
 | Provider ID | Provider | Usage | Authentication |
 | --- | --- | --- | --- |
 | `claude` | Claude | Session (5h) and weekly usage, including per-model weekly limits | Claude Code OAuth (OpenCode fallback) |
-| `codex` | Codex | 5-hour and weekly limits (a single monthly window on free plans) | ~/.codex/auth.json |
+| `codex` | Codex | 5-hour and weekly limits (a single monthly window on free plans), usage-credit balance and banked resets | ~/.codex/auth.json |
 | `opencode` | OpenCode | Rolling, weekly, and monthly usage | OPENCODE_GO_API_KEY or OpenCode auth |
 | `antigravity` | Antigravity | Weekly and 5-hour limits per model (Gemini and Claude/GPT) | agy CLI session |
 | `copilot` | Copilot | Chat and completions usage | GITHUB_COPILOT_TOKEN, gh auth token, or OpenCode |
@@ -71,7 +71,15 @@ Uses the Codex access token and account ID from `~/.codex/auth.json` to call Ope
 |---|---|
 | **Auth** | `~/.codex/auth.json` with valid `access_token` and `account_id` |
 | **Endpoint** | `https://chatgpt.com/backend-api/wham/usage` |
-| **Metrics** | Plan type; a 5-hour and a weekly usage window on paid plans (a single monthly window on free), each with a reset timer |
+| **Metrics** | Plan type; a 5-hour and a weekly usage window on paid plans (a single monthly window on free), each with a reset timer; usage-credit balance; available banked resets |
+
+**Usage credits** shows the balance reported in the usage API's `credits` block,
+including promotional or purchased credits included in that balance. It is shown
+in credits, separately from percentage-based plan limits and **Reset credits**,
+which restore rate-limit windows. A zero or negative balance is preserved;
+unlimited accounts show **Unlimited**. If the API reports available credits but
+omits the amount, the panel shows **Available** with **Balance not reported**.
+No balance, grant expiration, or dollar conversion is inferred from reset grants.
 
 Codex also shows banked **Reset credits** when the usage response reports an available count. Only then does the query make an optional GET to `https://chatgpt.com/backend-api/wham/rate-limit-reset-credits` for titles and expirations. If that request fails, usage and the original count remain visible with **Expiration not reported**. Redeemed credits are excluded from the detail list. Counts come from the usage response, even if the detail endpoint reports a different count.
 
