@@ -62,10 +62,15 @@ def parse(raw_output):
         total, spent = number(credits.get("total_credits")), number(credits.get("total_usage"))
         if total is not None and spent is not None and total >= 0 and spent >= 0:
             # Both values are account totals. Key usage has a different scope.
-            metrics.append(_display_metric(_ratio_metric(spent, "Account spend / total credits", "credits", total),
-                                           "Account credits", "Spent / total purchased", -2))
-            metrics.append(_display_metric(amount_metric(total - spent, "USD", "Account credit balance", "credits"),
-                                           "Available balance", order=-1))
+            account = _display_metric(_ratio_metric(spent, "Account spend / total credits", "credits", total),
+                                      "Account credits", order=-2)
+            balance = total - spent
+            if account["percentage"] is not None:
+                account["detail"] = f"Available balance: ${balance:.2f}"
+            metrics.append(account)
+            if account["percentage"] is None:
+                metrics.append(_display_metric(amount_metric(balance, "USD", "Account credit balance", "credits"),
+                                               "Available balance", order=-1))
     metadata = raw.get("_ai_status")
     if metrics and isinstance(metadata, dict) and metadata.get("credits_hint") and not isinstance(credits, dict):
         metric = metrics[0]

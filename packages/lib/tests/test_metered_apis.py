@@ -179,27 +179,24 @@ class OpenRouterTests(unittest.TestCase):
         parser = load("openrouter", "parse").parse
         metrics = parser(json.dumps({"key": {"data": {"limit": None, "usage": 500, "usage_monthly": 12}},
                                       "credits": {"data": {"total_credits": 100, "total_usage": 25}}}))["metrics"]
-        self.assertEqual([m["amount"] for m in metrics], [12, 25, 75])
-        self.assertEqual([m["percentage"] for m in metrics], [None, 25, None])
+        self.assertEqual([m["amount"] for m in metrics], [12, 25])
+        self.assertEqual([m["percentage"] for m in metrics], [None, 25])
         self.assertEqual(metrics[1]["limit"], 100)
         self.assertEqual(metrics[1]["value_format"], "amount_ratio")
         self.assertEqual(metrics[1]["name"], "Account credits")
-        self.assertEqual(metrics[1]["detail"], "Spent / total purchased")
-        self.assertEqual(metrics[2]["name"], "Available balance")
-        self.assertEqual(metrics[2]["detail"], "")
-        self.assertEqual([metrics[1]["display_order"], metrics[2]["display_order"]], [-2, -1])
+        self.assertEqual(metrics[1]["detail"], "Available balance: $75.00")
+        self.assertEqual(metrics[1]["display_order"], -2)
         self.assertEqual(render.metric_key(metrics[1]), "credits:Account spend / total credits (USD)")
-        self.assertEqual(render.metric_key(metrics[2]), "credits:Account credit balance (USD)")
-        self.assertEqual(len({render.metric_key(m) for m in metrics}), 3)
+        self.assertEqual(len({render.metric_key(m) for m in metrics}), 2)
 
     def test_equal_account_and_key_spend_keep_their_independent_scopes(self):
         metrics = load("openrouter", "parse").parse(json.dumps({"key": {"data": {"usage_monthly": 25, "limit": 100, "limit_remaining": 75, "limit_reset": "monthly"}},
                                                                   "credits": {"data": {"total_credits": 100, "total_usage": 25}}}))["metrics"]
-        self.assertEqual([m["amount"] for m in metrics], [25, 25, 75])
-        self.assertEqual([m["name"] for m in metrics], ["Key · monthly", "Account credits", "Available balance"])
+        self.assertEqual([m["amount"] for m in metrics], [25, 25])
+        self.assertEqual([m["name"] for m in metrics], ["Key · monthly", "Account credits"])
         ordered = sorted(metrics, key=render.metric_sort_key)
-        self.assertEqual([m["name"] for m in ordered], ["Account credits", "Available balance", "Key · monthly"])
-        self.assertEqual(len({render.metric_key(m) for m in metrics}), 3)
+        self.assertEqual([m["name"] for m in ordered], ["Account credits", "Key · monthly"])
+        self.assertEqual(len({render.metric_key(m) for m in metrics}), 2)
 
     def test_missing_or_invalid_credit_totals_never_invent_balance(self):
         parser = load("openrouter", "parse").parse
@@ -218,13 +215,23 @@ class OpenRouterTests(unittest.TestCase):
         for total, spent, balance, percentage in ((0, 0, 0, None), (100, 120, -20, 120)):
             with self.subTest(total=total, spent=spent):
                 metrics = parser(json.dumps({"credits": {"data": {"total_credits": total, "total_usage": spent}}}))["metrics"]
-                self.assertEqual([m["amount"] for m in metrics], [spent, balance])
                 self.assertEqual(metrics[0]["percentage"], percentage)
-                self.assertIsNone(metrics[1]["percentage"])
+                if percentage is None:
+                    self.assertEqual([m["amount"] for m in metrics], [spent, balance])
+                    self.assertEqual(metrics[0]["detail"], "")
+                    self.assertEqual(metrics[1]["name"], "Available balance")
+                    self.assertEqual(render.metric_key(metrics[1]), "credits:Account credit balance (USD)")
+                    self.assertIsNone(metrics[1]["percentage"])
+                else:
+                    self.assertEqual([m["amount"] for m in metrics], [spent])
+                    self.assertEqual(metrics[0]["detail"], "Available balance: $-20.00")
 
     def test_extreme_credit_ratio_has_no_nonfinite_percentage(self):
         metrics = load("openrouter", "parse").parse(json.dumps({"credits": {"data": {"total_credits": 1e-300, "total_usage": 1e300}}}))["metrics"]
         self.assertIsNone(metrics[0]["percentage"])
+        self.assertEqual(metrics[0]["detail"], "")
+        self.assertEqual(metrics[1]["name"], "Available balance")
+        self.assertEqual(metrics[1]["amount"], -1e300)
 
     def test_api_budget_and_free_requests(self):
         parser = load("openrouter", "parse").parse
@@ -277,7 +284,9 @@ class OpenRouterTests(unittest.TestCase):
             result = query.query()
         get.assert_called_once_with("https://openrouter.ai/api/v1/credits", {"Authorization": "Bearer fake-management"})
         self.assertNotIn("key", result)
-        self.assertEqual([m["amount"] for m in load("openrouter", "parse").parse(json.dumps(result))["metrics"]], [2, 8])
+        metrics = load("openrouter", "parse").parse(json.dumps(result))["metrics"]
+        self.assertEqual([m["amount"] for m in metrics], [2])
+        self.assertEqual(metrics[0]["detail"], "Available balance: $8.00")
 
     def test_management_key_in_api_key_variable_is_detected(self):
         query = load("openrouter", "query")

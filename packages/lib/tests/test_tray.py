@@ -386,25 +386,29 @@ class DesktopTests(IsolatedState):
 
     def test_two_openrouter_accounts_fit_without_scrolling(self):
         from core import accounts
+        import json
+        from test_metered_apis import load
+        parser = load("openrouter", "parse").parse
         accounts.save_document({"version": 1, "accounts": [
             {"id": "personal", "provider": "openrouter", "label": "Personal"},
             {"id": "work", "provider": "openrouter", "label": "Work"},
         ]}, config.accounts_file())
         config.save_config([])
-        for identity, label in (("personal", "Personal"), ("work", "Work")):
+        for identity, label, spent, key_used in (("personal", "Personal", 25, 12), ("work", "Work", 42, 29)):
+            parsed = parser(json.dumps({
+                "key": {"data": {"usage_monthly": key_used, "limit": 100, "limit_remaining": 100 - key_used,
+                                   "limit_reset": "monthly"}},
+                "credits": {"data": {"total_credits": 100, "total_usage": spent}},
+            }))
             self.dashboard.on_result("account:" + identity, [{"provider": "OpenRouter",
                 "_dir": "openrouter", "_connection_id": "account:" + identity,
-                "_account_label": label, "metrics": [
-                    {"type": "credits", "name": "Account credits", "percentage": 25,
-                     "amount": 25, "limit": 100, "unit": "USD", "value_format": "amount_ratio"},
-                    {"type": "monthly", "name": "Key limit", "percentage": 12,
-                     "amount": 12, "limit": 100, "unit": "USD", "value_format": "amount_ratio"},
-                    {"type": "balance", "name": "Available balance", "percentage": None,
-                     "amount": 75, "unit": "USD"},
-                ]}])
+                "_account_label": label, "metrics": parsed["metrics"]}])
         self.dashboard.show()
         self.app.processEvents()
-        self.assertEqual(len(self.dashboard.metric_buttons), 6)
+        self.assertEqual(len(self.dashboard.metric_buttons), 4)
+        self.assertEqual([row.description.text() for row in self.dashboard.metric_buttons if row.description.text()],
+                         ["Available balance: $75.00", "Available balance: $58.00"])
+        self.assertFalse(any(row.title.text().startswith("Available balance") for row in self.dashboard.metric_buttons))
         self.assertLessEqual(self.dashboard.height(), 720)
         self.assertEqual(self.dashboard.scroll.verticalScrollBar().maximum(), 0)
         self.dashboard.metric_buttons[-1].click()

@@ -116,18 +116,20 @@ class ConnectionViewsTests(unittest.TestCase):
                 self.assertEqual(render.metric_detail(dict(metric, detail=detail)), detail)
 
     def test_account_summary_priority_preserves_selection_and_metric_text(self):
-        key = dict(type="monthly", name="Key · monthly", percentage=12, amount=12, limit=100,
-                   unit="USD", value_format="amount_ratio", id="key-spend")
-        credits = dict(type="credits", name="Account credits", percentage=25, amount=25, limit=100,
-                       unit="USD", value_format="amount_ratio", display_order=-2, id="account-credits")
-        balance = dict(type="credits", name="Available balance", percentage=None, amount=75,
-                       unit="USD", detail="", display_order=-1, id="account-balance")
-        entry = dict(self.data[0], metrics=[key, credits, balance])
-        snapshot = quickshell.build_snapshot([entry], dict(provider="account:personal", idx=0, icon_mode="off"))
+        from test_metered_apis import load
+        parsed = load("openrouter", "parse").parse(json.dumps({
+            "key": {"data": {"usage_monthly": 12, "limit": 100, "limit_remaining": 88, "limit_reset": "monthly"}},
+            "credits": {"data": {"total_credits": 100, "total_usage": 25}},
+        }))
+        entry = dict(self.data[0], metrics=parsed["metrics"])
+        snapshot = quickshell.build_snapshot([entry], dict(provider="account:personal", idx=0, icon_mode="off",
+                                              metric="credits:Account credit balance (USD)"))
         self.assertEqual([metric["name"] for metric in snapshot["providers"][0]["metrics"]],
-                         ["Account credits", "Available balance", "Key · monthly"])
-        self.assertEqual(snapshot["selected"]["metric"], "credits:account-credits")
-        choice = dict(provider="account:personal", idx=0, metric="credits:account-credits",
+                         ["Account credits", "Key · monthly"])
+        self.assertEqual(snapshot["providers"][0]["metrics"][0]["detail"], "Available balance: $75.00")
+        self.assertEqual(snapshot["selected"]["provider"], "account:personal")
+        self.assertEqual(snapshot["selected"]["metric"], "credits:Account spend / total credits (USD)")
+        choice = dict(provider="account:personal", idx=0, metric=snapshot["selected"]["metric"],
                       icon_mode="off", show_metric=True)
         self.assertIn("Account credits $25.00 / $100.00", render.get_selected_metric_text([entry], choice))
 
