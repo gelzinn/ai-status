@@ -1,7 +1,7 @@
-# README interface previews
+# Desktop interface previews
 
 The desktop panel PNGs render the production AI Status interfaces
-with sample Codex and Claude usage and the fixture's 0.10.0 version label.
+with sample Codex and Claude usage and example version labels.
 Those renders contain no account credentials or live usage data. The Waybar
 capture is retained from the original README.
 
@@ -24,3 +24,19 @@ window behavior on a running desktop can differ from the fixtures.
 
 Provider logos, app artwork and fonts come from the bundled assets. See
 [artwork and licenses](../../packages/lib/assets/README.md).
+
+## Update flow previews
+
+The `updates-*-notice.png` and `updates-*-guide.png` pairs show the optional
+update notice and the guide inside the app. The guide includes versions,
+platform instructions, release links, and a copy control inside the terminal
+command box when a command is available. All previews use sample data.
+
+- `updates-linux-*.png` renders the production QML with the dark Omarchy test
+  theme and an older sample plugin installation.
+- `updates-windows-*.png` renders the production Qt adapter offscreen with
+  instructions for an installed Windows copy. This flow opens the installer,
+  so no terminal command is shown.
+- `updates-macos-*.png` is unchanged from the native `macos-panel-preview`
+  artifact for commit `c087ffff880485fef12308e5eae5716d42831718` in
+  [the macOS CI run](https://github.com/gelzinn/ai-status/actions/runs/38161008294).
