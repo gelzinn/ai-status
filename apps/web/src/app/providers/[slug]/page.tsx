@@ -19,8 +19,8 @@ import {
 	HeroInstallCta,
 	StickyInstallCta,
 } from "@/components/install-cta";
-import { SUPPORTED_PROVIDERS, type Provider } from "@ai-status/shared";
-import { site, repo, LIB_NAME } from "@/lib/env";
+import { SUPPORTED_PROVIDERS, type Provider } from "@/lib/providers";
+import { site, repo } from "@/lib/env";
 import { renderMarkdown } from "@/lib/markdown";
 
 function getProvider(slug: string): Provider | undefined {
@@ -54,8 +54,9 @@ export async function generateMetadata({
 	const provider = getProvider(slug);
 	if (!provider) return { title: `Provider not found | ${site.name}` };
 	return {
-		title: `${provider.name} | ${site.name}`,
-		description: `How to authenticate ${provider.name} in Waybar and Omarchy Quickshell with ${LIB_NAME} — ${provider.tracks}.`,
+		title: `${provider.name} setup and usage | ${site.name}`,
+		description: `Connect ${provider.name} to ${site.name} on Linux, Windows or macOS. Credentials, setup, multiple accounts and troubleshooting for ${provider.tracks}.`,
+		alternates: { canonical: `${site.url}/providers/${slug}` },
 	};
 }
 
@@ -135,7 +136,7 @@ export default async function ProviderPage({
 				<div className="grid gap-10 lg:grid-cols-[1fr_260px] lg:gap-12">
 					<article className="min-w-0">
 						<h2 className="mb-4 font-heading text-2xl font-semibold tracking-tight text-foreground">
-							Authentication guide
+							Setup and usage guide
             </h2>
 
 						{guide ? (
@@ -167,6 +168,19 @@ export default async function ProviderPage({
 					<aside className="flex flex-col gap-4 lg:sticky lg:top-8 lg:self-start">
 						{/* Install CTA — morphs in from the hero once it scrolls off. */}
 						<StickyInstallCta label={`Install ${site.name}`} />
+
+						<div className="overflow-hidden rounded-2xl border border-border bg-card">
+							<div className="p-4 text-xs text-muted-foreground/70">Install for your desktop</div>
+							{[
+								{ href: "/linux", label: "Linux · Waybar or Omarchy" },
+								{ href: "/windows", label: "Windows" },
+								{ href: "/macos", label: "macOS" },
+							].map((platform) => (
+								<Link key={platform.href} href={platform.href} className="flex items-center justify-between gap-2 border-t border-border p-4 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+									{platform.label} <ArrowRight className="size-3.5 shrink-0" />
+								</Link>
+							))}
+						</div>
 
 						{/* Details card — mirrors the provider listing card:
 						    content + a bg-muted footer bar with the auth source. */}

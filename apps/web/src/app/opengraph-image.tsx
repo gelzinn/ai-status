@@ -3,7 +3,7 @@ import { ImageResponse } from "next/og";
 import { Logo } from "@/components/logo";
 import { site } from "@/lib/env";
 import { getLatestVersion } from "@/lib/version";
-import { PROVIDERS } from "@ai-status/shared";
+import { PROVIDERS } from "@/lib/providers";
 
 export const runtime = "nodejs";
 export const size = { width: 1200, height: 630 };

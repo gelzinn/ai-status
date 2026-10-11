@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, ArrowUpRight, CircleDot, KeyRound, ShieldCheck } from "lucide-react";
-import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
+import { SUPPORTED_PROVIDERS } from "@/lib/providers";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { GithubIcon } from "@/components/github-icon";

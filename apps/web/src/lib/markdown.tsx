@@ -20,6 +20,26 @@ function hastText(node: any): string {
 	return "";
 }
 
+/** Keep guide fragments usable without introducing another rendering dependency. */
+function guideHeadingIds() {
+	return (tree: { children?: unknown[] }) => {
+		const used = new Set<string>();
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		function visit(node: any) {
+			if (node.type === "element" && /^h[1-6]$/.test(node.tagName)) {
+				const base = hastText(node).toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, "").replace(/\s/g, "-");
+				let id = base;
+				let suffix = 0;
+				while (used.has(id)) id = `${base}-${++suffix}`;
+				used.add(id);
+				node.properties = { ...node.properties, id };
+			}
+			for (const child of node.children ?? []) visit(child);
+		}
+		visit(tree);
+	};
+}
+
 const components: Partial<Components> = {
 	// External links open in a new tab; in-app links stay put.
 	a: ({ href, children, ...rest }) => {
@@ -86,6 +106,7 @@ export async function renderMarkdown(md: string): Promise<ReactNode> {
 		.use(remarkParse)
 		.use(remarkGfm)
 		.use(remarkRehype)
+		.use(guideHeadingIds)
 		.use(rehypeShiki, { theme: CODE_THEME, addLanguageClass: true })
 		.use(rehypeReact, { Fragment, jsx, jsxs, components, passNode: true })
 		// Guides are authored with the literal names; swap the product name

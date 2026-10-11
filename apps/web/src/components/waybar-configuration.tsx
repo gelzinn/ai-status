@@ -117,12 +117,14 @@ export function WaybarConfiguration() {
         </pre>
       </CodeBlock>
 
-      <Link
-        href="/llms.txt"
-        className="inline-flex items-center gap-1 text-sm font-medium text-foreground hover:text-muted-foreground transition-colors w-fit mt-1"
-      >
-        Copy-paste install guide for LLMs <ArrowRight className="size-3.5" />
-      </Link>
+      <div className="flex flex-wrap gap-x-6 gap-y-3 text-sm font-medium">
+        <Link href="/linux" className="inline-flex items-center gap-1 transition-colors hover:text-muted-foreground">
+          Linux installation and configuration <ArrowRight className="size-3.5" />
+        </Link>
+        <Link href="/linux/llms.txt" className="inline-flex items-center gap-1 transition-colors hover:text-muted-foreground">
+          Copy-paste Linux guide for LLMs <ArrowRight className="size-3.5" />
+        </Link>
+      </div>
     </section>
   );
 }

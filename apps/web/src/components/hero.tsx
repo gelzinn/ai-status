@@ -39,7 +39,7 @@ export function Hero() {
       />
 
       <PlatformContent
-        linux={<Link href="/llms.txt" className="inline-flex w-fit items-center gap-1 text-sm font-medium transition-colors hover:text-muted-foreground">Copy-paste install guide for LLMs <ArrowRight className="size-3.5" /></Link>}
+        linux={<Link href="/linux/llms.txt" className="inline-flex w-fit items-center gap-1 text-sm font-medium transition-colors hover:text-muted-foreground">Copy-paste Linux guide for LLMs <ArrowRight className="size-3.5" /></Link>}
         mac={<Link href="/macos/llms.txt" className="inline-flex w-fit items-center gap-1 text-sm font-medium transition-colors hover:text-muted-foreground">Copy-paste macOS guide for LLMs <ArrowRight className="size-3.5" /></Link>}
         windows={<Link href="/windows/llms.txt" className="inline-flex w-fit items-center gap-1 text-sm font-medium transition-colors hover:text-muted-foreground">Copy-paste Windows guide for LLMs <ArrowRight className="size-3.5" /></Link>}
       />

@@ -14,7 +14,7 @@ import {
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { GithubIcon } from "@/components/github-icon";
-import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
+import { SUPPORTED_PROVIDERS } from "@/lib/providers";
 import { site, repo } from "@/lib/env";
 import { cn } from "@/lib/utils";
 

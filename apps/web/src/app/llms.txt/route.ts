@@ -7,7 +7,7 @@ export const dynamic = "force-static";
 export async function GET() {
   const mdPath = path.resolve(
     process.cwd(),
-    "../../packages/lib/INSTALL.md",
+    "../../packages/lib/LLMS.md",
   );
   const content = resolveLibGuideLinks(await readFile(mdPath, "utf-8"));
   return new Response(content, {

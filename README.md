@@ -10,7 +10,8 @@
   </p>
   <p>
     <a href="https://ai-status.gelzin.com">Website &amp; interactive preview</a> ·
-    <a href="#quick-start">Install</a> ·
+    <a href="#installation-guide">Install</a> ·
+    <a href="#platform-support">Platforms</a> ·
     <a href="#supported-providers">Providers</a> ·
     <a href="#documentation">Documentation</a>
   </p>
@@ -18,27 +19,27 @@
 
 <table>
   <tr>
-    <th align="left">Omarchy Quickshell</th>
+    <th align="left">Linux · Omarchy Quickshell</th>
     <th align="left">Windows tray</th>
+    <th align="left">macOS menu bar</th>
   </tr>
   <tr>
-    <td valign="top"><img src="docs/screenshots/omarchy-usage.png" alt="Omarchy panel with Codex and Claude usage bars, reset timers and available reset credits" width="360" /></td>
-    <td valign="top"><img src="docs/screenshots/windows-usage.png" alt="Windows panel showing the same provider usage, refresh and settings controls" width="360" /></td>
+    <td valign="top"><img src="docs/screenshots/omarchy-usage.png" alt="Linux Omarchy panel with Codex and Claude usage bars, reset timers and available reset credits" width="260" /></td>
+    <td valign="top"><img src="docs/screenshots/windows-usage.png" alt="Windows panel showing the same provider usage, refresh and settings controls" width="260" /></td>
+    <td valign="top"><img src="docs/screenshots/macos-usage.png" alt="Native macOS menu bar panel showing Codex and Claude usage bars, reset timers and available reset credits" width="260" /></td>
   </tr>
 </table>
 
 *Example panels rendered with sample usage data. Omarchy follows your shell theme.*
 
-## Quick start
+<a id="quick-start"></a>
 
-| Desktop | Integration | Setup |
-| --- | --- | --- |
-| **Omarchy Quickshell** | Native bar widget, usage panel and settings | [Install the plugin](#omarchy-quickshell) |
-| **Linux with Waybar** | Status module with a detailed usage tooltip | [Run the installer](#linux-with-waybar) |
-| **Windows 10/11 x64** | Native tray app, usage panel and settings | [Download the installer or portable ZIP](#windows-1011) |
-| **macOS 13+** | Native menu bar app, usage panel and settings | [Run the macOS installer](#macos-13) |
+## Installation guide
 
-Sign in to the providers you want to monitor using their apps or CLIs, then follow the setup for your desktop. See [provider authentication](packages/lib/PROVIDERS.md) for the credentials and additional setup each integration needs.
+Sign in to the providers you want to monitor using their apps or CLIs, then expand the guide for your system. See [provider authentication](packages/lib/PROVIDERS.md) for credentials and additional setup.
+
+<details>
+<summary><strong>Linux — Waybar or Omarchy Quickshell</strong></summary>
 
 ### Omarchy Quickshell
 
@@ -108,6 +109,26 @@ Then reference it in whichever bar section you use — a module that's defined b
 
 </details>
 
+</details>
+
+<details>
+<summary><strong>Windows 10/11 x64</strong></summary>
+
+### Windows 10/11
+
+1. Open the [latest release](https://github.com/gelzinn/ai-status/releases/latest).
+2. Download `ai-status-<version>-windows-x64-setup.exe` and run it as your normal user, or extract the portable `ai-status-<version>-windows-x64.zip`.
+3. Launch **AI Status** from the Start menu, or open `ai-status.exe` in the extracted portable folder. Click the tray logo to see usage.
+
+The packaged app includes its runtime. Installation needs no administrator access, Python setup or WSL. Provider apps and authenticated sessions remain separate prerequisites. Enable **Start when I sign in to Windows** in Settings if you want it to launch at sign-in.
+
+[Windows installation, updates and provider compatibility →](packages/lib/WINDOWS.md)
+
+</details>
+
+<details>
+<summary><strong>macOS 13+</strong></summary>
+
 ### macOS 13+
 
 ```bash
@@ -120,15 +141,7 @@ Requires macOS 13+, Python 3.10+ and Xcode Command Line Tools (`xcode-select --i
 
 [macOS installation, branch testing and SwiftBar options →](packages/lib/MACOS.md)
 
-### Windows 10/11
-
-1. Open the [latest release](https://github.com/gelzinn/ai-status/releases/latest).
-2. Download `ai-status-<version>-windows-x64-setup.exe` and run it as your normal user, or extract the portable `ai-status-<version>-windows-x64.zip`.
-3. Launch **AI Status** from the Start menu, or open `ai-status.exe` in the extracted portable folder. Click the tray logo to see usage.
-
-The packaged app includes its runtime. Installation needs no administrator access, Python setup or WSL. Provider apps and authenticated sessions remain separate prerequisites. Enable **Start when I sign in to Windows** in Settings if you want it to launch at sign-in.
-
-[Windows installation, updates and provider compatibility →](packages/lib/WINDOWS.md)
+</details>
 
 ## What you get
 
@@ -163,6 +176,19 @@ Save applies preferences and keeps Settings open. Back sits before the panel tit
 <img src="docs/screenshots/waybar-tooltip.png" alt="Waybar tooltip showing per-provider usage percentages, progress bars and reset countdowns" width="320" />
 
 </details>
+
+## Platform support
+
+| System | Supported versions / environment | Desktop integration |
+| --- | --- | --- |
+| **Linux** | Wayland session with Waybar | Status module and detailed usage tooltip |
+| **Linux / Omarchy** | Omarchy Quattro shell (Quickshell) | Native bar widget, usage panel and settings |
+| **Windows** | Windows 10 version 1809+ or Windows 11, x64 | Native tray app, usage panel and settings |
+| **macOS** | macOS 13 or newer | Native menu bar app; optional SwiftBar integration |
+
+Linux integration currently supports **Waybar and Omarchy Quickshell only**. The Quickshell plugin requires the Omarchy Quattro shell and its plugin CLI; standalone Quickshell configurations and other bars are not supported. See [Linux requirements](packages/lib/INSTALL.md).
+
+The Windows package includes its runtime. The macOS installer requires Python 3.10+ and Xcode Command Line Tools; see [macOS requirements](packages/lib/MACOS.md#requirements).
 
 ## Supported providers
 
@@ -204,9 +230,10 @@ Available metrics depend on the account, plan and upstream API. Providers withou
 
 | Guide | What you will find |
 | --- | --- |
-| [Install and configure](packages/lib/INSTALL.md) | Dependencies, bar placement, display options and manual setup |
+| [Linux](https://ai-status.gelzin.com/linux) | Waybar and Omarchy Quickshell requirements, installation and configuration |
 | [Windows](packages/lib/WINDOWS.md) | Installer, portable app, sign-in option, compatibility and local builds |
 | [macOS](packages/lib/MACOS.md) | Native menu bar app, local builds, sign-in startup and optional SwiftBar modes |
+| [Guide for LLMs](https://ai-status.gelzin.com/llms.txt) | Select the Linux, Windows or macOS instructions for your system |
 | [Providers and authentication](packages/lib/PROVIDERS.md) | Credential sources, account setup and troubleshooting |
 | [Updates and rollback](packages/lib/UPDATES.md) | Stable releases, version selection, checksums and recovery |
 | [Changelog](packages/lib/CHANGELOG.md) | Changes in each published release |

@@ -3,13 +3,14 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, ArrowUpRight, CircleDot, KeyRound, ShieldCheck } from "lucide-react";
-import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
+import { SUPPORTED_PROVIDERS } from "@/lib/providers";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { GithubIcon } from "@/components/github-icon";
 import { WindowsIcon } from "@/components/os-icons";
 import { InstallCtaProvider, HeroInstallCta, StickyInstallCta } from "@/components/install-cta";
 import { renderMarkdown } from "@/lib/markdown";
+import { resolveLibGuideLinks } from "@/lib/guide-links";
 import { repo, site } from "@/lib/env";
 import { getWindowsDownload } from "@/lib/windows-download";
 
@@ -23,7 +24,7 @@ const guideSource = `${repo.url}/blob/main/packages/lib/WINDOWS.md`;
 export default async function WindowsPage() {
   const download = await getWindowsDownload();
   const markdown = await readFile(path.resolve(process.cwd(), "../../packages/lib/WINDOWS.md"), "utf-8");
-  const guide = await renderMarkdown(markdown.replace(/^# .+\r?\n\r?\n/, ""));
+  const guide = await renderMarkdown(resolveLibGuideLinks(markdown.replace(/^# .+\r?\n\r?\n/, "")));
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-8 p-6 sm:gap-16 sm:py-16">

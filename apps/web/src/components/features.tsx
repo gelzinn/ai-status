@@ -1,6 +1,6 @@
 "use client";
 
-import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
+import { SUPPORTED_PROVIDERS } from "@/lib/providers";
 import { FeatureVisuals } from "@/components/features-visuals";
 import { useInstallPlatform } from "@/components/install-platform";
 

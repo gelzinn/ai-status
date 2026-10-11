@@ -11,7 +11,7 @@ import { WaybarReplica } from "@/components/waybar-replica";
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, Plus, ShieldCheck } from "lucide-react";
 
-import { SUPPORTED_PROVIDERS } from "@ai-status/shared";
+import { SUPPORTED_PROVIDERS } from "@/lib/providers";
 import { site, repo } from "@/lib/env";
 import { getLatestVersion } from "@/lib/version";
 

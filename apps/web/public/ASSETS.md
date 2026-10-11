@@ -11,3 +11,10 @@ corners. The colors were sampled from the reference. The same SVG is used at
 24 px in the taskbar preview and 16 px in both Windows installation tabs.
 Microsoft's [Windows 11 desktop imagery](https://msftstories.thesourcemediaassets.com/sites/612/2021/06/Windows-11-Start-Dark-1000x562.jpg)
 provides additional context. The Windows mark belongs to Microsoft.
+
+# Provider logos
+
+`providers/kilo.png` and `providers/lyceum.png` are exact copies of the bundled
+opaque logos in `packages/lib/assets/providers/`. Their existing light backgrounds
+keep the black provider glyphs legible on the website's dark surfaces. The web
+provider metadata in `src/lib/providers.ts` selects these copies for every view.

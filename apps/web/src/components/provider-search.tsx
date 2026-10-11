@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Check, ChevronDown, KeyRound, Plus, Search } from "lucide-react";
 import { repo } from "@/lib/env";
 import { cn } from "@/lib/utils";
-import type { Provider } from "@ai-status/shared";
+import type { Provider } from "@/lib/providers";
 
 /** Chips: how each provider authenticates (from `authType`). */
 const AUTH_FILTERS: { id: string; label: string; authType?: string }[] = [
@@ -110,6 +110,48 @@ function PeriodDropdown({
 				</div>
 			)}
 		</div>
+	);
+}
+
+const PROVIDER_GROUPS = [
+	{ id: "assistants", title: "Apps, CLIs and subscriptions", description: "Coding tools, desktop assistants and subscription usage." },
+	{ id: "apis", title: "APIs and gateways", description: "API spend, prepaid balances and model-routing credits." },
+	{ id: "cloud", title: "Cloud platforms", description: "Cloud platform quotas, hosted models and billing." },
+] as const;
+
+function ProviderCard({ provider, grouped = false }: { provider: Provider; grouped?: boolean }) {
+	const Heading = grouped ? "h3" : "h2";
+	return (
+		<Link
+			href={`/providers/${provider.slug}`}
+			className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm backdrop-blur-md transition-transform hover:-translate-y-0.5 hover:bg-card hover:shadow-md"
+		>
+			<div className="flex flex-col gap-4 p-4">
+				<header className="flex items-center gap-3">
+					<div className="flex [--tile:2.75rem] size-(--tile) shrink-0 items-center justify-center rounded-[calc(var(--tile)/4)] border border-border bg-background shadow-sm">
+						<img
+							src={provider.logo}
+							alt={provider.name}
+							className="[--logo:1.5rem] size-(--logo) rounded-[calc(var(--logo)/6)] object-contain"
+						/>
+					</div>
+					<Heading className="font-heading text-lg font-semibold text-foreground">
+						{provider.name}
+					</Heading>
+				</header>
+
+				<p className="flex-1 text-sm leading-relaxed text-muted-foreground">
+					{provider.tracks}
+				</p>
+			</div>
+
+			<footer className="mt-auto flex items-center gap-1.5 border-t border-border bg-muted p-4 text-xs text-muted-foreground/80">
+				<KeyRound className="size-3.5 shrink-0" />
+				<span className="truncate font-mono" title={provider.auth}>
+					{provider.auth}
+				</span>
+			</footer>
+		</Link>
 	);
 }
 
@@ -222,62 +264,49 @@ export function ProviderSearch({ providers }: { providers: Provider[] }) {
 				</div>
 			</div>
 
-			{/* Grid */}
-			<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-				{filtered.map((provider) => (
-					<Link
-						key={provider.name}
-						href={`/providers/${provider.slug}`}
-						className="group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm backdrop-blur-md transition-transform hover:-translate-y-0.5 hover:bg-card hover:shadow-md"
-					>
-						<div className="flex flex-col gap-4 p-4">
-							<header className="flex items-center gap-3">
-								<div className="flex [--tile:2.75rem] size-(--tile) shrink-0 items-center justify-center rounded-[calc(var(--tile)/4)] border border-border bg-background shadow-sm">
-									<img
-										src={provider.logo}
-										alt={provider.name}
-										className="[--logo:1.5rem] size-(--logo) rounded-[calc(var(--logo)/6)] object-contain"
-									/>
-								</div>
-								<h2 className="font-heading text-lg font-semibold text-foreground">
-									{provider.name}
+			{isFullList ? (
+				<div className="flex flex-col gap-10">
+					{PROVIDER_GROUPS.map((group) => (
+						<section key={group.id} aria-labelledby={`providers-${group.id}`} className="flex flex-col gap-4">
+							<header className="flex flex-col gap-1">
+								<h2 id={`providers-${group.id}`} className="font-heading text-xl font-semibold text-foreground">
+									{group.title}
 								</h2>
+								<p className="text-sm text-muted-foreground">{group.description}</p>
 							</header>
-
-							<p className="flex-1 text-sm leading-relaxed text-muted-foreground">
-								{provider.tracks}
-							</p>
-						</div>
-
-						<footer className="mt-auto flex items-center gap-1.5 border-t border-border bg-muted p-4 text-xs text-muted-foreground/80">
-							<KeyRound className="size-3.5 shrink-0" />
-							<span className="truncate font-mono" title={provider.auth}>
-								{provider.auth}
+							<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+								{providers.filter((provider) => provider.category === group.id).map((provider) => (
+									<ProviderCard key={provider.slug} provider={provider} grouped />
+								))}
+							</div>
+						</section>
+					))}
+					<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+						<a
+							href={`${repo.url}/issues/new`}
+							target="_blank"
+							rel="noreferrer"
+							className="group flex min-h-40 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border/60 bg-transparent p-5 text-center transition-all hover:border-foreground/30 hover:bg-card/40"
+						>
+							<span className="flex size-10 items-center justify-center rounded-xl border border-border bg-background text-muted-foreground transition-colors group-hover:text-foreground">
+								<Plus className="size-5" />
 							</span>
-						</footer>
-					</Link>
-				))}
-
-				{/* Add provider — only in the full, unfiltered list */}
-				{isFullList && (
-					<a
-						href={`${repo.url}/issues/new`}
-						target="_blank"
-						rel="noreferrer"
-						className="group flex min-h-40 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border/60 bg-transparent p-5 text-center transition-all hover:border-foreground/30 hover:bg-card/40"
-					>
-						<span className="flex size-10 items-center justify-center rounded-xl border border-border bg-background text-muted-foreground transition-colors group-hover:text-foreground">
-							<Plus className="size-5" />
-						</span>
-						<span className="font-heading text-base font-semibold text-muted-foreground transition-colors group-hover:text-foreground">
-							Add a provider
-						</span>
-						<span className="text-xs text-muted-foreground/70">
-							Open an issue on GitHub
-						</span>
-					</a>
-				)}
-			</div>
+							<span className="font-heading text-base font-semibold text-muted-foreground transition-colors group-hover:text-foreground">
+								Add a provider
+							</span>
+							<span className="text-xs text-muted-foreground/70">
+								Open an issue on GitHub
+							</span>
+						</a>
+					</div>
+				</div>
+			) : (
+				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+					{filtered.map((provider) => (
+						<ProviderCard key={provider.slug} provider={provider} />
+					))}
+				</div>
+			)}
 
 			{/* Empty state */}
 			{filtered.length === 0 && (
