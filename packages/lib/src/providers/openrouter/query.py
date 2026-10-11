@@ -5,16 +5,24 @@ from core.provider_http import output, require_token
 
 
 def query():
-    opts = options()
+    options()
     management = os.environ.get("OPENROUTER_MANAGEMENT_KEY")
-    token = require_token(os.environ.get("OPENROUTER_API_KEY") or management,
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    token = require_token(api_key or management,
                           "Set OPENROUTER_API_KEY to read this key's usage; set OPENROUTER_MANAGEMENT_KEY for the account credit balance.")
-    key = json_request("https://openrouter.ai/api/v1/key", {"Authorization": f"Bearer {token}"})
-    result = {"key": key}
-    if management or opts.get("include_credits") or ((key.get("data") or {}).get("is_management_key")):
-        require_token(management or (token if (key.get("data") or {}).get("is_management_key") else None),
-                      "OpenRouter account credits require OPENROUTER_MANAGEMENT_KEY; regular inference keys can only read their own usage.")
-        result["credits"] = json_request("https://openrouter.ai/api/v1/credits", {"Authorization": f"Bearer {management or token}"})
+    result = {}
+    if api_key:
+        key = json_request("https://openrouter.ai/api/v1/key", {"Authorization": f"Bearer {token}"})
+        result["key"] = key
+        data = key.get("data")
+        if isinstance(data, dict) and data.get("is_management_key") is True:
+            management = management or token
+    if management:
+        result["credits"] = json_request("https://openrouter.ai/api/v1/credits", {"Authorization": f"Bearer {management}"})
+    else:
+        # A regular inference key cannot read the account-wide credit endpoint.
+        # Keep its valid usage even when include_credits was requested.
+        result["_ai_status"] = {"credits_hint": "Set OPENROUTER_MANAGEMENT_KEY to track account credits."}
     return result
 
 

@@ -173,7 +173,7 @@ Column {
                                 Label {
                                     id: percentage
                                     objectName: "usage-value-" + provider.modelData.id + "-" + provider.modelData.idx + "-" + metric.modelData.key
-                                    width: metric.modelData.hasPercentage === false ? parent.width : Style.space(40)
+                                    width: metric.modelData.hasPercentage === false ? parent.width : Math.max(Style.space(40), implicitWidth)
                                     horizontalAlignment: metric.modelData.hasPercentage === false ? Text.AlignLeft : Text.AlignRight
                                     text: provider.modelData.loading ? Plugin.Model.spinner : (metric.modelData.value || Math.round(metric.modelData.percentage) + "%")
                                     opacity: metric.selected ? 1 : 0.55

@@ -166,7 +166,7 @@ Save applies preferences and keeps Settings open. Back sits before the panel tit
 | <img src="packages/lib/assets/providers/anthropic-api.png" width="18" height="18" alt="" /> **Anthropic API** | Monthly organization API spend | ANTHROPIC_ADMIN_KEY (organization Admin key) |
 | <img src="packages/lib/assets/providers/openai-api.png" width="18" height="18" alt="" /> **OpenAI API** | Monthly organization API spend | OPENAI_ADMIN_KEY (organization Admin key) |
 | <img src="packages/lib/assets/providers/google-cloud.png" width="18" height="18" alt="" /> **Google Cloud** | Project quotas; optional billing-export monthly cost | gcloud or GOOGLE_CLOUD_ACCESS_TOKEN; project_id option |
-| <img src="packages/lib/assets/providers/openrouter.png" width="18" height="18" alt="" /> **OpenRouter** | Key usage, monthly spend, remaining limit and prepaid credits | OPENROUTER_API_KEY |
+| <img src="packages/lib/assets/providers/openrouter.png" width="18" height="18" alt="" /> **OpenRouter** | Key usage and limits; account spend / total credits and remaining balance | OPENROUTER_API_KEY; OPENROUTER_MANAGEMENT_KEY for account credits |
 | <img src="packages/lib/assets/providers/deepseek.png" width="18" height="18" alt="" /> **DeepSeek** | Available prepaid balance | DEEPSEEK_API_KEY |
 | <img src="packages/lib/assets/providers/deepinfra.png" width="18" height="18" alt="" /> **DeepInfra** | Prepaid balance and current-month spend | DEEPINFRA_API_KEY |
 | <img src="packages/lib/assets/providers/kimi.png" width="18" height="18" alt="" /> **Kimi** | Coding subscription quota and rolling limits | KIMI_API_KEY or Kimi CLI login |

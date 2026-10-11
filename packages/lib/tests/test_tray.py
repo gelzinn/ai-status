@@ -286,13 +286,15 @@ class DesktopTests(IsolatedState):
              "percentage": 38.75},
             {"type": "balance", "name": "Available organization prepaid credit balance (USD)",
              "percentage": None, "amount": 12345.67, "unit": "USD"},
+            {"type": "credits", "name": "Account spend / total credits (USD)",
+             "percentage": 25, "amount": 25, "limit": 100, "unit": "USD", "value_format": "amount_ratio"},
         ]}])
         self.dashboard.show()
         self.app.processEvents()
         viewport = self.dashboard.scroll.viewport()
         self.assertLessEqual(self.dashboard.scroll.widget().width(), viewport.width())
         self.assertEqual([button.percentage.text() for button in self.dashboard.metric_buttons],
-                         ["39%", "$12345.67"])
+                         ["39%", "$12345.67", "$25.00 / $100.00"])
         for button in self.dashboard.metric_buttons:
             value = button.percentage
             right = value.mapTo(viewport, tray.QPoint(value.width(), 0)).x()

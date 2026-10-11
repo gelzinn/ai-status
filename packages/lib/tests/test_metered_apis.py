@@ -146,15 +146,47 @@ class OpenRouterTests(unittest.TestCase):
         metrics = parser(json.dumps({"data": {"usage": 200, "usage_monthly": 12, "limit": 100, "limit_remaining": 88, "limit_reset": "monthly"}}))["metrics"]
         self.assertEqual(metrics[0]["percentage"], 12)
         self.assertEqual(metrics[0]["type"], "monthly")
+        self.assertEqual(metrics[0]["amount"], 12)
+        self.assertEqual(metrics[0]["limit"], 100)
+        self.assertEqual(metrics[0]["value_format"], "amount_ratio")
         self.assertIsNone(metrics[1]["percentage"])
         self.assertEqual(len({m["name"] for m in metrics}), 2)
 
-    def test_unlimited_key_and_management_credits_are_amount_only(self):
+    def test_account_spend_ratio_and_balance_use_account_scope(self):
         parser = load("openrouter", "parse").parse
-        metrics = parser(json.dumps({"key": {"data": {"limit": None, "usage_monthly": 12}},
+        metrics = parser(json.dumps({"key": {"data": {"limit": None, "usage": 500, "usage_monthly": 12}},
                                       "credits": {"data": {"total_credits": 100, "total_usage": 25}}}))["metrics"]
-        self.assertEqual([m["amount"] for m in metrics], [12, 75])
-        self.assertTrue(all(m["percentage"] is None for m in metrics))
+        self.assertEqual([m["amount"] for m in metrics], [12, 25, 75])
+        self.assertEqual([m["percentage"] for m in metrics], [None, 25, None])
+        self.assertEqual(metrics[1]["limit"], 100)
+        self.assertEqual(metrics[1]["value_format"], "amount_ratio")
+        self.assertIn("Account spend", metrics[1]["detail"])
+        self.assertEqual(len({render.metric_key(m) for m in metrics}), 3)
+
+    def test_missing_or_invalid_credit_totals_never_invent_balance(self):
+        parser = load("openrouter", "parse").parse
+        for value in (None, True, "NaN", "Infinity", -1, [], {}):
+            for field in ("total_credits", "total_usage"):
+                with self.subTest(field=field, value=value):
+                    credits = {"total_credits": 100, "total_usage": 25, field: value}
+                    metrics = parser(json.dumps({"key": {"data": {"usage_monthly": 12}},
+                                                 "credits": {"data": credits}}))["metrics"]
+                    self.assertEqual([m["amount"] for m in metrics], [12])
+        for credits in ({}, {"total_credits": 100}, {"total_usage": 25}):
+            self.assertEqual(parser(json.dumps({"credits": {"data": credits}}))["metrics"], [])
+
+    def test_zero_and_overdrawn_account_credit_balance(self):
+        parser = load("openrouter", "parse").parse
+        for total, spent, balance, percentage in ((0, 0, 0, None), (100, 120, -20, 120)):
+            with self.subTest(total=total, spent=spent):
+                metrics = parser(json.dumps({"credits": {"data": {"total_credits": total, "total_usage": spent}}}))["metrics"]
+                self.assertEqual([m["amount"] for m in metrics], [spent, balance])
+                self.assertEqual(metrics[0]["percentage"], percentage)
+                self.assertIsNone(metrics[1]["percentage"])
+
+    def test_extreme_credit_ratio_has_no_nonfinite_percentage(self):
+        metrics = load("openrouter", "parse").parse(json.dumps({"credits": {"data": {"total_credits": 1e-300, "total_usage": 1e300}}}))["metrics"]
+        self.assertIsNone(metrics[0]["percentage"])
 
     def test_api_budget_and_free_requests(self):
         parser = load("openrouter", "parse").parse
@@ -166,9 +198,24 @@ class OpenRouterTests(unittest.TestCase):
     def test_regular_key_never_calls_management_endpoint(self):
         query = load("openrouter", "query")
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": "fake-key"}, clear=True), patch.object(query, "json_request", return_value={"data": {"usage_monthly": 1}}) as get:
-            query.query()
+            result = query.query()
         get.assert_called_once()
         self.assertEqual(get.call_args.args[0], "https://openrouter.ai/api/v1/key")
+        self.assertIn("OPENROUTER_MANAGEMENT_KEY", result["_ai_status"]["credits_hint"])
+        metrics = load("openrouter", "parse").parse(json.dumps(result))["metrics"]
+        self.assertEqual(metrics[0]["amount"], 1)
+        self.assertIn("Set OPENROUTER_MANAGEMENT_KEY", metrics[0]["detail"])
+
+    def test_requested_credits_without_management_keeps_key_usage(self):
+        query = load("openrouter", "query")
+        env = {"OPENROUTER_API_KEY": "fake-key", "AI_STATUS_ACCOUNT_OPTIONS": '{"include_credits":true}'}
+        with patch.dict(os.environ, env, clear=True), patch.object(query, "json_request", return_value={"data": {"usage": 2}}) as get:
+            result = query.query()
+        get.assert_called_once()
+        self.assertNotIn("credits", result)
+        metrics = load("openrouter", "parse").parse(json.dumps(result))["metrics"]
+        self.assertEqual(metrics[0]["amount"], 2)
+        self.assertIn("OPENROUTER_MANAGEMENT_KEY", metrics[0]["detail"])
 
     def test_explicit_management_key_reads_account_credits(self):
         query = load("openrouter", "query")
@@ -176,6 +223,42 @@ class OpenRouterTests(unittest.TestCase):
             result = query.query()
         self.assertEqual(get.call_args.args[1]["Authorization"], "Bearer fake-management")
         self.assertIn("credits", result)
+
+    def test_management_key_alone_fetches_credits_directly(self):
+        query = load("openrouter", "query")
+        with patch.dict(os.environ, {"OPENROUTER_MANAGEMENT_KEY": "fake-management"}, clear=True), patch.object(query, "json_request", return_value={"data": {"total_credits": 10, "total_usage": 2}}) as get:
+            result = query.query()
+        get.assert_called_once_with("https://openrouter.ai/api/v1/credits", {"Authorization": "Bearer fake-management"})
+        self.assertNotIn("key", result)
+        self.assertEqual([m["amount"] for m in load("openrouter", "parse").parse(json.dumps(result))["metrics"]], [2, 8])
+
+    def test_management_key_in_api_key_variable_is_detected(self):
+        query = load("openrouter", "query")
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "fake-management"}, clear=True), patch.object(query, "json_request", side_effect=[{"data": {"is_management_key": True}}, {"data": {"total_credits": 10, "total_usage": 2}}]) as get:
+            result = query.query()
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(get.call_args.args[1]["Authorization"], "Bearer fake-management")
+        self.assertIn("credits", result)
+
+    def test_credit_request_errors_keep_auth_and_rate_limit_metadata(self):
+        query = load("openrouter", "query")
+        env = {"OPENROUTER_API_KEY": "fake-key", "OPENROUTER_MANAGEMENT_KEY": "fake-management"}
+        for status, retry in ((401, None), (403, None), (429, 123)):
+            with self.subTest(status=status):
+                error = provider_http.QueryError("Usage request failed.", status=status, retry_after_seconds=retry)
+                with patch.dict(os.environ, env, clear=True), patch.object(query, "json_request", side_effect=[{"data": {"usage_monthly": 1}}, error]) as get, self.assertRaises(provider_http.QueryError) as caught:
+                    query.query()
+                self.assertIs(caught.exception, error)
+                self.assertEqual(get.call_count, 2)
+
+    def test_key_error_stops_before_credit_request(self):
+        query = load("openrouter", "query")
+        env = {"OPENROUTER_API_KEY": "fake-key", "OPENROUTER_MANAGEMENT_KEY": "fake-management"}
+        error = provider_http.QueryError("Rate limited.", status=429, retry_after_seconds=60)
+        with patch.dict(os.environ, env, clear=True), patch.object(query, "json_request", side_effect=error) as get, self.assertRaises(provider_http.QueryError) as caught:
+            query.query()
+        get.assert_called_once()
+        self.assertIs(caught.exception, error)
 
 
 class GoogleCloudTests(unittest.TestCase):

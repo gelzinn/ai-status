@@ -20,7 +20,7 @@ For Windows credential locations and native CLI compatibility, see the
 | `anthropic-api` | Anthropic API | Monthly organization API spend | ANTHROPIC_ADMIN_KEY (organization Admin key) |
 | `openai-api` | OpenAI API | Monthly organization API spend | OPENAI_ADMIN_KEY (organization Admin key) |
 | `google-cloud` | Google Cloud | Project quotas; optional billing-export monthly cost | gcloud or GOOGLE_CLOUD_ACCESS_TOKEN; project_id option |
-| `openrouter` | OpenRouter | Key usage, monthly spend, remaining limit and prepaid credits | OPENROUTER_API_KEY |
+| `openrouter` | OpenRouter | Key usage and limits; account spend / total credits and remaining balance | OPENROUTER_API_KEY; OPENROUTER_MANAGEMENT_KEY for account credits |
 | `deepseek` | DeepSeek | Available prepaid balance | DEEPSEEK_API_KEY |
 | `deepinfra` | DeepInfra | Prepaid balance and current-month spend | DEEPINFRA_API_KEY |
 | `kimi` | Kimi | Coding subscription quota and rolling limits | KIMI_API_KEY or Kimi CLI login |
@@ -190,7 +190,14 @@ Spend, available credit and subscription quota are separate metrics. A balance h
 
 - **OpenAI API:** `OPENAI_ADMIN_KEY`, optionally `organization_id`/`OPENAI_ORG_ID`, `project_ids`, `monthly_budget`, `budget_currency`. Queries the paginated [organization costs API](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs) for the current UTC month; a project inference key or Codex OAuth login cannot query it.
 - **Anthropic API:** `ANTHROPIC_ADMIN_KEY` for a Console Admin key or an unscoped personal/service account key with admin access; alternatively `ANTHROPIC_ADMIN_TOKEN` for `org:admin` OAuth. Workspace inference keys cannot read costs. Optional `workspace_id` scopes the paginated report, `monthly_budget`/`budget_currency` supplies a monitoring budget. [Cost report](https://platform.claude.com/docs/en/api/http/beta/organization/cost_report/retrieve) amounts are decimal cents and are converted to currency units. Claude subscriptions, Bedrock and Vertex invoices are separate.
-- **OpenRouter:** `OPENROUTER_API_KEY` reports key usage, daily/weekly/monthly spend and any applicable limit. Optional management-key credit retrieval requires the permissions of a management key. The collector uses `/api/v1/key` and `/api/v1/credits`; ordinary key metrics remain usable if the optional credit request fails.
+- **OpenRouter:** `OPENROUTER_API_KEY` reports this key's usage and any applicable limit. Set `OPENROUTER_MANAGEMENT_KEY` to retrieve account-wide purchased credits and total spend from the [credits API](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits). For example, `$25.00 / $100.00` means $25 spent from $100 total account credits; the remaining account balance appears separately as `$75.00`. Key spending limits and account credits have separate scopes. A management key alone is sufficient for account metrics and makes one request; providing both keys also collects key usage. Regular keys never call the management endpoint and display setup guidance for account credits, including when the legacy `include_credits` option is enabled. Authentication and rate-limit errors from configured management credentials follow the normal cached-data and cooldown behavior.
+
+  Each account can reference its own management key through the existing credential-source options:
+
+  ```bash
+  ai-status accounts add openrouter --id personal-credits --label Personal --env OPENROUTER_MANAGEMENT_KEY=OPENROUTER_PERSONAL_MANAGEMENT_KEY
+  ai-status accounts add openrouter --id work-credits --label Work --env OPENROUTER_MANAGEMENT_KEY=OPENROUTER_WORK_MANAGEMENT_KEY
+  ```
 - **Google Cloud:** `GOOGLE_CLOUD_ACCESS_TOKEN`, or `gcloud auth print-access-token` with optional `gcloud_account`. Set `project_id` (or `GOOGLE_CLOUD_PROJECT`). Cloud Monitoring quota series require Monitoring read permissions. `service` and `quota_metric` filter series; allocation usage is paired with the matching limit, and rate-window quotas only use compatible labels/windows.
 
 Google Cloud billing is optional: set `billing_table` to an existing `project.dataset.table` [Cloud Billing export](https://cloud.google.com/billing/docs/how-to/export-data-bigquery). AI Status queries net current-month cost, including credits, scoped to `project_id`. `billing_project_id` controls the BigQuery job project, `billing_location` its location, `service_id` narrows services, and `billing_all_projects: true` explicitly broadens the spend scope. BigQuery read/query IAM permissions are required. Queries can incur BigQuery charges; `maximum_bytes_billed` defaults to 1 GB and query caching is enabled. Export delays apply, and missing quota/billing data stays unavailable rather than becoming a zero balance.

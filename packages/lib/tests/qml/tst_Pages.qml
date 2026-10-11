@@ -79,6 +79,24 @@ Item {
             compare(Plugin.Model.saved.selected.metric, "weekly:Fable")
             compare(Plugin.Model.saved.iconMode, "logo")
         }
+        function test_account_credit_ratio_fits_next_to_progress_bar() {
+            settings.visible = false
+            const snapshot = Plugin.Model.snapshot
+            snapshot.selected = {provider: "account:work", idx: 0, metric: "credits:account"}
+            snapshot.providers = [{id: "account:work", providerId: "openrouter", idx: 0, name: "OpenRouter · Work", logoPath: "", loading: false, cached: false, error: "", metrics: [
+                {key: "credits:account", name: "Account spend / total credits", percentage: 25, hasPercentage: true, value: "$25.00 / $100.00", detail: "Account totals"}
+            ]}]
+            Plugin.Model.snapshot = Object.assign({}, snapshot)
+            usage.visible = true
+            wait(20)
+            const value = findChild(usage, "usage-value-account:work-0-credits:account")
+            const bar = findChild(usage, "usage-bar-account:work-0-credits:account")
+            compare(value.text, "$25.00 / $100.00")
+            verify(value.width >= value.implicitWidth)
+            verify(bar.visible && bar.width > 0)
+            verify(Math.abs(value.mapToItem(usage, value.width, 0).x - usage.width) < 0.1)
+            verify(bar.mapToItem(usage, bar.width, 0).x < value.mapToItem(usage, 0, 0).x)
+        }
         function test_disabling_active_provider_selects_an_enabled_one() {
             settings.toggleProvider("claude")
             compare(settings.selected.provider, "codex")

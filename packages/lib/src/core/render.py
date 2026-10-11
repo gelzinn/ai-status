@@ -45,6 +45,16 @@ def metric_percentage(metric):
 
 
 def metric_value(metric):
+    unit = metric.get("unit", "")
+    if metric.get("value_format") == "amount_ratio":
+        try:
+            amount, limit = float(metric.get("amount")), float(metric.get("limit"))
+            if math.isfinite(amount) and math.isfinite(limit) and limit > 0:
+                if unit == "USD":
+                    return f"${amount:.2f} / ${limit:.2f}"
+                return f"{amount:,.2f} / {limit:,.2f} {unit}".strip()
+        except (ValueError, TypeError):
+            pass
     percentage = metric_percentage(metric)
     if percentage is not None:
         return f"{percentage:.0f}%"
@@ -54,7 +64,6 @@ def metric_value(metric):
             return "Unavailable"
     except (ValueError, TypeError):
         return str(metric.get("value") or "Unavailable")
-    unit = metric.get("unit", "")
     return f"${amount:.2f}" if unit == "USD" else f"{amount:,.2f} {unit}".strip()
 
 
@@ -269,7 +278,12 @@ def format_provider_block(
         if recede:
             label = _dim(label, recede)
         percentage = metric_percentage(metric)
-        bar_str = make_progress_bar(percentage) if percentage is not None else escape(metric_value(metric))
+        if percentage is not None:
+            bar_str = make_progress_bar(percentage)
+            if metric.get("value_format") == "amount_ratio":
+                bar_str = bar_str.rsplit(" ", 1)[0] + " " + escape(metric_value(metric))
+        else:
+            bar_str = escape(metric_value(metric))
         bar_line = ("    " + _dim(bar_str, recede)) if recede else f"    {bar_str}"
 
         lines.append(label)

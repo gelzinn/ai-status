@@ -82,6 +82,25 @@ class ConnectionViewsTests(unittest.TestCase):
         self.assertEqual(snapshot["providers"][0]["metrics"][0]["value"], "Unlimited")
         self.assertFalse(snapshot["providers"][0]["metrics"][0]["hasPercentage"])
 
+    def test_account_credit_ratio_survives_snapshot_selection_and_tooltip(self):
+        metric = dict(type="credits", name="Account spend / total credits", percentage=25,
+                      amount=25, limit=100, unit="USD", value_format="amount_ratio")
+        entry = dict(self.data[1], metrics=[metric])
+        choice = dict(self.selected, metric=render.metric_key(metric))
+        snapshot = quickshell.build_snapshot([entry], choice)
+        self.assertEqual(snapshot["providers"][0]["metrics"][0]["value"], "$25.00 / $100.00")
+        self.assertTrue(snapshot["providers"][0]["metrics"][0]["hasPercentage"])
+        self.assertEqual(snapshot["text"], "OpenRouter · Work $25.00 / $100.00")
+        tooltip = render.build_final_state([entry], choice)["tooltip"]
+        self.assertIn("$25.00 / $100.00", tooltip)
+        self.assertIn("█", tooltip)
+
+    def test_invalid_credit_denominators_keep_safe_amount_fallbacks(self):
+        for limit in (0, -1, None, "unavailable", float("inf"), float("nan")):
+            with self.subTest(limit=limit):
+                metric = dict(amount=0, limit=limit, percentage=None, unit="USD", value_format="amount_ratio")
+                self.assertEqual(render.metric_value(metric), "$0.00")
+
 
 if __name__ == "__main__":
     unittest.main()
