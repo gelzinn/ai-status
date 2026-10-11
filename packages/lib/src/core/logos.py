@@ -94,9 +94,22 @@ def _rasterize_svg(src_path, png_path, height=96):
     return False
 
 
+def contrast_logo(provider):
+    """Use the bundled light backgrounds for dark monochrome provider marks."""
+    if provider in ("kilo", "lyceum"):
+        logo = paths.LIB_DIR / "assets" / "providers" / f"{provider}.png"
+        if logo.is_file():
+            return str(logo)
+    return None
+
+
 def provider_png(provider):
     """Path to the opaque, cached PNG for ``provider`` (downloading and
     rasterizing on demand), or None if it cannot be produced."""
+    bundled = contrast_logo(provider)
+    if bundled:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        return bundled
     try:
         with open(_PROVIDERS_JSON) as f:
             providers = json.load(f)

@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from core import cli, daemon, fetch, quickshell, render, state
+from core import cli, daemon, fetch, logos, quickshell, render, state
 
 DATA = [
     {"_dir": "claude", "_idx": 0, "provider": "Claude (Pro)", "metrics": [
@@ -186,6 +186,25 @@ class SnapshotTests(unittest.TestCase):
             with patch.object(quickshell.urllib.request, "urlopen") as network:
                 self.assertEqual(cache.get("claude"), str(path))
                 network.assert_not_called()
+
+    def test_dark_provider_marks_override_old_remote_caches_without_downloads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = quickshell.LogoCache()
+            cache.directory = Path(directory)
+            for provider in ("kilo", "lyceum"):
+                with self.subTest(provider=provider):
+                    (cache.directory / f"{provider}.png").write_bytes(b"old dark remote favicon")
+                    expected = str(quickshell.paths.LIB_DIR / "assets" / "providers" / f"{provider}.png")
+                    with patch.object(quickshell.threading, "Thread") as download, \
+                         patch.object(logos, "request_bytes") as request, \
+                         patch.object(logos, "CACHE_DIR", str(cache.directory / "waybar")):
+                        self.assertEqual(cache.get(provider), expected)
+                        self.assertEqual(logos.provider_png(provider), expected)
+                        self.assertTrue(Path(logos.CACHE_DIR).is_dir())
+                        # Waybar requires opaque RGB rather than alpha or grayscale.
+                        self.assertEqual(Path(expected).read_bytes()[25], 2)
+                        download.assert_not_called()
+                        request.assert_not_called()
 
     def test_errors_are_exposed_only_when_requested(self):
         with patch.object(fetch, "run_provider", return_value={"error": "Authentication failed"}):

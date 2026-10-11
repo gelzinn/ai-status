@@ -10,7 +10,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import about, config, fetch, paths, render, state, reset_credits
+from . import about, config, fetch, logos, paths, render, state, reset_credits
 
 
 class _PlainText(HTMLParser):
@@ -43,6 +43,9 @@ class LogoCache:
         self.attempts = {}
 
     def get(self, provider):
+        bundled = logos.contrast_logo(provider)
+        if bundled:
+            return bundled
         url = self.providers.get(provider, {}).get("logo")
         if not url:
             return ""
