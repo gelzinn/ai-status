@@ -158,6 +158,7 @@ ai-status help accounts add   # Help for a specific command
 ai-status providers          # Provider IDs and enabled default connections
 ai-status status             # Collect usage and print JSON
 ai-status doctor             # Installation details as JSON
+ai-status update             # Start the updater for your installation
 ai-status config             # Provider and display settings
 ```
 
@@ -242,6 +243,7 @@ process. The connection stores the variable reference, not the key value.
 - **Native settings.** Enable providers, reorder them and select limits inside the Omarchy, Windows and macOS panels. Windows also supports drag and drop; Waybar uses an interactive configuration TUI.
 - **Useful reset details.** See reset countdowns and available Claude/Codex reset credits, with expiry dates, remaining time and time zones when reported. Redeem credits in the provider's own app.
 - **Refresh when you need it.** Usage updates every five minutes, with manual refresh and loading feedback. Usable cached data remains visible when a refresh fails.
+- **Optional updates.** The blue update link opens instructions inside the desktop panel. Start an update in a terminal on Linux/macOS, or download and open a verified installer on Windows. Portable installations include manual instructions.
 - **A desktop runtime.** The Omarchy widget runs inside the existing shell with one backend across monitors. Windows uses Qt widgets with a bundled runtime. macOS uses SwiftUI/AppKit and the same Python backend. Desktop installation requires no Node or NPM.
 
 <details>

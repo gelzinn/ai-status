@@ -47,12 +47,20 @@ settings/cache live in your user profile.
   changing your tray selection. Expired, paused or spent credits are excluded.
   If details are unavailable, the known credit count remains visible and missing
   information is labeled. Use the provider's own app to redeem a reset.
+- **Update available** is an optional blue link with a right arrow. Open it to
+  see the installed/latest versions and instructions for your installation.
+  The back arrow or Escape returns to usage, keeping your selection and position.
+  For an installed app, **Download and open installer** downloads the new setup
+  file, verifies its published SHA-256 checksum and opens the normal setup wizard.
+  Follow setup and leave **Launch AI Status** selected to restart. Downloads run
+  in the background with progress and a retry action if they fail. A portable
+  app shows the steps to replace its folder, with links to downloads and the
+  manual guide. Updates never start until you choose the update action.
 - Clicking outside the panel or closing it keeps the tray app running. Use **Exit** in its menu
   to stop it. An active query finishes before exit so child processes close.
-- The tray menu opens the latest release for updates. Run the new installer
-  to upgrade; the app runtime is replaced completely and configuration is
-  preserved. There is no unattended executable
-  replacement or remote shell execution.
+- **Update AI Status** in the tray menu opens the same guide. Running the new
+  installer replaces the app runtime and preserves configuration. You can keep
+  using the current version and update when convenient; updates are optional.
 
 The installer and app contain their own runtime. Provider applications and
 authenticated sessions are separate prerequisites; their CLIs are not bundled

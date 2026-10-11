@@ -64,6 +64,8 @@ The bar has no hover tutorial. Open **About AI Status** in Settings for the proj
 
 The header uses monochrome Lucide vector icons for refresh, configuration, and back, following the shell's foreground color. Claude and Codex show **Reset credits: N available** when usable manual resets exist. Clicking it opens a details page with provider/back navigation, explanation, and a table with reset type, credit count, local expiry date, remaining time, and UTC offset. Expired credits are removed, details are bounded by the authoritative count, and missing expiry details are indicated explicitly. Back or Escape restores the usage page, scroll position, and focused button without changing the bar selection. The same inventory appears in the Waybar tooltip; see [PROVIDERS.md](PROVIDERS.md) for endpoint behavior.
 
+When a newer stable release is available, the blue **Update available** link uses the same arrow layout as Reset credits, with a blue hover background. It opens an update page inside the panel with installed and available versions, release notes, and instructions for the detected installation. **Update in terminal** starts the Omarchy updater or the Linux installer; you can also copy the command. Back or Escape returns to usage and restores focus. Opening the guide does not start an update. Updates remain optional; see [updates and rollback](UPDATES.md).
+
 ```bash
 # Place the widget (defaults to right on first enable):
 omarchy bar move io.github.gelzinn.ai-status --section right
