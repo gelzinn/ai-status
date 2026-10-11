@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.11.0](https://github.com/gelzinn/ai-status/compare/v0.10.0...v0.11.0) (2026-10-11)
+
+
+### Features
+
+* **macos:** add a native menu bar app with the shared desktop usage, reset credits, settings and about pages ([54c7755](https://github.com/gelzinn/ai-status/commit/54c775597384c913955f80ba6d6d0ef0eda8d32e))
+* **providers:** track API spend and quotas across 29 providers with unlimited named account connections ([765a8f1](https://github.com/gelzinn/ai-status/commit/765a8f1a9576c4fe7ed213ef8b3df752e8e32482))
+
+
+### Bug Fixes
+
+* **desktop:** keep the selected account when unavailable accounts are hidden ([54c7755](https://github.com/gelzinn/ai-status/commit/54c775597384c913955f80ba6d6d0ef0eda8d32e))
+* **macos:** read Claude Code Keychain credentials and preserve existing installs and preferences during updates ([54c7755](https://github.com/gelzinn/ai-status/commit/54c775597384c913955f80ba6d6d0ef0eda8d32e))
+* **openrouter:** show available account balance directly below its credit usage bar ([765a8f1](https://github.com/gelzinn/ai-status/commit/765a8f1a9576c4fe7ed213ef8b3df752e8e32482))
+* **usage:** align usage content with provider names and keep balance values beside their labels ([765a8f1](https://github.com/gelzinn/ai-status/commit/765a8f1a9576c4fe7ed213ef8b3df752e8e32482))
+* **usage:** display balances without invented percentages and isolate account credentials and cached results ([765a8f1](https://github.com/gelzinn/ai-status/commit/765a8f1a9576c4fe7ed213ef8b3df752e8e32482))
+
+
+### Performance Improvements
+
+* **usage:** reuse fresh usage and persist service rate-limit cooldowns across refreshes ([765a8f1](https://github.com/gelzinn/ai-status/commit/765a8f1a9576c4fe7ed213ef8b3df752e8e32482))
+
 ## [0.10.0](https://github.com/gelzinn/ai-status/compare/v0.9.0...v0.10.0) (2026-10-10)
 
 
