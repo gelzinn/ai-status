@@ -13,6 +13,9 @@ Item {
     property var actions: []
     property bool settingsSaving: false
     property string settingsError: ""
+    property bool updateRunning: false
+    property string updateError: ""
+    property string updateMessage: ""
     signal settingsSaved()
     property int frame: 0
     readonly property string spinner: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][frame % 10]
@@ -68,6 +71,14 @@ Item {
         settingsProcess.exec(["python3", cliPath, "save-settings", "--frontend", "quickshell", "--settings-json", JSON.stringify(settings)])
     }
 
+    function startUpdate() {
+        if (updateRunning || consumers === 0 || !snapshot.update || !snapshot.update.canUpdate) return
+        updateError = ""
+        updateMessage = ""
+        updateRunning = true
+        updateProcess.exec(["python3", cliPath, "update"])
+    }
+
     function drain() {
         if (consumers === 0 || actionProcess.running || actions.length === 0) return
         const command = actions[0]
@@ -113,6 +124,25 @@ Item {
                 }
             })
         }
+    }
+
+    Process {
+        id: updateProcess
+        stdout: SplitParser { onRead: data => root.updateMessage = data }
+        stderr: SplitParser { onRead: data => root.updateError = data }
+        onExited: (exitCode, exitStatus) => {
+            root.updateRunning = false
+            if (exitCode !== 0 || exitStatus !== 0) {
+                root.updateMessage = ""
+                root.updateError = root.updateError || "Could not start the update. Try again or use the command above."
+            }
+        }
+        onRunningChanged: if (!running) Qt.callLater(() => {
+            if (root.updateRunning) {
+                root.updateRunning = false
+                root.updateError = root.updateError || "Could not start the updater. Use the command above."
+            }
+        })
     }
 
     Timer {

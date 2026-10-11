@@ -86,6 +86,15 @@ def render_menu(cache, selected, spinner=None, title_image=None):
         title_params.append(f"image={_image(str(path))}")
     out = [_line(title or "AI Status", *title_params), "---",
            _line(f"AI Status · v{snapshot['about']['version']}", "size=11", f"color={DIM}"), "---"]
+    if snapshot["version"]["has_update"]:
+        guide = snapshot["update"]
+        out.append(_line(f"Update available: v{snapshot['version']['latest']} →", "color=#89b4fa",
+                         f"href={guide['guideUrl']}"))
+        if guide["canUpdate"]:
+            out.append("--" + _line(guide["actionLabel"], *_action("update")))
+        out.append("--" + _line("Update guide", f"href={guide['guideUrl']}"))
+        out.append("--" + _line("Release notes", f"href={guide['releaseUrl']}"))
+        out.append("---")
     if not snapshot["providers"]:
         out.append(_line("Checking your connected providers…" if spinner else "No usage available. Connect a provider and refresh.", f"color={DIM}"))
     for index, provider in enumerate(snapshot["providers"]):

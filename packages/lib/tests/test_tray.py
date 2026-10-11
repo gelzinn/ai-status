@@ -634,6 +634,110 @@ class DesktopTests(IsolatedState):
         self.assertGreater(scroll.verticalScrollBar().value(), 0)
         self.assertEqual(state.load_selected(), selected)
 
+    @staticmethod
+    def update_guide(can_update=True):
+        return {"method": "windows-installer" if can_update else "windows-portable",
+                "title": "Update AI Status", "description": "Update this installation.",
+                "steps": ["Download the latest installer.", "Run setup to keep your settings."],
+                "command": "", "actionLabel": "Download and open installer", "canUpdate": can_update,
+                "releaseUrl": "https://github.com/gelzinn/ai-status/releases/latest",
+                "guideUrl": "https://github.com/gelzinn/ai-status/blob/main/packages/lib/WINDOWS.md"}
+
+    def wait_for_update(self):
+        deadline = time.monotonic() + 5
+        while self.dashboard.updating and time.monotonic() < deadline:
+            self.app.processEvents()
+            time.sleep(0.01)
+        self.assertFalse(self.dashboard.updating)
+
+    def test_optional_update_link_opens_guide_and_back_restores_usage(self):
+        version = {"current": "0.11.0", "latest": "0.12.1", "has_update": True}
+        with patch.object(tray.fetch, "get_version_info", return_value=version), \
+                patch.object(tray.updates, "update_guide", return_value=self.update_guide()):
+            self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
+                {"type": "weekly", "id": str(index), "percentage": 23} for index in range(15)]}])
+            self.dashboard.show()
+            self.app.processEvents()
+            selected = state.load_selected()
+            link = self.dashboard.update_link
+            self.assertFalse(link.isHidden())
+            self.assertEqual(self.dashboard.update_title.text(), "Update available: v0.12.1")
+            self.assertIsInstance(link.findChild(tray.ArrowIcon), tray.ArrowIcon)
+            link.setFocus()
+            self.dashboard.scroll.verticalScrollBar().setValue(200)
+            position = self.dashboard.scroll.verticalScrollBar().value()
+            self.assertGreater(position, 0)
+            QTest.keyClick(link, tray.Qt.Key.Key_Return)
+            self.app.processEvents()
+            self.assertTrue(self.dashboard.viewing_updates())
+            self.assertEqual(self.dashboard.brand.text(), "Updates")
+            self.assertIs(self.dashboard.focusWidget(), self.dashboard.back_button)
+            self.assertIn("Installed: v0.11.0", self.dashboard.update_view.versions.text())
+            self.assertIn("Latest: v0.12.1", self.dashboard.update_view.versions.text())
+            self.assertTrue(self.dashboard.update_view.action.isEnabled())
+            QTest.keyClick(self.dashboard.back_button, tray.Qt.Key.Key_Down)
+            self.assertEqual(state.load_selected(), selected)
+            QTest.keyClick(self.dashboard.back_button, tray.Qt.Key.Key_Escape)
+            self.app.processEvents()
+            self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
+            self.assertEqual(self.dashboard.scroll.verticalScrollBar().value(), position)
+            self.assertTrue(link.hasFocus())
+            self.assertEqual(state.load_selected(), selected)
+            version["has_update"] = False
+            self.dashboard.draw()
+            self.assertTrue(link.isHidden())
+
+    def test_portable_update_guide_offers_download_and_manual_links(self):
+        with patch.object(tray.fetch, "get_version_info", return_value={"has_update": True}), \
+                patch.object(tray.updates, "update_guide", return_value=self.update_guide(False)), \
+                patch.object(tray.QDesktopServices, "openUrl") as browser, \
+                patch.object(tray.updates, "run_update") as updater:
+            self.dashboard.show_updates()
+            self.assertTrue(self.dashboard.update_view.action.isHidden())
+            self.dashboard.start_update()
+            updater.assert_not_called()
+            self.dashboard.update_view.findChild(tray.QPushButton, "update-releaseUrl").click()
+            self.assertEqual(browser.call_args.args[0].toString(), self.update_guide(False)["releaseUrl"])
+            self.dashboard.update_view.findChild(tray.QPushButton, "update-guideUrl").click()
+            self.assertEqual(browser.call_args.args[0].toString(), self.update_guide(False)["guideUrl"])
+
+    def test_update_action_runs_in_worker_and_error_allows_retry(self):
+        version = {"current": "0.11.0", "latest": "0.12.1", "has_update": True}
+        def failed_update(progress=None):
+            progress("Verifying download…")
+            raise OSError("Unable to download the update. Check your connection and retry.")
+        with patch.object(tray.fetch, "get_version_info", return_value=version), \
+                patch.object(tray.updates, "update_guide", return_value=self.update_guide()), \
+                patch.object(tray.updates, "run_update", side_effect=failed_update) as updater:
+            self.dashboard.show_updates()
+            self.dashboard.update_view.action.click()
+            self.assertTrue(self.dashboard.updating)
+            self.assertFalse(self.dashboard.update_view.action.isEnabled())
+            self.dashboard.start_update()
+            self.wait_for_update()
+            updater.assert_called_once()
+            self.assertIn("Check your connection", self.dashboard.update_view.status.text())
+            self.assertEqual(self.dashboard.update_view.action.text(), "Retry update")
+            self.assertTrue(self.dashboard.update_view.action.isEnabled())
+            updater.side_effect = None
+            updater.return_value = "The verified installer is open. Follow setup to update."
+            self.dashboard.update_view.action.click()
+            self.wait_for_update()
+            self.assertEqual(updater.call_count, 2)
+            self.assertTrue(self.dashboard.update_view.completed)
+            self.assertTrue(self.dashboard.update_view.action.isEnabled())  # Setup can be cancelled.
+            self.assertIn("verified installer is open", self.dashboard.update_view.status.text())
+
+    def test_update_guide_command_can_be_copied(self):
+        guide = self.update_guide(False)
+        guide["command"] = "ai-status update"
+        with patch.object(tray.fetch, "get_version_info", return_value={"has_update": True}), \
+                patch.object(tray.updates, "update_guide", return_value=guide):
+            self.dashboard.show_updates()
+            self.dashboard.update_view.copy_button.click()
+            self.assertEqual(self.app.clipboard().text(), "ai-status update")
+            self.assertEqual(self.dashboard.update_view.copy_button.text(), "Copied")
+
     def test_provider_settings_save_disabled_providers(self):
         settings = tray.ProviderSettings(self.dashboard)
         self.addCleanup(settings.deleteLater)

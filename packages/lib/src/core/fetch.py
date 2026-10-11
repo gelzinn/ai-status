@@ -2,6 +2,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -275,6 +276,20 @@ def run_provider(provider_dir, connection=None):
 
 _latest_version = None
 
+
+def stable_version(value):
+    """Comparable stable SemVer; release branches and prereleases are excluded."""
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", value)
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def newer_version(latest, current):
+    latest_parts, current_parts = stable_version(latest), stable_version(current)
+    return latest_parts is not None and current_parts is not None and latest_parts > current_parts
+
+
 def check_for_updates():
     global _latest_version
     try:
@@ -287,15 +302,20 @@ def check_for_updates():
             timeout=5,
         ))
         tag = data.get("tag_name", "")
-        _latest_version = tag.lstrip("v")
+        if (data.get("draft") or data.get("prerelease") or not isinstance(tag, str)
+                or not tag.startswith("v") or stable_version(tag) is None):
+            _latest_version = None
+            return
+        _latest_version = tag[1:]
+        return _latest_version
     except Exception:
-        pass
+        return None
 
 def get_version_info():
     return {
         "current": __version__,
         "latest": _latest_version,
-        "has_update": _latest_version is not None and _latest_version != __version__,
+        "has_update": newer_version(_latest_version, __version__),
     }
 
 def fetch_all_data(on_result=None, on_error=None, include_errors=False):

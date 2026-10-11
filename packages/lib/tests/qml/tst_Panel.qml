@@ -20,6 +20,100 @@ Item {
             wait(20)
         }
         function cleanup() { panel.close() }
+        function prepareUpdate(canUpdate) {
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.version = {current: "0.11.0", latest: "0.12.1", has_update: true}
+            snapshot.update = {
+                title: "Update the Omarchy plugin", description: "Omarchy updates AI Status in place.",
+                steps: ["Start the update.", "Wait for the plugin to reload."],
+                command: "omarchy plugin update io.github.gelzinn.ai-status",
+                canUpdate: canUpdate, actionLabel: "Update in terminal",
+                releaseUrl: "https://github.com/gelzinn/ai-status/releases/tag/v0.12.1"
+            }
+            Plugin.Model.snapshot = snapshot
+            wait(20)
+        }
+        function test_update_link_opens_guide_only_and_back_restores_focus() {
+            prepareUpdate(true)
+            const selected = JSON.stringify(Plugin.Model.snapshot.selected)
+            const link = findChild(panel, "update-available")
+            const scroller = findChild(panel, "panel-scroller")
+            verify(link.visible)
+            compare(link.text, "Update available: v0.12.1")
+            compare(link.trailingIconName, "arrow-right")
+            compare(link.foreground, "#89b4fa")
+            mouseMove(link, 10, 10)
+            verify(link.color.a > 0)
+            compare(link.color.b, link.foreground.b)
+            const scrollPosition = scroller.contentY
+            mouseClick(link)
+            wait(20)
+            verify(panel.updatePage)
+            compare(findChild(panel, "panel-title").text, "Update AI Status")
+            verify(findChild(panel, "panel-back").activeFocus)
+            verify(!findChild(panel, "panel-settings").visible)
+            verify(!link.visible)
+            compare(Plugin.Model.updateStarts, 0)
+            compare(JSON.stringify(Plugin.Model.snapshot.selected), selected)
+            verify(findChild(panel, "update-versions").text.indexOf("0.11.0") !== -1)
+            compare(findChild(panel, "update-command").text, Plugin.Model.snapshot.update.command)
+            keyClick(Qt.Key_Escape)
+            wait(20)
+            verify(!panel.updatePage)
+            verify(panel.opened)
+            verify(link.activeFocus)
+            compare(scroller.contentY, scrollPosition)
+            keyClick(Qt.Key_Return)
+            verify(panel.updatePage)
+            mouseClick(findChild(panel, "panel-back"))
+            verify(!panel.updatePage)
+        }
+        function test_update_action_reports_failure_and_can_retry_without_forcing_update() {
+            prepareUpdate(true)
+            panel.showUpdate()
+            wait(20)
+            const action = findChild(panel, "update-action")
+            mouseClick(action)
+            compare(Plugin.Model.updateStarts, 1)
+            verify(!action.enabled)
+            mouseClick(action)
+            compare(Plugin.Model.updateStarts, 1)
+            Plugin.Model.updateError = "Terminal not found. Run the command above."
+            Plugin.Model.updateRunning = false
+            verify(action.enabled)
+            compare(findChild(panel, "update-status").text, Plugin.Model.updateError)
+            mouseClick(action)
+            compare(Plugin.Model.updateStarts, 2)
+            compare(Plugin.Model.updateError, "")
+            panel.close()
+            verify(!panel.updatePage)
+            verify(Plugin.Model.updateRunning)
+        }
+        function test_manual_update_guide_keeps_command_and_release_notes_available() {
+            prepareUpdate(false)
+            mouseClick(findChild(panel, "update-available"))
+            wait(20)
+            verify(panel.updatePage)
+            verify(!findChild(panel, "update-action").visible)
+            verify(findChild(panel, "update-release-notes").visible)
+            verify(findChild(panel, "update-copy-command").visible)
+            compare(Plugin.Model.updateStarts, 0)
+            Plugin.Model.updateError = ""
+            panel.configure()
+            verify(!panel.updatePage)
+            verify(!findChild(panel, "update-available").visible)
+        }
+        function test_update_notice_does_not_replace_backend_error() {
+            prepareUpdate(true)
+            Plugin.Model.errorMessage = "Backend is reconnecting."
+            verify(findChild(panel, "update-available").visible)
+            compare(Plugin.Model.errorMessage, "Backend is reconnecting.")
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.version.has_update = false
+            Plugin.Model.snapshot = snapshot
+            verify(!findChild(panel, "update-available").visible)
+            compare(Plugin.Model.updateStarts, 0)
+        }
         function test_reset_navigation_uses_clicked_provider_and_back_restores_focus() {
             const selected = JSON.stringify(Plugin.Model.snapshot.selected)
             const button = findChild(panel, "reset-credits-codex-0")

@@ -8,6 +8,17 @@ Item {
     property var chosen: null
     property bool settingsSaving: false
     property string settingsError: ""
+    property bool updateRunning: false
+    property string updateError: ""
+    property string updateMessage: ""
+    property int updateStarts: 0
+    function startUpdate() {
+        if (updateRunning || !snapshot.update || !snapshot.update.canUpdate) return
+        updateStarts += 1
+        updateRunning = true
+        updateError = ""
+        updateMessage = ""
+    }
     property string spinner: "⠋"
     property var snapshot: ({})
     function saveSettings(settings) { saved = settings }
@@ -16,6 +27,11 @@ Item {
         saved = null
         chosen = null
         settingsError = ""
+        errorMessage = ""
+        updateRunning = false
+        updateError = ""
+        updateMessage = ""
+        updateStarts = 0
         snapshot = {
             about: {name: "AI Status", version: "0.9.0", commit: "12345678", license: "MIT", author: "gelzin.com", github: "https://github.com/gelzinn/ai-status", documentation: "https://github.com/gelzinn/ai-status#readme", issues: "https://github.com/gelzinn/ai-status/issues/new"},
             loading: false,

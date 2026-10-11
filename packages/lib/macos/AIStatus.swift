@@ -164,6 +164,29 @@ struct VersionInfo: Decodable {
     enum CodingKeys: String, CodingKey { case current, latest; case hasUpdate = "has_update" }
 }
 
+struct UpdateGuide: Decodable {
+    let method: String
+    let title: String
+    let description: String
+    let steps: [String]
+    let command: String
+    let actionLabel: String
+    let canUpdate: Bool
+    let releaseUrl: String
+    let guideUrl: String
+
+    // Older snapshots remain useful even before the shared core is updated.
+    static let manualMacOS = UpdateGuide(
+        method: "manual", title: "Update AI Status on macOS",
+        description: "Re-run the macOS installer to install the latest stable version. Your settings and provider connections are preserved.",
+        steps: ["Copy the command below and run it in Terminal.",
+                "Follow the installation progress in Terminal. AI Status restarts after installation."],
+        command: "curl -fsSL https://ai-status.gelzin.com/install/macos | bash",
+        actionLabel: "", canUpdate: false,
+        releaseUrl: "https://github.com/gelzinn/ai-status/releases/latest",
+        guideUrl: "https://ai-status.gelzin.com/macos")
+}
+
 struct Snapshot: Decodable {
     let schemaVersion: Int
     let text: String
@@ -175,10 +198,11 @@ struct Snapshot: Decodable {
     let settings: Settings
     let about: ProjectInfo
     let version: VersionInfo
+    let update: UpdateGuide?
 }
 
 enum Page: Equatable {
-    case usage, settings, about, credits(String)
+    case usage, settings, about, update, credits(String)
 }
 
 struct Choice: Identifiable {
@@ -231,12 +255,15 @@ final class Model: ObservableObject {
     @Published var error = ""
     @Published var settingsError = ""
     @Published var settingsSaving = false
+    @Published var updateStarting = false
+    @Published var updateError = ""
+    @Published var updateMessage = ""
     @Published var isPresented = false
     var changed: (() -> Void)?
     private let runtime: RuntimeConfig?
     private var backend: Process?
     private var actionProcess: Process?
-    private var actions: [([String], (String?) -> Void)] = []
+    private var actions: [([String], ((String) -> Void)?, (String?) -> Void)] = []
     private var reconnect: DispatchWorkItem?
     private var retryDelay = 1.0
     private var stopping = false
@@ -276,10 +303,12 @@ final class Model: ObservableObject {
         guard case .credits(let id) = page else { return nil }
         return snapshot?.providers.first { $0.id == id }
     }
+    var updateGuide: UpdateGuide { snapshot?.update ?? .manualMacOS }
     var panelHeight: CGFloat {
         switch page {
         case .settings: return 680
         case .about: return 640
+        case .update: return 600
         case .credits: return min(680, CGFloat(310 + (creditProvider?.resetCredits?.rows.count ?? 0) * 82))
         case .usage:
             guard let providers = snapshot?.providers, !providers.isEmpty else { return 210 }
@@ -408,24 +437,46 @@ final class Model: ObservableObject {
         changed?()
     }
     func showAbout() { page = .about; changed?() }
+    func showUpdate() {
+        updateError = ""
+        updateMessage = ""
+        page = .update
+        changed?()
+    }
+    func startUpdate() {
+        guard updateGuide.canUpdate, !updateStarting else { return }
+        updateStarting = true
+        updateError = ""
+        updateMessage = ""
+        enqueue(["update"], output: { [weak self] message in
+            self?.updateMessage = message
+        }) { [weak self] error in
+            guard let self = self else { return }
+            self.updateStarting = false
+            self.updateError = error ?? ""
+        }
+    }
     func back() {
         guard !settingsSaving else { return }
         page = page == .about ? .settings : .usage
         changed?()
     }
 
-    private func enqueue(_ arguments: [String], completion: @escaping (String?) -> Void) {
+    private func enqueue(_ arguments: [String], output: ((String) -> Void)? = nil,
+                         completion: @escaping (String?) -> Void) {
         guard !stopping, runtime != nil else { completion("The AI Status runtime is unavailable."); return }
-        actions.append((arguments, completion))
+        actions.append((arguments, output, completion))
         drain()
     }
     private func drain() {
         guard !stopping, actionProcess == nil, !actions.isEmpty, let runtime = runtime else { return }
-        let (arguments, completion) = actions.removeFirst()
+        let (arguments, output, completion) = actions.removeFirst()
         let process = runtime.process(arguments)
         let errors = Pipe()
         process.standardError = errors
-        process.standardOutput = FileHandle.nullDevice
+        // Share one pipe for captured results so neither stream blocks the other.
+        if output != nil { process.standardOutput = errors }
+        else { process.standardOutput = FileHandle.nullDevice }
         do {
             actionProcess = process
             try process.run()
@@ -437,6 +488,7 @@ final class Model: ObservableObject {
                 DispatchQueue.main.async {
                     guard let self = self, self.actionProcess === process, !self.stopping else { return }
                     self.actionProcess = nil
+                    if process.terminationStatus == 0 { output?(message ?? "") }
                     completion(process.terminationStatus == 0 ? nil : (message?.isEmpty == false ? message : "Could not apply this change. Try again."))
                     self.drain()
                 }
@@ -480,6 +532,7 @@ private enum Palette {
     static let border = Color.white.opacity(0.10)
     static let bright = Color(red: 238 / 255, green: 238 / 255, blue: 238 / 255)
     static let dim = Color(red: 136 / 255, green: 136 / 255, blue: 136 / 255)
+    static let update = Color(red: 137 / 255, green: 180 / 255, blue: 250 / 255)
 }
 
 struct ProviderLogo: View {
@@ -497,6 +550,7 @@ struct ProviderLogo: View {
 struct HoverButton<Label: View>: View {
     var bordered = false
     var padding: CGFloat = 6
+    var hoverColor = Color.white.opacity(0.045)
     let action: () -> Void
     @ViewBuilder let label: () -> Label
     @State private var hovering = false
@@ -506,7 +560,7 @@ struct HoverButton<Label: View>: View {
             label().frame(maxWidth: .infinity, alignment: .leading).padding(padding).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(RoundedRectangle(cornerRadius: 6).fill(hovering && enabled ? Color.white.opacity(0.045) : .clear))
+        .background(RoundedRectangle(cornerRadius: 6).fill(hovering && enabled ? hoverColor : .clear))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(bordered ? Palette.border : .clear))
         .opacity(enabled ? 1 : 0.4)
         .onHover { hovering = $0 }
@@ -729,6 +783,78 @@ struct ResetCreditsPage: View {
     }
 }
 
+struct UpdatePage: View {
+    @ObservedObject var model: Model
+    @State private var copiedCommand = false
+
+    private func open(_ value: String) {
+        if let url = URL(string: value), url.scheme == "https" { NSWorkspace.shared.open(url) }
+    }
+
+    var body: some View {
+        let guide = model.updateGuide
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(guide.title).foregroundColor(Palette.bright)
+                if let version = model.snapshot?.version {
+                    Text("Installed: v\(version.current)" + (version.latest.map { "\nAvailable: v" + $0 } ?? ""))
+                        .font(.custom("GeistMono-Regular", size: 11))
+                }
+                Text(guide.description).fixedSize(horizontal: false, vertical: true)
+            }
+            if guide.canUpdate {
+                HoverButton(bordered: true, hoverColor: Palette.update.opacity(0.10), action: model.startUpdate) {
+                    HStack {
+                        Text(model.updateStarting ? "Opening updater…" : guide.actionLabel)
+                        Spacer()
+                        Image(systemName: "arrow.right")
+                    }.foregroundColor(Palette.update)
+                }.disabled(model.updateStarting)
+            }
+            if !model.updateError.isEmpty {
+                Text(model.updateError + "\nUse the command below or open the installation guide to retry.")
+                    .foregroundColor(.orange).fixedSize(horizontal: false, vertical: true)
+            }
+            if !model.updateMessage.isEmpty {
+                Text(model.updateMessage).foregroundColor(Palette.bright).fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(guide.steps.enumerated()), id: \.offset) { index, step in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("\(index + 1).").foregroundColor(Palette.bright)
+                        Text(step).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            if !guide.command.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Terminal command").foregroundColor(Palette.bright)
+                    Text(guide.command).font(.custom("GeistMono-Regular", size: 11))
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.border))
+                    HoverButton(bordered: true, action: {
+                        NSPasteboard.general.clearContents()
+                        copiedCommand = NSPasteboard.general.setString(guide.command, forType: .string)
+                    }) {
+                        HStack { Text(copiedCommand ? "Copied" : "Copy command"); Spacer(); Image(systemName: "doc.on.doc") }
+                    }
+                }
+            }
+            VStack(spacing: 6) {
+                HoverButton(action: { open(guide.releaseUrl) }) {
+                    HStack { Text("Release notes"); Spacer(); Image(systemName: "arrow.right") }
+                }
+                HoverButton(action: { open(guide.guideUrl) }) {
+                    HStack { Text("Installation guide"); Spacer(); Image(systemName: "arrow.right") }
+                }
+            }
+            Text("Updating is optional. You can return to usage and update later.")
+                .font(.custom("GeistMono-Regular", size: 11))
+        }
+    }
+}
+
 struct AboutPage: View {
     let info: ProjectInfo
     var body: some View {
@@ -749,7 +875,7 @@ struct AboutPage: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Quick guide").foregroundColor(Palette.bright)
                 Text("Menu bar: click to show usage; right-click for settings and other actions.")
-                Text("Usage: click a limit to show it in the bar. Refresh checks now; Reset credits shows the available resets.")
+                Text("Usage: click a limit to show it in the bar. Refresh checks now; Reset credits shows the available resets. Update available opens the update guide.")
                 Text("Settings: pick a limit, text and icon. Enable providers and reorder them with the arrows. Save applies changes and keeps settings open.")
                 Text("Keyboard: R refreshes, C opens settings, Esc goes back. Tab moves between controls.")
             }.font(.custom("GeistMono-Regular", size: 11))
@@ -765,11 +891,12 @@ struct PanelView: View {
                 if model.page != .usage {
                     ControlButton(symbol: "arrow.left", help: model.page == .about ? "Back to settings (Esc)" : "Back to usage (Esc)", action: model.back)
                         .disabled(model.settingsSaving)
+                        .padding(.trailing, 4)
                 }
-                Text(model.page == .about ? "About" : model.page == .settings ? "Settings" : "AI Status").foregroundColor(Palette.bright)
+                Text(model.page == .about ? "About" : model.page == .settings ? "Settings" : model.page == .update ? "Update AI Status" : "AI Status").foregroundColor(Palette.bright)
                 Spacer(minLength: 0)
                 Text(model.snapshot.map { "v" + $0.version.current } ?? "").font(.custom("GeistMono-Regular", size: 11))
-                if model.page != .settings && model.page != .about {
+                if model.page != .settings && model.page != .about && model.page != .update {
                     ControlButton(symbol: "arrow.clockwise", help: "Refresh usage (R)",
                                   spinning: model.snapshot?.loading == true && model.isPresented, action: model.refresh)
                         .disabled(model.snapshot?.loading == true)
@@ -777,21 +904,31 @@ struct PanelView: View {
                 }
             }.padding(.horizontal, 16).frame(height: 49)
             Divider().overlay(Palette.border)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    if !model.error.isEmpty { Text(model.error).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(.orange) }
-                    if model.snapshot?.version.hasUpdate == true {
-                        Button("Update available: v" + (model.snapshot?.version.latest ?? "")) {
-                            NSWorkspace.shared.open(URL(string: "https://github.com/gelzinn/ai-status/releases/latest")!)
-                        }.buttonStyle(.plain).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(Palette.bright)
-                    }
-                    switch model.page {
-                    case .usage: UsagePage(model: model)
-                    case .settings: SettingsPage(model: model)
-                    case .about: if let info = model.snapshot?.about { AboutPage(info: info) }
-                    case .credits: if let provider = model.creditProvider { ResetCreditsPage(provider: provider) }
-                    }
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 18)
+            ScrollViewReader { scroll in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        if !model.error.isEmpty { Text(model.error).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(.orange) }
+                        if model.page == .usage && model.snapshot?.version.hasUpdate == true {
+                            HoverButton(hoverColor: Palette.update.opacity(0.10), action: model.showUpdate) {
+                                HStack {
+                                    Text("Update available: v" + (model.snapshot?.version.latest ?? ""))
+                                    Spacer()
+                                    Image(systemName: "arrow.right")
+                                }.foregroundColor(Palette.update)
+                            }.help("Show update instructions")
+                        }
+                        switch model.page {
+                        case .usage: UsagePage(model: model)
+                        case .settings: SettingsPage(model: model)
+                        case .about: if let info = model.snapshot?.about { AboutPage(info: info) }
+                        case .update: UpdatePage(model: model)
+                        case .credits: if let provider = model.creditProvider { ResetCreditsPage(provider: provider) }
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 18)
+                        .id("page-top")
+                }.onChange(of: model.page) { page in
+                    if page == .update { scroll.scrollTo("page-top", anchor: .top) }
+                }
             }
             if model.page == .settings {
                 HStack(spacing: 8) {
@@ -942,7 +1079,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return nil
         }
         guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return event }
-        if model.page != .settings && model.page != .about {
+        if model.page != .settings && model.page != .about && model.page != .update {
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "r": model.refresh(); return nil
             case "c": configure(nil); return nil
@@ -1044,6 +1181,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         model.accept(Data(sample.utf8))
         guard let snapshot = model.snapshot, snapshot.providers.count == 2,
               model.selectedProvider?.providerID == "codex" else { throw AppError.message("Legacy snapshot decoding failed.") }
+        guard !model.updateGuide.canUpdate, !model.updateGuide.command.isEmpty else {
+            throw AppError.message("Legacy update guide fallback failed.")
+        }
         model.showSettings()
         guard model.settingsValid, model.choices.count == 4 else { throw AppError.message("Settings model failed.") }
         model.draft.display["show_provider"] = false
@@ -1053,6 +1193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         model.accept(malformed)
         guard model.snapshot?.schemaVersion == 1 else { throw AppError.message("Invalid snapshot replaced usable data.") }
         try smokeAccounts(sample: sample, directory: previewDirectory)
+        try smokeUpdate(sample: sample, directory: previewDirectory)
         model.isPresented = true
         let pages: [(String, Page)] = [("usage", .usage), ("settings", .settings),
                                       ("reset-credits", .credits(snapshot.providers[0].id)), ("about", .about)]
@@ -1060,7 +1201,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             model.page = page
             try renderSmokePage(model, name: name, directory: previewDirectory)
         }
-        print("AI Status macOS smoke OK: usage, settings, reset credits, about, accounts, metered values, resources, snapshot validation")
+        print("AI Status macOS smoke OK: usage, settings, reset credits, update guide, about, accounts, metered values, resources, snapshot validation")
+    }
+
+    private static func smokeUpdate(sample: String, directory: URL?) throws {
+        guard var document = try JSONSerialization.jsonObject(with: Data(sample.utf8)) as? [String: Any] else {
+            throw AppError.message("Update sample setup failed.")
+        }
+        document["version"] = ["current": "0.10.0", "latest": "0.12.1", "has_update": true] as [String: Any]
+        document["update"] = [
+            "method": "macos-installer", "title": "Update AI Status on macOS",
+            "description": "Install the latest stable version. Your settings and provider connections are preserved.",
+            "steps": ["Open the updater in Terminal.", "Follow its progress. AI Status restarts after installation."],
+            "command": "curl -fsSL https://ai-status.gelzin.com/install/macos | bash",
+            "actionLabel": "Open updater in Terminal", "canUpdate": true,
+            "releaseUrl": "https://github.com/gelzinn/ai-status/releases/latest",
+            "guideUrl": "https://ai-status.gelzin.com/macos",
+        ] as [String: Any]
+        // No runtime is provided: smoke tests never execute the installer.
+        let model = Model()
+        model.accept(try JSONSerialization.data(withJSONObject: document))
+        guard let selection = model.snapshot?.selected, model.updateGuide.canUpdate,
+              model.updateGuide.steps.count == 2, model.snapshot?.version.latest == "0.12.1" else {
+            throw AppError.message("Update guide decoding failed.")
+        }
+        model.isPresented = true
+        try renderSmokePage(model, name: "update-available", directory: directory)
+        model.showUpdate()
+        guard model.page == .update else { throw AppError.message("Update guide navigation failed.") }
+        try renderSmokePage(model, name: "update-guide", directory: directory)
+        model.startUpdate()
+        guard !model.updateStarting, !model.updateError.isEmpty, model.updateMessage.isEmpty else {
+            throw AppError.message("Unavailable update runtime did not expose a retry guide.")
+        }
+        try renderSmokePage(model, name: "update-error", directory: directory)
+        try smokeUpdateResult(document: document, directory: directory)
+        model.back()
+        guard model.page == .usage, model.snapshot?.selected == selection else {
+            throw AppError.message("Returning from the update guide changed the selected metric.")
+        }
+        document.removeValue(forKey: "update")
+        model.accept(try JSONSerialization.data(withJSONObject: document))
+        model.showUpdate()
+        model.startUpdate()
+        guard !model.updateGuide.canUpdate, model.updateError.isEmpty, !model.updateStarting else {
+            throw AppError.message("Manual update fallback attempted to run an updater.")
+        }
+        try renderSmokePage(model, name: "update-manual", directory: directory)
+    }
+
+    private static func smokeUpdateResult(document: [String: Any], directory: URL?) throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("ai-status-update-smoke-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let script = temporary.appendingPathComponent("fixture.sh")
+        let model = Model(runtime: RuntimeConfig(python: "/bin/sh", cli: script.path))
+        defer { model.shutdown() }
+        model.accept(try JSONSerialization.data(withJSONObject: document))
+        model.showUpdate()
+        // Only fixture output is executed; no installer or network request runs.
+        try "printf '%s\\n' 'AI Status is already up to date.'\n".write(to: script, atomically: true, encoding: .utf8)
+        model.startUpdate()
+        try awaitSmokeUpdateResult(model)
+        guard model.updateError.isEmpty, model.updateMessage == "AI Status is already up to date." else {
+            throw AppError.message("Update result did not preserve the CLI status.")
+        }
+        model.isPresented = true
+        try renderSmokePage(model, name: "update-up-to-date", directory: directory)
+        try "printf '%s\\n' 'Could not open Terminal.' >&2\nexit 1\n".write(to: script, atomically: true, encoding: .utf8)
+        model.startUpdate()
+        try awaitSmokeUpdateResult(model)
+        guard model.updateError == "Could not open Terminal.", model.updateMessage.isEmpty else {
+            throw AppError.message("A failed update command reported a successful handoff.")
+        }
+    }
+
+    private static func awaitSmokeUpdateResult(_ model: Model) throws {
+        let deadline = Date().addingTimeInterval(3)
+        while model.updateStarting && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        guard !model.updateStarting else { throw AppError.message("Update result fixture timed out.") }
     }
 
     private static func smokeAccounts(sample: String, directory: URL?) throws {
