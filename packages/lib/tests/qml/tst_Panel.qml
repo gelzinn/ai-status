@@ -499,6 +499,89 @@ Item {
             mouseClick(findChild(panel, "panel-back"))
             verify(!panel.configurationPage)
         }
+        function test_settings_footer_aligns_status_actions_and_separator() {
+            panel.configure()
+            wait(20)
+            const footer = findChild(panel, "settings-footer")
+            const separator = findChild(panel, "settings-footer-divider")
+            const headerSeparator = findChild(panel, "panel-divider")
+            const surface = findChild(panel, "panel-surface")
+            const status = findChild(panel, "settings-status")
+            const cancel = findChild(panel, "settings-cancel")
+            const save = findChild(panel, "settings-save")
+            const scroller = findChild(panel, "panel-scroller")
+            verify(footer.visible)
+            compare(separator.width, headerSeparator.width)
+            compare(separator.height, headerSeparator.height)
+            compare(separator.color, headerSeparator.color)
+            compare(separator.mapToItem(surface, 0, 0).x, headerSeparator.mapToItem(surface, 0, 0).x)
+            compare(separator.width, surface.width)
+            verify(scroller.mapToItem(surface, 0, scroller.height).y < separator.mapToItem(surface, 0, 0).y)
+            verify(separator.mapToItem(footer, 0, separator.height).y < cancel.mapToItem(footer, 0, 0).y)
+            compare(cancel.outlined, true)
+            compare(save.primary, true)
+            compare(save.text, "Save")
+            Plugin.Model.settingsSaved()
+            wait(20)
+            compare(status.x, 0)
+            verify(status.mapToItem(footer, status.width, 0).x < cancel.mapToItem(footer, 0, 0).x)
+            compare(save.mapToItem(footer, save.width, 0).x, footer.width)
+            const cancelPosition = cancel.mapToItem(footer, 0, 0).x
+            Plugin.Model.settingsSaving = true
+            compare(cancel.mapToItem(footer, 0, 0).x, cancelPosition)
+            compare(save.mapToItem(footer, save.width, 0).x, footer.width)
+        }
+        function test_settings_footer_tracks_saving_error_retry_and_edits() {
+            panel.configure()
+            wait(20)
+            const settings = findChild(panel, "panel-settings-page")
+            const label = findChild(panel, "settings-status-label")
+            const icon = findChild(panel, "settings-status-icon")
+            const cancel = findChild(panel, "settings-cancel")
+            const save = findChild(panel, "settings-save")
+            compare(label.text, "")
+            compare(Plugin.Model.snapshot.loading, false)
+            mouseClick(save)
+            verify(Plugin.Model.saved !== null)
+            // Simulate the asynchronous writer while provider refresh is idle.
+            Plugin.Model.settingsSaving = true
+            Plugin.Model.settingsError = "A previous write failed."
+            compare(label.text, "Saving…")
+            compare(save.text, "Save")
+            verify(!cancel.enabled)
+            verify(!save.enabled)
+            verify(!settings.enabled)
+            compare(icon.name, "loader-circle")
+            tryVerify(() => icon.rotation > 0)
+            const rotation = icon.rotation
+            tryVerify(() => icon.rotation !== rotation)
+            panel.aboutPage = true
+            tryCompare(icon, "rotation", 0)
+            panel.aboutPage = false
+            tryVerify(() => icon.rotation > 0)
+            Plugin.Model.settingsSaving = false
+            compare(label.text, "Error")
+            tryCompare(icon, "rotation", 0)
+            verify(cancel.enabled)
+            verify(save.enabled)
+            verify(settings.enabled)
+            Plugin.Model.saved = null
+            mouseClick(save)
+            verify(Plugin.Model.saved !== null)
+            // The fake Model records payloads; model the retry's writer states.
+            Plugin.Model.settingsError = ""
+            Plugin.Model.settingsSaving = true
+            compare(label.text, "Saving…")
+            Plugin.Model.settingsSaving = false
+            Plugin.Model.settingsSaved()
+            compare(label.text, "Saved")
+            compare(icon.name, "check")
+            tryCompare(icon, "rotation", 0)
+            verify(panel.configurationPage)
+            verify(panel.opened)
+            settings.toggleProvider("kiro")
+            compare(label.text, "")
+        }
         function test_about_back_preserves_settings_draft_and_scroll() {
             panel.configure()
             wait(20)
