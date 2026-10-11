@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.13.1](https://github.com/gelzinn/ai-status/compare/v0.13.0...v0.13.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **quickshell:** restore panel opening after an Omarchy shell restart while preserving keyboard focus and scrolling ([d0c8a85](https://github.com/gelzinn/ai-status/commit/d0c8a8566fcd7616b5fd768f5f59a263db3a8f64))
+* **quickshell:** show settings save progress and results beside clearly styled footer actions ([b0900b6](https://github.com/gelzinn/ai-status/commit/b0900b63e7ef239030cd8d8b18670bb56a98c795))
+* **ui:** make the header back arrow consistent with the other panel icons ([c809aaf](https://github.com/gelzinn/ai-status/commit/c809aaf4adbec99fa818e6e82ea369f5626b3481))
+
 ## [0.13.0](https://github.com/gelzinn/ai-status/compare/v0.12.1...v0.13.0) (2026-10-11)
 
 
