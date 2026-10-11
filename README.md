@@ -330,7 +330,7 @@ Available metrics depend on the account, plan and upstream API. Providers withou
 | [Guide for LLMs](https://ai-status.gelzin.com/llms.txt) | Select the Linux, Windows or macOS instructions for your system |
 | [Providers and authentication](packages/lib/PROVIDERS.md) | Credential sources, account setup and troubleshooting |
 | [Updates and rollback](packages/lib/UPDATES.md) | Stable releases, version selection, checksums and recovery |
-| [Changelog](packages/lib/CHANGELOG.md) | Changes in each published release |
+| [Changelog](https://ai-status.gelzin.com/changelog) | Changes in each published release |
 | [Releases](https://github.com/gelzinn/ai-status/releases) | Linux packages, Windows downloads and release notes |
 
 ## How it works

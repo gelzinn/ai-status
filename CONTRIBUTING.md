@@ -53,7 +53,8 @@ reach users who install or update through the public command.
 
 After CI succeeds on `main`, Release Please opens or updates a single release
 PR with the next version, `packages/lib/VERSION`,
-`.release-please-manifest.json`, `manifest.json`, and `packages/lib/CHANGELOG.md`. Several PRs
+`.release-please-manifest.json`, and `manifest.json`. Release notes are generated
+in the PR body without creating a changelog file. Several PRs
 can accumulate before a release. Merging a normal feature or fix PR does not
 publish a version. Merging the generated release PR creates its version tag
 and a draft GitHub Release after the same CI checks succeed. The workflow
@@ -99,9 +100,10 @@ text. For routine maintenance, remove the block and write `None`. Generated
 release PRs do not require this section. The default squash title uses the
 validated PR title.
 
-Before merging the release PR, review both its release notes and the generated
-changelog, and add any migration instructions users need. GitHub Release
-notes are taken from the release PR body; keep it consistent with the changelog.
+Before merging the release PR, review its release notes and add any migration
+instructions users need. GitHub Release notes are taken from the release PR body.
+Published stable notes appear on the [web changelog](https://ai-status.gelzin.com/changelog)
+and [GitHub Releases](https://github.com/gelzinn/ai-status/releases).
 Custom wording belongs in the original feature/fix PR description so it
 survives updates to the generated release PR; see
 [Release Please's documentation](https://github.com/googleapis/release-please#how-can-i-fix-release-notes).

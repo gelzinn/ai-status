@@ -5,7 +5,7 @@
     ".": {
       "release-type": "simple",
       "version-file": "packages/lib/VERSION",
-      "changelog-path": "packages/lib/CHANGELOG.md",
+      "skip-changelog": true,
       "include-component-in-tag": false,
       "include-v-in-tag": true,
       "draft": true,

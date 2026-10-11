@@ -46,24 +46,27 @@ export async function Header() {
 				<Logo className="size-5" />
 				{site.name}
 			</Link>
-			<a
-				href={repo.url}
-				target="_blank"
-				rel="noreferrer"
-				className={cn(
-					"flex items-center gap-2 rounded-full bg-white pl-4 py-1.5 text-sm font-medium text-black transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background hover:bg-white/90",
-					stars !== null ? "pr-1.5" : "pr-4",
-				)}
-			>
-				<GithubIcon className="-ml-1 size-4" />
-				<span className="hidden sm:inline">Star on GitHub</span>
-				<span className="sm:hidden">Star</span>
-				{stars !== null && (
-					<div className="flex items-center justify-center rounded-full bg-black/10 px-2.5 py-1 text-xs font-semibold">
-						<span>{stars.toLocaleString()}</span>
-					</div>
-				)}
-			</a>
+			<div className="flex items-center gap-4 sm:gap-6">
+				<Link href="/changelog" className="text-sm text-muted-foreground transition-colors hover:text-foreground">Changelog</Link>
+				<a
+					href={repo.url}
+					target="_blank"
+					rel="noreferrer"
+					className={cn(
+						"flex items-center gap-2 rounded-full bg-white pl-4 py-1.5 text-sm font-medium text-black transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background hover:bg-white/90",
+						stars !== null ? "pr-1.5" : "pr-4",
+					)}
+				>
+					<GithubIcon className="-ml-1 size-4" />
+					<span className="hidden sm:inline">Star on GitHub</span>
+					<span className="sm:hidden">Star</span>
+					{stars !== null && (
+						<div className="flex items-center justify-center rounded-full bg-black/10 px-2.5 py-1 text-xs font-semibold">
+							<span>{stars.toLocaleString()}</span>
+						</div>
+					)}
+				</a>
+			</div>
 		</header>
 	);
 }
