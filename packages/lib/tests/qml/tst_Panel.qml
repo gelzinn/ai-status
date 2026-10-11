@@ -301,7 +301,7 @@ Item {
             compare(refresh.pathData, Plugin.PanelIcons.data.paths["refresh-cw"].map(command => command.join(" ")).join(" "))
             verify(refresh.pathData.indexOf("C ") !== -1)
             verify(Plugin.PanelIcons.path("settings").indexOf("C ") !== -1)
-            compare(Plugin.PanelIcons.path("arrow-left"), "M 12 21 L 3 12 L 12 3 M 21 12 L 3 12")
+            compare(Plugin.PanelIcons.path("arrow-left"), "M 12 19 L 5 12 L 12 5 M 19 12 L 5 12")
             compare(Plugin.PanelIcons.path("missing"), "")
         }
         function configureManyProviders() {
