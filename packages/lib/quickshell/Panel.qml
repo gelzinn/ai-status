@@ -18,37 +18,9 @@ Ui.Panel {
     readonly property var resetEntry: resetProvider ? Plugin.Model.snapshot.providers.find(entry => entry.id === resetProvider.id && entry.idx === resetProvider.idx) || null : null
     readonly property string panelFont: bar ? bar.fontFamily : Style.font.family
 
-    component IconButton: Ui.WidgetButton {
-        id: iconButton
-        property string iconName: ""
-        property bool spinning: false
+    component IconButton: Plugin.PanelIconButton {
         bar: root.bar
-        fixedWidth: Style.space(28)
-        fixedHeight: Style.space(28)
-        labelVisible: false
-        hasVisualContent: true
-        opacity: enabled ? 1 : 0.35
-        Accessible.role: Accessible.Button
-        Accessible.name: tooltipText
-        Accessible.onPressAction: if (enabled) triggerPress(Qt.LeftButton)
-        Plugin.PanelIcon {
-            id: controlIcon
-            objectName: iconButton.objectName + "-icon"
-            anchors.centerIn: parent
-            width: Style.space(16)
-            height: Style.space(16)
-            name: iconButton.iconName
-            foreground: iconButton.foreground
-            NumberAnimation on rotation {
-                id: spin
-                from: 0
-                to: 360
-                duration: 1000
-                loops: Animation.Infinite
-                running: iconButton.spinning && iconButton.visible
-                onRunningChanged: if (!running) controlIcon.rotation = 0
-            }
-        }
+        foreground: root.barForeground
     }
 
     function configure() {

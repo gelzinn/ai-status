@@ -201,6 +201,10 @@ struct SettingsDraft {
 enum Assets {
     static let font = Font.custom("GeistMono-Regular", size: 13)
     static let cache = NSCache<NSString, NSImage>()
+    static let panelIcons: PanelIcons = {
+        do { return try PanelIcons.load() }
+        catch { preconditionFailure("Bundled panel icons are unavailable: \(error)") }
+    }()
     static func url(_ path: String) -> URL? {
         Bundle.main.resourceURL?.appendingPathComponent("assets").appendingPathComponent(path)
     }
@@ -221,6 +225,61 @@ enum Assets {
             }
         }
         return nil
+    }
+}
+
+struct PanelIcons: Decodable {
+    struct Controls: Decodable {
+        let size: CGFloat
+        let radius: CGFloat
+        let hoverOpacity: Double
+        let focusOpacity: Double
+    }
+
+    enum Command: Decodable {
+        case move(CGPoint), line(CGPoint), curve(CGPoint, CGPoint, CGPoint), close
+
+        init(from decoder: Decoder) throws {
+            var values = try decoder.unkeyedContainer()
+            let operation = try values.decode(String.self)
+            func point() throws -> CGPoint {
+                let x = try values.decode(CGFloat.self)
+                let y = try values.decode(CGFloat.self)
+                guard x.isFinite, y.isFinite else { throw AppError.message("Panel icon coordinates must be finite.") }
+                return CGPoint(x: x, y: y)
+            }
+            switch operation {
+            case "M": self = .move(try point())
+            case "L": self = .line(try point())
+            case "C":
+                let first = try point(), second = try point(), end = try point()
+                self = .curve(first, second, end)
+            case "Z": self = .close
+            default: throw AppError.message("Unsupported panel icon command: \(operation)")
+            }
+            guard values.isAtEnd else { throw AppError.message("Unexpected panel icon command coordinates.") }
+        }
+    }
+
+    let viewBox: CGFloat
+    let size: CGFloat
+    let strokeWidth: CGFloat
+    let controls: Controls
+    let paths: [String: [Command]]
+
+    static func load() throws -> PanelIcons {
+        guard let url = Assets.url("panel-icons.json") else { throw AppError.message("Bundled panel icons are missing.") }
+        let icons = try JSONDecoder().decode(PanelIcons.self, from: Data(contentsOf: url))
+        guard icons.viewBox.isFinite, icons.viewBox > 0, icons.size.isFinite, icons.size > 0,
+              icons.strokeWidth.isFinite, icons.strokeWidth > 0,
+              icons.controls.size.isFinite, icons.controls.size >= icons.size,
+              icons.controls.radius.isFinite, icons.controls.radius >= 0,
+              (0...1).contains(icons.controls.hoverOpacity), (0...1).contains(icons.controls.focusOpacity),
+              ["refresh-cw", "settings", "arrow-left", "arrow-right", "arrow-up", "arrow-down", "chevron-down"]
+                .allSatisfy({ icons.paths[$0]?.isEmpty == false }) else {
+            throw AppError.message("Bundled panel icon geometry or controls are invalid.")
+        }
+        return icons
     }
 }
 
@@ -480,6 +539,7 @@ private enum Palette {
     static let border = Color.white.opacity(0.10)
     static let bright = Color(red: 238 / 255, green: 238 / 255, blue: 238 / 255)
     static let dim = Color(red: 136 / 255, green: 136 / 255, blue: 136 / 255)
+    static let control = Color(red: 170 / 255, green: 170 / 255, blue: 170 / 255)
 }
 
 struct ProviderLogo: View {
@@ -513,18 +573,67 @@ struct HoverButton<Label: View>: View {
     }
 }
 
+struct PanelIconShape: Shape {
+    let commands: [PanelIcons.Command]
+    let viewBox: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        func scaled(_ point: CGPoint) -> CGPoint {
+            CGPoint(x: rect.minX + point.x * rect.width / viewBox,
+                    y: rect.minY + point.y * rect.height / viewBox)
+        }
+        var path = Path()
+        for command in commands {
+            switch command {
+            case .move(let point): path.move(to: scaled(point))
+            case .line(let point): path.addLine(to: scaled(point))
+            case .curve(let first, let second, let end):
+                path.addCurve(to: scaled(end), control1: scaled(first), control2: scaled(second))
+            case .close: path.closeSubpath()
+            }
+        }
+        return path
+    }
+}
+
+struct PanelIcon: View {
+    let name: String
+    private let icons = Assets.panelIcons
+    var body: some View {
+        PanelIconShape(commands: icons.paths[name] ?? [], viewBox: icons.viewBox)
+            .stroke(style: StrokeStyle(lineWidth: icons.strokeWidth * icons.size / icons.viewBox,
+                                       lineCap: .round, lineJoin: .round))
+            .frame(width: icons.size, height: icons.size)
+            .accessibilityHidden(true)
+    }
+}
+
 struct ControlButton: View {
-    let symbol: String
+    let icon: String
     let help: String
     var spinning = false
     let action: () -> Void
+    @State private var hovering = false
+    @FocusState private var focused: Bool
+    @Environment(\.isEnabled) private var enabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let controls = Assets.panelIcons.controls
     var body: some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 14)).rotationEffect(.degrees(spinning && !reduceMotion ? 360 : 0))
+            PanelIcon(name: icon).rotationEffect(.degrees(spinning && !reduceMotion ? 360 : 0))
                 .animation(spinning && !reduceMotion ? .linear(duration: 1).repeatForever(autoreverses: false) : nil, value: spinning)
-                .frame(width: 28, height: 28).contentShape(Rectangle())
-        }.buttonStyle(.plain).help(help).accessibilityLabel(help)
+                .frame(width: controls.size, height: controls.size).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focused($focused)
+        .foregroundColor(Palette.control)
+        .background(RoundedRectangle(cornerRadius: controls.radius)
+            .fill(hovering && enabled ? Color.white.opacity(controls.hoverOpacity) : .clear))
+        .overlay(RoundedRectangle(cornerRadius: controls.radius)
+            .stroke(focused && enabled ? Color.white.opacity(controls.focusOpacity) : .clear, lineWidth: 1))
+        .opacity(enabled ? 1 : 0.4)
+        .onHover { hovering = $0 }
+        .help(help).accessibilityLabel(help)
     }
 }
 
@@ -616,7 +725,7 @@ struct UsagePage: View {
                             HStack {
                                 Text("Reset credits: \(credits.available) available")
                                 Spacer()
-                                Image(systemName: "arrow.right")
+                                PanelIcon(name: "arrow-right")
                             }
                         }.padding(.leading, 18)
                     }
@@ -671,9 +780,9 @@ struct SettingsPage: View {
                             }
                         }.toggleStyle(.checkbox)
                         Spacer(minLength: 0)
-                        ControlButton(symbol: "arrow.up", help: "Move \(model.providerName(provider)) up",
+                        ControlButton(icon: "arrow-up", help: "Move \(model.providerName(provider)) up",
                                       action: { model.moveProvider(provider, -1) }).disabled(model.draft.order.first == provider)
-                        ControlButton(symbol: "arrow.down", help: "Move \(model.providerName(provider)) down",
+                        ControlButton(icon: "arrow-down", help: "Move \(model.providerName(provider)) down",
                                       action: { model.moveProvider(provider, 1) }).disabled(model.draft.order.last == provider)
                     }.padding(.vertical, 3)
                 }
@@ -683,7 +792,7 @@ struct SettingsPage: View {
                     .font(.custom("GeistMono-Regular", size: 11)).foregroundColor(.orange)
             }
             HoverButton(bordered: true, action: model.showAbout) {
-                HStack { Text("About AI Status"); Spacer(); Image(systemName: "arrow.right") }
+                HStack { Text("About AI Status"); Spacer(); PanelIcon(name: "arrow-right") }
             }
         }.disabled(model.settingsSaving)
     }
@@ -742,7 +851,7 @@ struct AboutPage: View {
                 ForEach([(name: "GitHub", url: info.github), (name: "Documentation", url: info.documentation),
                          (name: "Report a bug", url: info.issues)], id: \.name) { link in
                     HoverButton(bordered: true, action: { if let url = URL(string: link.url), url.scheme == "https" { NSWorkspace.shared.open(url) } }) {
-                        HStack { Text(link.name); Spacer(); Image(systemName: "arrow.right") }
+                        HStack { Text(link.name); Spacer(); PanelIcon(name: "arrow-right") }
                     }
                 }
             }
@@ -763,17 +872,17 @@ struct PanelView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 if model.page != .usage {
-                    ControlButton(symbol: "arrow.left", help: model.page == .about ? "Back to settings (Esc)" : "Back to usage (Esc)", action: model.back)
+                    ControlButton(icon: "arrow-left", help: model.page == .about ? "Back to settings (Esc)" : "Back to usage (Esc)", action: model.back)
                         .disabled(model.settingsSaving)
                 }
                 Text(model.page == .about ? "About" : model.page == .settings ? "Settings" : "AI Status").foregroundColor(Palette.bright)
                 Spacer(minLength: 0)
                 Text(model.snapshot.map { "v" + $0.version.current } ?? "").font(.custom("GeistMono-Regular", size: 11))
                 if model.page != .settings && model.page != .about {
-                    ControlButton(symbol: "arrow.clockwise", help: "Refresh usage (R)",
+                    ControlButton(icon: "refresh-cw", help: "Refresh usage (R)",
                                   spinning: model.snapshot?.loading == true && model.isPresented, action: model.refresh)
                         .disabled(model.snapshot?.loading == true)
-                    if model.page == .usage { ControlButton(symbol: "gearshape", help: "Configure (C)", action: model.showSettings) }
+                    if model.page == .usage { ControlButton(icon: "settings", help: "Configure (C)", action: model.showSettings) }
                 }
             }.padding(.horizontal, 16).frame(height: 49)
             Divider().overlay(Palette.border)
@@ -1040,6 +1149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         guard Assets.image() != nil, Assets.url("fonts/GeistMono-Regular.ttf").map({ FileManager.default.isReadableFile(atPath: $0.path) }) == true else {
             throw AppError.message("Bundled app artwork or Geist Mono is missing.")
         }
+        _ = try PanelIcons.load()
         let model = Model()
         model.accept(Data(sample.utf8))
         guard let snapshot = model.snapshot, snapshot.providers.count == 2,
@@ -1060,7 +1170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             model.page = page
             try renderSmokePage(model, name: name, directory: previewDirectory)
         }
-        print("AI Status macOS smoke OK: usage, settings, reset credits, about, accounts, metered values, resources, snapshot validation")
+        print("AI Status macOS smoke OK: usage, settings, reset credits, about, accounts, metered values, resources, panel icons, snapshot validation")
     }
 
     private static func smokeAccounts(sample: String, directory: URL?) throws {

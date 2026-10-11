@@ -1,6 +1,5 @@
 """Desktop adapter. The Waybar daemon and CLI do not import Qt."""
 import logging
-import math
 from functools import lru_cache
 from pathlib import Path
 import subprocess
@@ -51,7 +50,9 @@ QScrollBar::handle:vertical { background: #303030; border-radius: 2px; min-heigh
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
 QPushButton { padding: 6px 8px; }
-QAbstractButton#control { padding: 0; border-radius: 6px; }
+QAbstractButton#control, QAbstractButton#control:hover, QAbstractButton#control:focus {
+    padding: 0; border: none; background: transparent; border-radius: 6px;
+}
 QMenu { background: #111111; border: 1px solid #262626; border-radius: 10px; padding: 6px; }
 QMenu::item { color: #888888; padding: 8px 12px; margin: 1px 0; border-radius: 6px; }
 QMenu::item:selected { background: #1c1c1c; color: #eeeeee; }
@@ -290,23 +291,13 @@ class ArrowIcon(QWidget):
     def __init__(self, back=False):
         super().__init__()
         self.back = back
-        self.setFixedSize(16, 16)
+        size = panel_icons()["size"]
+        self.setFixedSize(size, size)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor("#aaaaaa"), 1.5)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(pen)
-        path = QPainterPath(QPointF(3, 8))
-        path.lineTo(13, 8)
-        tip, tail = (3, 7) if self.back else (13, 9)
-        path.moveTo(tail, 4)
-        path.lineTo(tip, 8)
-        path.lineTo(tail, 12)
-        painter.drawPath(path)
+        draw_control_icon(painter, QRectF(self.rect()), "arrow-left" if self.back else "arrow-right")
 
 
 class ResetCreditsView(QWidget):
@@ -502,29 +493,24 @@ class ProviderList(QListWidget):
 
 
 @lru_cache(maxsize=1)
-def settings_icon_path():
-    """The shell's Lucide settings outline, with SVG circular arcs mapped to Qt."""
-    path = QPainterPath(QPointF(9.671, 4.136))
-    for dx, dy, sweep in ((4.659, 0, True), (3.319, 1.915, False),
-                          (2.33, 4.033, True), (0, 3.831, False),
-                          (-2.33, 4.033, True), (-3.319, 1.915, False),
-                          (-4.659, 0, True), (-3.32, -1.915, False),
-                          (-2.33, -4.033, True), (0, -3.831, False),
-                          (2.33, -4.033, True), (3.319, -1.915, False)):
-        start = path.currentPosition()
-        distance = math.hypot(dx, dy)
-        radius = max(2.34, distance / 2)
-        offset = math.sqrt(max(0, radius * radius - distance * distance / 4)) / distance
-        sign = 1 if sweep else -1
-        center = start + QPointF(dx / 2 - sign * dy * offset, dy / 2 + sign * dx * offset)
-        angle = math.degrees(math.atan2(center.y() - start.y(), start.x() - center.x()))
-        end_angle = math.degrees(math.atan2(center.y() - start.y() - dy, start.x() + dx - center.x()))
-        span = (end_angle - angle) % 360
-        if sweep:
-            span -= 360
-        path.arcTo(QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2), angle, span)
-    path.closeSubpath()
-    path.addEllipse(QRectF(9, 9, 6, 6))
+def panel_icons():
+    """Geometry shared by the Quickshell, Windows and macOS panels."""
+    return paths.read_json(ASSETS / "panel-icons.json")
+
+
+@lru_cache(maxsize=16)
+def control_icon_path(name):
+    """Render bundled Lucide paths without requiring QtSvg plugins."""
+    path = QPainterPath()
+    for command, *points in panel_icons()["paths"][name]:
+        if command == "M":
+            path.moveTo(*points)
+        elif command == "L":
+            path.lineTo(*points)
+        elif command == "C":
+            path.cubicTo(*points)
+        elif command == "Z":
+            path.closeSubpath()
     return path
 
 
@@ -532,41 +518,16 @@ def draw_control_icon(painter, rect, name, color="#aaaaaa"):
     """Monochrome Lucide vectors; see quickshell/LUCIDE-LICENSE."""
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.translate(rect.center().x() - 8, rect.center().y() - 8)
-    painter.scale(16 / 24, 16 / 24)
-    pen = QPen(QColor(color), 2)
+    icons = panel_icons()
+    size = icons["size"]
+    painter.translate(rect.center().x() - size / 2, rect.center().y() - size / 2)
+    painter.scale(size / icons["viewBox"], size / icons["viewBox"])
+    pen = QPen(QColor(color), icons["strokeWidth"])
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     painter.setPen(pen)
     painter.setBrush(Qt.BrushStyle.NoBrush)
-    path = QPainterPath()
-    if name == "refresh-cw":
-        path.moveTo(3, 12)
-        path.arcTo(QRectF(3, 3, 18, 18), 180, -135)
-        path.lineTo(21, 8)
-        path.moveTo(21, 3)
-        path.lineTo(21, 8)
-        path.lineTo(16, 8)
-        path.moveTo(21, 12)
-        path.arcTo(QRectF(3, 3, 18, 18), 0, -135)
-        path.lineTo(3, 16)
-        path.moveTo(8, 16)
-        path.lineTo(3, 16)
-        path.lineTo(3, 21)
-    elif name == "settings":
-        path = settings_icon_path()
-    else:
-        points = {
-            "arrow-left": ((12, 19), (5, 12), (12, 5), (19, 12), (5, 12)),
-            "arrow-up": ((5, 12), (12, 5), (19, 12), (12, 19), (12, 5)),
-            "arrow-down": ((19, 12), (12, 19), (5, 12), (12, 5), (12, 19)),
-        }[name]
-        path.moveTo(*points[0])
-        path.lineTo(*points[1])
-        path.lineTo(*points[2])
-        path.moveTo(*points[3])
-        path.lineTo(*points[4])
-    painter.drawPath(path)
+    painter.drawPath(control_icon_path(name))
     painter.restore()
 
 
@@ -575,7 +536,9 @@ class ControlButton(QAbstractButton):
         super().__init__()
         self.icon_name = name
         self.setObjectName("control")
-        self.setFixedSize(28, 28)
+        size = panel_icons()["controls"]["size"]
+        self.setFixedSize(size, size)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setToolTip(label)
         self.setAccessibleName(label)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -609,17 +572,35 @@ class ControlButton(QAbstractButton):
         self.spin.stop()
         self.rotate_icon(0.0)
 
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.click()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if self.underMouse() or self.hasFocus():
+        controls = panel_icons()["controls"]
+        foreground = QColor("#aaaaaa" if self.isEnabled() else "#444444")
+        if self.isEnabled() and self.underMouse():
+            hover = QColor("white")
+            hover.setAlphaF(controls["hoverOpacity"])
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor("#1c1c1c"))
-            painter.drawRoundedRect(QRectF(self.rect()), 6, 6)
+            painter.setBrush(hover)
+            painter.drawRoundedRect(QRectF(self.rect()), controls["radius"], controls["radius"])
+        if self.isEnabled() and self.hasFocus():
+            focus = QColor("white")
+            focus.setAlphaF(controls["focusOpacity"])
+            painter.setPen(QPen(focus, 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5),
+                                    controls["radius"], controls["radius"])
         painter.translate(self.width() / 2, self.height() / 2)
         painter.rotate(self.rotation)
         painter.translate(-self.width() / 2, -self.height() / 2)
-        draw_control_icon(painter, QRectF(self.rect()), self.icon_name, "#aaaaaa" if self.isEnabled() else "#444444")
+        draw_control_icon(painter, QRectF(self.rect()), self.icon_name, foreground)
 
 
 class UsageWorker(QObject):
