@@ -18,10 +18,10 @@ export const metadata: Metadata = {
   description: "Install AI Status on Linux with Waybar or the native Omarchy Quattro Quickshell widget, then connect your providers and monitor usage.",
 };
 
-const guideSource = `${repo.url}/blob/main/packages/lib/INSTALL.md`;
+const guideSource = `${repo.url}/blob/main/packages/lib/LINUX.md`;
 
 export default async function LinuxPage() {
-  const markdown = await readFile(path.resolve(process.cwd(), "../../packages/lib/INSTALL.md"), "utf-8");
+  const markdown = await readFile(path.resolve(process.cwd(), "../../packages/lib/LINUX.md"), "utf-8");
   const guide = await renderMarkdown(resolveLibGuideLinks(markdown.replace(/^# .+\r?\n\r?\n/, "")));
 
   return (

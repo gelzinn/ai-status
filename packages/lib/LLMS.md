@@ -25,7 +25,7 @@ or macOS instructions for those operating systems. The Linux Bash installer is
 for Linux, and its Quickshell integration requires Omarchy Quattro and its
 plugin commands rather than a generic Quickshell configuration.
 
-The Linux human and LLM guides share [INSTALL.md](INSTALL.md) as their detailed
+The Linux human and LLM guides share [LINUX.md](LINUX.md) as their detailed
 source. Windows and macOS use [WINDOWS.md](WINDOWS.md) and [MACOS.md](MACOS.md).
 This document is the platform directory; platform-specific setup remains in
 those guides.

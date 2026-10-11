@@ -727,7 +727,7 @@ MANUAL
 MANUAL
     fi
     echo ""
-    echo -e "  ${C_DIM}Full guide: ${REPO_URL}/blob/main/packages/lib/INSTALL.md${C_RESET}"
+    echo -e "  ${C_DIM}Full guide: ${REPO_URL}/blob/main/packages/lib/LINUX.md${C_RESET}"
 fi
 
 # ═══════════════════════════════════════════════════════════
