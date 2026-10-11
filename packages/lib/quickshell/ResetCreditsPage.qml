@@ -58,6 +58,12 @@ Column {
                 : "Restore eligible usage limits.\nCredits expire on the dates below."
         }
     }
+    Label {
+        objectName: "reset-available"
+        width: parent.width
+        text: "Available " + root.inventory.available
+        visible: root.inventory.available > 0
+    }
     Rectangle {
         id: resetTable
         objectName: "reset-table"
@@ -74,31 +80,20 @@ Column {
             y: 1
             width: parent.width - 2
             Rectangle {
+                objectName: "reset-column-header"
                 width: parent.width
-                height: Style.space(42)
+                height: columnHeadings.implicitHeight + Style.space(18)
                 color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.04)
                 radius: Math.max(0, resetTable.radius - 1)
-                Rectangle {
-                    anchors.bottom: parent.bottom
-                    width: parent.width
-                    height: parent.height / 2
-                    color: parent.color
+                Row {
+                    id: columnHeadings
+                    x: Style.space(12)
+                    y: Style.space(10)
+                    width: parent.width - x * 2
+                    spacing: Style.space(12)
+                    Secondary { objectName: "reset-type-header"; width: (parent.width - parent.spacing) / 2; text: "Reset type" }
+                    Secondary { objectName: "reset-expires-header"; width: (parent.width - parent.spacing) / 2; text: "Expires" }
                 }
-                Label {
-                    objectName: "reset-available"
-                    anchors.fill: parent
-                    anchors.margins: Style.space(12)
-                    text: "Available " + root.inventory.available
-                }
-            }
-            Row {
-                x: Style.space(12)
-                width: parent.width - x * 2
-                topPadding: Style.space(10)
-                bottomPadding: Style.space(8)
-                spacing: Style.space(12)
-                Secondary { width: (parent.width - parent.spacing) / 2; text: "Reset type" }
-                Secondary { width: (parent.width - parent.spacing) / 2; text: "Expires" }
             }
             Repeater {
                 model: rows

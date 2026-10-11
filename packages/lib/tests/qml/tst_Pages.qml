@@ -396,13 +396,26 @@ Item {
             Plugin.Model.snapshot = snapshot
             settings.visible = false
             credits.visible = true
-            compare(findChild(credits, "reset-available").text, "Available 2")
-            verify(findChild(credits, "reset-table").visible)
+            wait(20)
+            const available = findChild(credits, "reset-available")
+            const table = findChild(credits, "reset-table")
+            const header = findChild(credits, "reset-column-header")
+            compare(available.text, "Available 2")
+            verify(table.visible)
+            compare(available.parent, credits)
+            verify(available.y + available.height < table.y)
+            verify(findChild(table, "reset-available") === null)
+            compare(findChild(header, "reset-type-header").text, "Reset type")
+            compare(findChild(header, "reset-expires-header").text, "Expires")
+            compare(header.color, Qt.rgba(credits.foreground.r, credits.foreground.g, credits.foreground.b, 0.04))
+            compare(header.children.length, 1)
+            verify(header.radius > 0)
             compare(Plugin.Model.chosen, null)
             const empty = JSON.parse(JSON.stringify(snapshot))
             empty.providers[1].resetCredits = null
             Plugin.Model.snapshot = empty
             verify(!findChild(credits, "reset-table").visible)
+            verify(!available.visible)
             compare(Plugin.Model.snapshot.selected.provider, "claude")
         }
     }

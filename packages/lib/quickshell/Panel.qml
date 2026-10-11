@@ -51,7 +51,7 @@ Ui.Panel {
         settingsScrollPosition = scroller.contentY
         aboutPage = true
         scroller.contentY = 0
-        backButton.forceActiveFocus()
+        backButton.focusProgrammatically()
     }
 
     function goBack() {
@@ -70,7 +70,7 @@ Ui.Panel {
         usageScrollPosition = scroller.contentY
         resetProvider = {id: provider, idx: idx}
         scroller.contentY = 0
-        Qt.callLater(() => backButton.forceActiveFocus())
+        Qt.callLater(() => backButton.focusProgrammatically())
     }
 
     function switchPanel(direction) {
@@ -98,15 +98,16 @@ Ui.Panel {
 
         Ui.PanelKeyCatcher {
             id: keyCatcher
+            objectName: "panel-key-catcher"
             anchors.fill: parent
             onCloseRequested: {
                 if (root.configurationPage || root.resetProvider) root.goBack()
                 else root.close()
             }
             onTabRequested: direction => {
-                if (root.aboutPage) backButton.forceActiveFocus()
+                if (root.aboutPage) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
                 else if (root.configurationPage) settings.focusFirstControl()
-                else if (root.resetProvider) backButton.forceActiveFocus()
+                else if (root.resetProvider) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
                 else root.switchPanel(direction)
             }
             onMoveRequested: (dx, dy) => {

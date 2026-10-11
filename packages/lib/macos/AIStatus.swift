@@ -285,12 +285,15 @@ struct PanelIcons: Decodable {
 
 final class Model: ObservableObject {
     @Published var snapshot: Snapshot?
-    @Published var page: Page = .usage
+    @Published var page: Page = .usage {
+        didSet { if page != oldValue { keyboardFocusVisible = false } }
+    }
     @Published var draft = SettingsDraft()
     @Published var error = ""
     @Published var settingsError = ""
     @Published var settingsSaving = false
     @Published var isPresented = false
+    @Published var keyboardFocusVisible = false
     var changed: (() -> Void)?
     private let runtime: RuntimeConfig?
     private var backend: Process?
@@ -301,6 +304,19 @@ final class Model: ObservableObject {
     private var stopping = false
 
     init(runtime: RuntimeConfig? = nil) { self.runtime = runtime }
+
+    func observeFocusInput(_ event: NSEvent) {
+        guard isPresented else { return }
+        switch event.type {
+        case .keyDown:
+            if event.keyCode == 48 && event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+                keyboardFocusVisible = true
+            }
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            keyboardFocusVisible = false
+        default: break
+        }
+    }
 
     var choices: [Choice] {
         guard let snapshot = snapshot else { return [] }
@@ -608,6 +624,17 @@ struct PanelIcon: View {
     }
 }
 
+private struct ControlKeyboardFocusVisibleKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private extension EnvironmentValues {
+    var controlKeyboardFocusVisible: Bool {
+        get { self[ControlKeyboardFocusVisibleKey.self] }
+        set { self[ControlKeyboardFocusVisibleKey.self] = newValue }
+    }
+}
+
 struct ControlButton: View {
     let icon: String
     let help: String
@@ -615,6 +642,7 @@ struct ControlButton: View {
     let action: () -> Void
     @State private var hovering = false
     @FocusState private var focused: Bool
+    @Environment(\.controlKeyboardFocusVisible) private var keyboardFocusVisible
     @Environment(\.isEnabled) private var enabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let controls = Assets.panelIcons.controls
@@ -626,11 +654,11 @@ struct ControlButton: View {
         }
         .buttonStyle(.plain)
         .focused($focused)
-        .foregroundColor(Palette.control)
+        .foregroundColor(focused && keyboardFocusVisible && enabled ? Palette.bright : Palette.control)
         .background(RoundedRectangle(cornerRadius: controls.radius)
             .fill(hovering && enabled ? Color.white.opacity(controls.hoverOpacity) : .clear))
         .overlay(RoundedRectangle(cornerRadius: controls.radius)
-            .stroke(focused && enabled ? Color.white.opacity(controls.focusOpacity) : .clear, lineWidth: 1))
+            .stroke(focused && keyboardFocusVisible && enabled ? Color.white.opacity(controls.focusOpacity) : .clear, lineWidth: 1))
         .opacity(enabled ? 1 : 0.4)
         .onHover { hovering = $0 }
         .help(help).accessibilityLabel(help)
@@ -813,11 +841,11 @@ struct ResetCreditsPage: View {
                      "Restore eligible usage limits.\nCredits expire on the dates below.")
             }
             if let credits = provider.resetCredits, credits.available > 0 {
+                Text("Available \(credits.available)").foregroundColor(Palette.bright)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Available \(credits.available)").foregroundColor(Palette.bright).padding(12)
-                    Divider()
                     HStack { Text("Reset type").frame(maxWidth: .infinity, alignment: .leading); Text("Expires").frame(maxWidth: .infinity, alignment: .leading) }
                         .font(.custom("GeistMono-Regular", size: 11)).padding(12)
+                        .background(Palette.bright.opacity(0.04))
                     ForEach(Array(credits.rows.enumerated()), id: \.offset) { _, row in
                         Divider()
                         HStack(alignment: .top, spacing: 12) {
@@ -831,7 +859,8 @@ struct ResetCreditsPage: View {
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }.padding(12)
                     }
-                }.overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.border))
+                }.clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.border))
                 if credits.undetailed > 0 { Text("Some reset details haven't been provided yet.").font(.custom("GeistMono-Regular", size: 11)) }
             } else { Text("No reset credits available.") }
         }
@@ -915,6 +944,7 @@ struct PanelView: View {
         }
         .frame(width: 380).frame(maxHeight: .infinity)
         .font(Assets.font).foregroundColor(Palette.dim).background(Palette.surface)
+        .environment(\.controlKeyboardFocusVisible, model.keyboardFocusVisible)
         .preferredColorScheme(.dark)
     }
 }
@@ -923,7 +953,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let model: Model
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
-    private var keyMonitor: Any?
+    private var inputMonitor: Any?
     private var signalSources: [DispatchSourceSignal] = []
     private var spinnerTimer: Timer?
     private var spinnerFrame = 0
@@ -955,9 +985,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             }
         }
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(receiveCommand(_:)), name: commandNotification, object: nil)
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        inputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
             guard let self = self else { return event }
-            return self.handleKey(event)
+            self.model.observeFocusInput(event)
+            return event.type == .keyDown ? self.handleKey(event) : event
         }
         for number in [SIGTERM, SIGINT, SIGHUP, SIGUSR2] {
             signal(number, SIG_IGN)
@@ -1008,6 +1039,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func show() {
         guard let button = statusItem.button else { return }
         resize()
+        model.keyboardFocusVisible = false
         model.isPresented = true
         NSApp.activate(ignoringOtherApps: true)
         if !popover.isShown { popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY) }
@@ -1061,13 +1093,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         return event
     }
     func popoverDidClose(_ notification: Notification) {
+        model.keyboardFocusVisible = false
         model.isPresented = false
         if !model.settingsSaving { model.page = .usage }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { openUsage(nil); return false }
     func applicationWillTerminate(_ notification: Notification) {
         spinnerTimer?.invalidate()
-        if let monitor = keyMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = inputMonitor { NSEvent.removeMonitor(monitor) }
         DistributedNotificationCenter.default().removeObserver(self)
         model.shutdown()
         NSStatusBar.system.removeStatusItem(statusItem)
@@ -1150,6 +1183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             throw AppError.message("Bundled app artwork or Geist Mono is missing.")
         }
         _ = try PanelIcons.load()
+        try smokeFocusInput()
         let model = Model()
         model.accept(Data(sample.utf8))
         guard let snapshot = model.snapshot, snapshot.providers.count == 2,
@@ -1170,7 +1204,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             model.page = page
             try renderSmokePage(model, name: name, directory: previewDirectory)
         }
-        print("AI Status macOS smoke OK: usage, settings, reset credits, about, accounts, metered values, resources, panel icons, snapshot validation")
+        print("AI Status macOS smoke OK: usage, settings, reset credits, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+    }
+
+    private static func smokeFocusInput() throws {
+        func tabEvent(_ modifiers: NSEvent.ModifierFlags) -> NSEvent? {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0,
+                             windowNumber: 0, context: nil, characters: "\t", charactersIgnoringModifiers: "\t",
+                             isARepeat: false, keyCode: 48)
+        }
+        guard let tab = tabEvent([]), let backTab = tabEvent(.shift), let commandTab = tabEvent(.command),
+              let click = NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                            windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else {
+            throw AppError.message("Unable to create keyboard focus smoke events.")
+        }
+        let model = Model()
+        guard !model.keyboardFocusVisible else { throw AppError.message("Initial focus showed a keyboard outline.") }
+        model.observeFocusInput(tab)
+        guard !model.keyboardFocusVisible else { throw AppError.message("A hidden panel accepted Tab focus.") }
+        model.isPresented = true
+        model.observeFocusInput(commandTab)
+        guard !model.keyboardFocusVisible else { throw AppError.message("Command-Tab enabled a panel focus outline.") }
+        model.observeFocusInput(tab)
+        guard model.keyboardFocusVisible else { throw AppError.message("Tab navigation did not enable a focus outline.") }
+        model.observeFocusInput(click)
+        guard !model.keyboardFocusVisible else { throw AppError.message("A mouse click retained the keyboard focus outline.") }
+        model.observeFocusInput(backTab)
+        guard model.keyboardFocusVisible else { throw AppError.message("Shift-Tab navigation did not enable a focus outline.") }
+        model.page = .settings
+        guard !model.keyboardFocusVisible else { throw AppError.message("A new page inherited a keyboard focus outline.") }
     }
 
     private static func smokeAccounts(sample: String, directory: URL?) throws {

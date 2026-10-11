@@ -42,7 +42,10 @@ QLabel#brand { color: #eeeeee; font-weight: 500; }
 QAbstractButton { border: none; background: transparent; text-align: left; }
 QAbstractButton:hover, QAbstractButton:focus { background: #1c1c1c; border-radius: 8px; }
 QWidget#creditTable { border: 1px solid #262626; border-radius: 8px; }
-QWidget#creditTableHeader { border-bottom: 1px solid #262626; }
+QWidget#creditTableHeader {
+    background: rgba(255, 255, 255, 10); border-bottom: 1px solid #262626;
+    border-top-left-radius: 7px; border-top-right-radius: 7px;
+}
 QWidget#creditRow { border-top: 1px solid #262626; }
 QScrollArea { border: none; background: transparent; }
 QScrollBar:vertical { background: transparent; width: 5px; margin: 6px 0; }
@@ -328,6 +331,8 @@ class ResetCreditsView(QWidget):
         self.explanation.setWordWrap(True)
         intro.addWidget(self.explanation)
         layout.addLayout(intro)
+        self.available = plain_label("", "#dddddd")
+        layout.addWidget(self.available)
         self.table = QWidget()
         self.table.setObjectName("creditTable")
         table_layout = QVBoxLayout(self.table)
@@ -336,18 +341,12 @@ class ResetCreditsView(QWidget):
         header = QWidget()
         header.setObjectName("creditTableHeader")
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(12, 12, 12, 12)
-        self.available = plain_label("", "#dddddd")
-        header_layout.addWidget(self.available)
-        header_layout.addStretch()
-        table_layout.addWidget(header)
-        columns = QHBoxLayout()
-        columns.setContentsMargins(12, 10, 12, 8)
-        columns.setSpacing(12)
+        header_layout.setContentsMargins(12, 10, 12, 8)
+        header_layout.setSpacing(12)
         for text in ("Reset type", "Expires"):
             label = self.secondary_label(text)
-            columns.addWidget(label, 1)
-        table_layout.addLayout(columns)
+            header_layout.addWidget(label, 1)
+        table_layout.addWidget(header)
         self.rows_widget = QWidget()
         self.rows_layout = QVBoxLayout(self.rows_widget)
         self.rows_layout.setContentsMargins(0, 0, 0, 0)
@@ -543,6 +542,7 @@ class ControlButton(QAbstractButton):
         self.setAccessibleName(label)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.loading = False
+        self.keyboard_focus_visible = False
         self.rotation = 0.0
         self.spin = QVariantAnimation(self)
         self.spin.setStartValue(0.0)
@@ -579,18 +579,44 @@ class ControlButton(QAbstractButton):
         else:
             super().keyPressEvent(event)
 
+    def focusInEvent(self, event):
+        self.keyboard_focus_visible = event.reason() in (
+            Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason)
+        super().focusInEvent(event)
+        self.update()
+
+    def setFocus(self, reason=Qt.FocusReason.OtherFocusReason):
+        # Qt skips focusInEvent when this control is already focused.
+        self.keyboard_focus_visible = reason in (
+            Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason)
+        super().setFocus(reason)
+        self.update()
+
+    def focusOutEvent(self, event):
+        self.keyboard_focus_visible = False
+        super().focusOutEvent(event)
+        self.update()
+
+    def mousePressEvent(self, event):
+        self.keyboard_focus_visible = False
+        super().mousePressEvent(event)
+        self.update()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         controls = panel_icons()["controls"]
         foreground = QColor("#aaaaaa" if self.isEnabled() else "#444444")
+        keyboard_focus = self.isEnabled() and self.hasFocus() and self.keyboard_focus_visible
+        if keyboard_focus:
+            foreground = QColor("#eeeeee")
         if self.isEnabled() and self.underMouse():
             hover = QColor("white")
             hover.setAlphaF(controls["hoverOpacity"])
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(hover)
             painter.drawRoundedRect(QRectF(self.rect()), controls["radius"], controls["radius"])
-        if self.isEnabled() and self.hasFocus():
+        if keyboard_focus:
             focus = QColor("white")
             focus.setAlphaF(controls["focusOpacity"])
             painter.setPen(QPen(focus, 1))
