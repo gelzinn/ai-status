@@ -11,13 +11,25 @@ export const contentType = "image/png";
 export const alt = `${site.name} - ${site.description}`;
 
 // Satori silently falls back to a serif face unless fonts are embedded explicitly.
-// Fetch from Google Fonts at build time to avoid monorepo hoisting issues with node_modules paths.
-const geistRegular = fetch(
-  "https://cdn.jsdelivr.net/npm/geist@1.5.1/dist/fonts/geist-sans/Geist-Regular.ttf",
-).then((res) => res.arrayBuffer());
-const geistSemiBold = fetch(
-  "https://cdn.jsdelivr.net/npm/geist@1.5.1/dist/fonts/geist-sans/Geist-SemiBold.ttf",
-).then((res) => res.arrayBuffer());
+// Optional assets must not hold up static generation when their hosts are unavailable.
+async function fetchAsset(url: string): Promise<ArrayBuffer | null> {
+  try {
+    const response = await fetch(url, {
+      next: { revalidate: 86400 },
+      signal: AbortSignal.timeout(5000),
+    });
+    return response.ok ? await response.arrayBuffer() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchLogo(url: string): Promise<string | null> {
+  const data = await fetchAsset(url);
+  return data
+    ? `data:image/svg+xml;base64,${Buffer.from(data).toString("base64")}`
+    : null;
+}
 
 const PAGE_BG = "#09090b";
 const BORDER = "rgba(250, 250, 250, 0.10)";
@@ -25,7 +37,19 @@ const FG = "#fafafa";
 const FG_MUTED = "#a1a1aa";
 
 export default async function OgImage() {
-  const version = await getLatestVersion();
+  const [version, geistRegular, geistSemiBold, antigravityLogo, claudeLogo] =
+    await Promise.all([
+      getLatestVersion(),
+      fetchAsset(
+        "https://cdn.jsdelivr.net/npm/geist@1.5.1/dist/fonts/geist-sans/Geist-Regular.ttf",
+      ),
+      fetchAsset(
+        "https://cdn.jsdelivr.net/npm/geist@1.5.1/dist/fonts/geist-sans/Geist-SemiBold.ttf",
+      ),
+      fetchLogo(PROVIDERS.ANTIGRAVITY.logo),
+      fetchLogo(PROVIDERS.CLAUDE.logo),
+    ]);
+  const hasGeist = geistRegular !== null && geistSemiBold !== null;
 
   return new ImageResponse(
     <div
@@ -36,7 +60,7 @@ export default async function OgImage() {
         display: "flex",
         background: PAGE_BG,
         color: FG,
-        fontFamily: "Geist",
+        fontFamily: hasGeist ? "Geist" : "sans-serif",
         overflow: "hidden",
       }}
     >
@@ -206,15 +230,19 @@ export default async function OgImage() {
             >
               →
             </span>
-            <img
-              src={PROVIDERS.ANTIGRAVITY.logo}
-              style={{
-                width: 28,
-                height: 28,
-                opacity: 0.8,
-                filter: "brightness(1.1)",
-              }}
-            />
+            {antigravityLogo ? (
+              <img
+                src={antigravityLogo}
+                style={{
+                  width: 28,
+                  height: 28,
+                  opacity: 0.8,
+                  filter: "brightness(1.1)",
+                }}
+              />
+            ) : (
+              <div style={{ width: 28, height: 28 }} />
+            )}
             <div
               style={{
                 display: "flex",
@@ -292,15 +320,19 @@ export default async function OgImage() {
               paddingLeft: 40,
             }}
           >
-            <img
-              src={PROVIDERS.CLAUDE.logo}
-              style={{
-                width: 28,
-                height: 28,
-                opacity: 0.8,
-                filter: "brightness(1.1)",
-              }}
-            />
+            {claudeLogo ? (
+              <img
+                src={claudeLogo}
+                style={{
+                  width: 28,
+                  height: 28,
+                  opacity: 0.8,
+                  filter: "brightness(1.1)",
+                }}
+              />
+            ) : (
+              <div style={{ width: 28, height: 28 }} />
+            )}
             <div
               style={{
                 display: "flex",
@@ -360,10 +392,12 @@ export default async function OgImage() {
     </div>,
     {
       ...size,
-      fonts: [
-        { name: "Geist", data: await geistRegular, weight: 400, style: "normal" },
-        { name: "Geist", data: await geistSemiBold, weight: 600, style: "normal" },
-      ],
+      fonts: hasGeist
+        ? [
+            { name: "Geist", data: geistRegular, weight: 400, style: "normal" },
+            { name: "Geist", data: geistSemiBold, weight: 600, style: "normal" },
+          ]
+        : undefined,
     },
   );
 }

@@ -1,7 +1,7 @@
 import curses
 import os
 from . import config
-from . import state
+from . import state, render
 
 ICON_MODE_LABELS = {
     "off": "Off",
@@ -14,20 +14,23 @@ def get_selectable_items():
     items = []
     if cache:
         for p in cache:
-            dir_name = p.get("_dir")
+            dir_name = render.connection_key(p)
             idx = p.get("_idx", 0)
-            p_name = p.get("provider", dir_name)
+            p_name = render.entry_name(p)
             metrics = p.get("metrics", [])
-            for m in metrics:
-                mtype = m.get("type", "rolling")
+            for m in sorted(metrics, key=render.metric_sort_key):
+                mtype = render.metric_key(m)
+                title = render.metric_title(m)
+                if not m.get("name") and ":" in mtype:
+                    title += f" ({mtype.split(':', 1)[1]})"
                 items.append({
                     "provider": dir_name,
                     "idx": idx,
                     "metric": mtype,
-                    "label": f"{p_name} ({mtype})"
+                    "label": f"{p_name} · {title}"
                 })
     if not items:
-        for p in config.available_providers():
+        for p in config.available_connections():
             for mtype in ["rolling", "weekly", "monthly"]:
                 items.append({
                     "provider": p,
@@ -38,11 +41,11 @@ def get_selectable_items():
     return items
 
 def run():
-    all_providers = sorted(config.available_providers())
+    all_providers = sorted(config.available_connections())
     if not all_providers:
         return
 
-    enabled = config.enabled_order()
+    enabled = config.enabled_connection_order()
     enabled_set = set(enabled)
     order = [p for p in enabled if p in all_providers]
     for p in all_providers:
@@ -201,7 +204,7 @@ def run():
             if config_changed or selected_changed:
                 if config_changed:
                     cfg = [p for p in order if p in enabled_set]
-                    config.save_config(cfg)
+                    config.save_connection_order(cfg)
                 
                 sel_item = selectable_items[selected_item_idx]
                 

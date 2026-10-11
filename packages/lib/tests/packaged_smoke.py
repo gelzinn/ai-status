@@ -37,11 +37,11 @@ assert json.loads(desktop.stdout)["widget_render"], desktop.stdout
 invalid = subprocess.run([str(launcher), "--query"], capture_output=True, text=True,
                          encoding="utf-8", timeout=15)
 assert invalid.returncode != 0 and "Usage:" in invalid.stderr, invalid
-assert len(info["providers"]) == 8, info
+assert len(info["providers"]) == 29, info
 for name in ("claude", "codex", "copilot", "zai", "opencode", "commandcode"):
     diagnostic = run("--query", name)
     assert "_ai_status_error" in diagnostic, (name, diagnostic)
 result = run("status")
 assert result["providers"] == [], result
 assert len(result["errors"]) == 8, result
-print("GUI launcher, native HTTPS, desktop dependencies and all eight collectors passed smoke checks.")
+print("GUI launcher, native HTTPS, desktop dependencies and all registered collectors passed smoke checks.")

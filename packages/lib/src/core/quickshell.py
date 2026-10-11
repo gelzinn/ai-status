@@ -10,7 +10,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import about, config, fetch, paths, render, state, reset_credits
+from . import about, config, fetch, logos, paths, render, state, reset_credits
 
 
 class _PlainText(HTMLParser):
@@ -43,6 +43,9 @@ class LogoCache:
         self.attempts = {}
 
     def get(self, provider):
+        bundled = logos.contrast_logo(provider)
+        if bundled:
+            return bundled
         url = self.providers.get(provider, {}).get("logo")
         if not url:
             return ""
@@ -78,12 +81,14 @@ class LogoCache:
 
 
 def settings_snapshot(selected):
-    available = config.available_providers()
-    enabled = [name for name in config.enabled_order() if name in available]
+    available = config.available_connections()
+    enabled = [name for name in config.enabled_connection_order() if name in available]
     providers = paths.read_json(paths.LIB_DIR.parent / "shared/providers/providers.json")
     return {
         "available": available,
-        "names": {name: providers.get(name, {}).get("name", name) for name in available},
+        "names": {name: (providers.get(config.connection_info(name)["provider"], {}).get("name", name)
+                         + (" · " + config.connection_info(name)["label"] if name.startswith("account:") else "")) for name in available},
+        "providerIds": {name: config.connection_info(name)["provider"] for name in available},
         "order": enabled + [name for name in available if name not in enabled],
         "enabled": enabled,
         "display": {key: selected.get(key, default) for key, default in (
@@ -98,7 +103,7 @@ def save_settings(payload):
     """Validate a native form before publishing shared preferences atomically."""
     if not isinstance(payload, dict):
         raise ValueError("Invalid settings")
-    available = config.available_providers()
+    available = config.available_connections()
     enabled = payload.get("enabled")
     if (not isinstance(enabled, list) or not enabled
             or any(not isinstance(name, str) or name not in available for name in enabled)
@@ -122,7 +127,7 @@ def save_settings(payload):
     selected.update({key: choice[key] for key in ("provider", "idx", "metric")})
     selected.update({key: display[key] for key in fields}, icon_mode=icon_mode)
     # Report I/O errors to the form instead of using the best-effort wrappers.
-    state._save_json(config.CONFIG_FILE, enabled)
+    config.save_connection_order(enabled)
     state._save_json(state.SELECTED_FILE, selected)
     state.trigger_refresh()
 
@@ -134,8 +139,10 @@ def usable_metrics(entry):
     metrics = []
     for metric in entry.get("metrics", []):
         try:
-            percentage = float(metric["percentage"])
+            percentage = float(metric["percentage"] if metric.get("percentage") is not None else metric["amount"])
         except (KeyError, TypeError, ValueError):
+            if metric.get("percentage") is None and isinstance(metric.get("value"), str) and metric["value"]:
+                metrics.append(metric)
             continue
         if math.isfinite(percentage):
             metrics.append(metric)
@@ -147,7 +154,7 @@ def select_metric(selection):
         raise ValueError("Invalid metric selection")
     provider, idx, key = selection.get("provider"), selection.get("idx"), selection.get("metric")
     for entry in state.load_cache():
-        if entry.get("_dir") == provider and entry.get("_idx", 0) == idx and provider in config.enabled_order():
+        if render.connection_key(entry) == provider and entry.get("_idx", 0) == idx and provider in config.enabled_connection_order():
             if key in [render.metric_key(metric) for metric in usable_metrics(entry)]:
                 selected = state.load_selected() or {}
                 selected.update(provider=provider, idx=idx, metric=key)
@@ -160,22 +167,25 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
     selected = dict(selected or {})
     pending = set(pending or ())
     logo_paths = logo_paths or {}
-    order = config.enabled_order()
+    order = config.enabled_connection_order()
     providers = []
     for name in order:
-        entries = [p for p in data if p.get("_dir") == name]
+        entries = [p for p in data if render.connection_key(p) == name]
         for entry in entries:
             metrics = []
-            for metric in sorted(usable_metrics(entry), key=lambda m: render.TYPE_ORDER.get(m.get("type"), 4)):
-                percentage = float(metric["percentage"])
-                detail = metric.get("detail")
-                if detail is None:
-                    detail = render.format_reset_time(metric.get("reset_in_seconds"), metric.get("type"))
+            for metric in sorted(usable_metrics(entry), key=render.metric_sort_key):
+                percentage = render.metric_percentage(metric)
+                detail = render.metric_detail(metric)
                 metrics.append({
                     "key": render.metric_key(metric),
                     "type": metric.get("type", "generic"),
-                    "name": render.TYPE_NAMES.get(metric.get("type"), "Usage"),
+                    "name": render.metric_title(metric),
                     "percentage": percentage,
+                    "value": render.metric_value(metric),
+                    "hasPercentage": percentage is not None,
+                    "isAmount": render.metric_is_amount(metric),
+                    "amount": metric.get("amount"),
+                    "unit": metric.get("unit", ""),
                     "resetInSeconds": metric.get("reset_in_seconds"),
                     "detail": plain_text(detail),
                 })
@@ -183,9 +193,10 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
                 continue
             providers.append({
                 "id": name,
+                "providerId": entry.get("_dir", name),
                 "idx": entry.get("_idx", 0),
-                "name": entry.get("provider", name),
-                "logoPath": logo_paths.get(name, ""),
+                "name": render.entry_name(entry),
+                "logoPath": logo_paths.get(entry.get("_dir", name), ""),
                 "loading": name in pending,
                 "cached": bool(entry.get("_cached")),
                 "error": plain_text(entry.get("_error") or ("No usage data available" if not metrics and name not in pending else "")),
@@ -199,13 +210,13 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
     if current and current["metrics"] and selected.get("metric") not in [m["key"] for m in current["metrics"]]:
         selected["metric"] = current["metrics"][0]["key"]
     selected_loading = selected.get("provider") in pending
-    enabled_data = [dict(p, metrics=usable_metrics(p)) for p in data if p.get("_dir") in order and usable_metrics(p)]
+    enabled_data = [dict(p, metrics=usable_metrics(p)) for p in data if render.connection_key(p) in order and usable_metrics(p)]
     text = render.get_selected_metric_text(enabled_data, selected, spinner="…" if selected_loading else None)
     if not current:
         text = "AI Status …" if pending else "AI Status"
         logo_path = ""
     elif state.get_icon_mode(selected) == "logo":
-        logo_path = logo_paths.get(current["id"], logo_path)
+        logo_path = logo_paths.get(current["providerId"], logo_path)
     return {
         "schemaVersion": 1,
         "about": about.project_info(),

@@ -1,8 +1,10 @@
 Z.AI is tracked through **OpenCode**: when you add your Z.AI coding plan to OpenCode, it stores the API key, and AI Status reads that key to call Z.AI's usage API. Set it up once in OpenCode and you're done.
 
+You can also supply `ZAI_API_KEY` directly to the AI Status process without OpenCode.
+
 ## Requirements
 
-- **OpenCode** installed, authenticated with your Z.AI coding plan
+- `ZAI_API_KEY`, or **OpenCode** authenticated with your Z.AI coding plan
 - `jq` and `curl` (already required by AI Status)
 
 ## Step 1 — Add Z.AI to OpenCode
@@ -42,3 +44,7 @@ Run the provider's fetch script by hand to see the raw response:
 ```bash
 bash ~/.local/share/ai-status/packages/lib/src/providers/zai/query.sh
 ```
+
+## Multiple accounts
+
+Set `auth_file` to that account's OpenCode `account.json`, or map `ZAI_API_KEY` to its own environment variable. There is no application-imposed account limit. See the [authentication and multiple-account guide](https://github.com/gelzinn/ai-status/blob/main/packages/lib/PROVIDERS.md).

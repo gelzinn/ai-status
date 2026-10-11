@@ -10,6 +10,8 @@ TYPE_NAMES = {
     "daily": "Daily Usage",
     "weekly": "Weekly Usage",
     "monthly": "Monthly Usage",
+    "credits": "Available balance",
+    "balance": "Available balance",
     "generic": "Usage",
 }
 
@@ -24,6 +26,84 @@ DIM_INACTIVE = 55   # non-selected providers and inactive metrics
 DIM_RESET = 60      # reset lines
 
 
+def connection_key(entry):
+    return entry.get("_connection_id") or entry.get("_dir")
+
+
+def entry_name(entry):
+    name = entry.get("provider", "AI Provider")
+    label = entry.get("_account_label")
+    return f"{name} · {label}" if label else name
+
+
+def metric_percentage(metric):
+    try:
+        value = float(metric.get("percentage"))
+        return value if math.isfinite(value) else None
+    except (ValueError, TypeError):
+        return None
+
+
+def metric_value(metric):
+    unit = metric.get("unit", "")
+    if metric.get("value_format") == "amount_ratio":
+        try:
+            amount, limit = float(metric.get("amount")), float(metric.get("limit"))
+            if math.isfinite(amount) and math.isfinite(limit) and limit > 0:
+                if unit == "USD":
+                    return f"${amount:.2f} / ${limit:.2f}"
+                return f"{amount:,.2f} / {limit:,.2f} {unit}".strip()
+        except (ValueError, TypeError):
+            pass
+    percentage = metric_percentage(metric)
+    if percentage is not None:
+        return f"{percentage:.0f}%"
+    try:
+        amount = float(metric.get("amount"))
+        if not math.isfinite(amount):
+            return "Unavailable"
+    except (ValueError, TypeError):
+        return str(metric.get("value") or "Unavailable")
+    return f"${amount:.2f}" if unit == "USD" else f"{amount:,.2f} {unit}".strip()
+
+
+def metric_title(metric):
+    title = metric.get("title") or metric.get("name") or TYPE_NAMES.get(metric.get("type", "generic"), "Usage")
+    unit = metric.get("unit")
+    if unit and (metric_percentage(metric) is None or metric.get("value_format") == "amount_ratio"):
+        title = title.removesuffix(f" ({unit})")
+    return title
+
+
+def metric_detail(metric):
+    detail = metric.get("detail")
+    if detail is None:
+        if metric_is_amount(metric) and metric.get("reset_in_seconds") is None:
+            return ""
+        return format_reset_time(metric.get("reset_in_seconds"), metric.get("type"))
+    name = metric.get("name") or ""
+    unit = metric.get("unit")
+    if unit:
+        name = name.removesuffix(f" ({unit})")
+    if detail.strip().casefold() in {name.strip().casefold(), metric_title(metric).strip().casefold()}:
+        return ""
+    return detail
+
+
+def metric_sort_key(metric):
+    order = metric.get("display_order")
+    return order if type(order) is int else TYPE_ORDER.get(metric.get("type", "generic"), 4)
+
+
+def metric_is_amount(metric):
+    if metric_percentage(metric) is not None or isinstance(metric.get("amount"), bool):
+        return False
+    try:
+        return math.isfinite(float(metric.get("amount")))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def _dim(text, alpha):
     return f"<span alpha='{alpha}%'>{text}</span>"
 
@@ -32,8 +112,12 @@ def metric_key(metric):
     """Stable per-metric id within a provider. Normally just the type, but when
     a provider exposes two metrics of the same type (e.g. Claude's general vs
     Fable weekly limit) the label prefix in ``detail`` disambiguates them so
-    each can be selected independently."""
+    each can be selected independently. Explicit provider identities preserve
+    selections when display labels change."""
     t = metric.get("type", "generic")
+    identity = metric.get("id")
+    if isinstance(identity, str) and identity:
+        return f"{t}:{identity}"
     if metric.get("name"):
         return f"{t}:{metric['name']}"
     detail = metric.get("detail") or ""
@@ -51,7 +135,7 @@ def _find_selected_provider(latest_data, selected):
     idx = selected.get("idx", 0)
     count = 0
     for p in latest_data:
-        if p.get("_dir") == dir_name:
+        if connection_key(p) == dir_name:
             if count == idx:
                 return p
             count += 1
@@ -66,7 +150,7 @@ def get_selected_metric_text(latest_data, selected, spinner=None):
             return f"{ICON} {spinner}" if show_icon else spinner
         return ICON
 
-    provider_full_name = p.get("provider", "")
+    provider_full_name = entry_name(p)
     selected_key = selected.get("metric", "rolling")
     metrics = p.get("metrics", [])
 
@@ -93,9 +177,9 @@ def get_selected_metric_text(latest_data, selected, spinner=None):
             m = item
             break
     if not m and metrics:
-        m = metrics[0]
+        m = sorted(metrics, key=metric_sort_key)[0]
 
-    metric_name = TYPE_NAMES.get(m.get("type", "generic"), "Usage") if m else "Usage"
+    metric_name = metric_title(m) if m else "Usage"
 
     if spinner is not None:
         # While loading the percentage isn't known yet — show the spinner in
@@ -104,8 +188,7 @@ def get_selected_metric_text(latest_data, selected, spinner=None):
         pct_str = spinner
         show_pct = True
     elif m:
-        pct = float(m.get("percentage", 0.0))
-        pct_str = f"{pct:.0f}%"
+        pct_str = metric_value(m)
     else:
         pct_str = "0%"
 
@@ -194,13 +277,13 @@ def format_reset_time(seconds, mtype):
 def format_provider_block(
     provider_data, selected_dir=None, selected_idx=None, selected_metric=None
 ):
-    provider = provider_data.get("provider", "AI Provider")
+    provider = escape(entry_name(provider_data))
     metrics = provider_data.get("metrics", [])
     if not metrics:
         return ""
 
     is_selected = (
-        provider_data.get("_dir") == selected_dir
+        connection_key(provider_data) == selected_dir
         and provider_data.get("_idx") == selected_idx
     )
     prefix = "→ " if is_selected else "  "
@@ -213,25 +296,25 @@ def format_provider_block(
     # Dim non-selected providers so the selected one stands out (like the replica)
     if not is_selected:
         header = _dim(header, DIM_INACTIVE)
-    sorted_metrics = sorted(
-        metrics, key=lambda m: TYPE_ORDER.get(m.get("type", "generic"), 4)
-    )
+    sorted_metrics = sorted(metrics, key=metric_sort_key)
     lines = [header, ""]
     for metric in sorted_metrics:
-        mtype = metric.get("type", "generic")
-        name = TYPE_NAMES.get(mtype, "Usage")
+        name = escape(metric_title(metric))
         is_active = is_selected and metric_key(metric) == selected_metric
-        seconds = metric.get("reset_in_seconds")
-        detail = metric.get("detail")
-        if detail is None:
-            detail = format_reset_time(seconds, mtype)
+        detail = metric_detail(metric)
 
         # Only the active metric of the selected provider stays bright.
         recede = None if is_active else DIM_INACTIVE
         label = f"•   {name}:" if is_active else f"    {name}:"
         if recede:
             label = _dim(label, recede)
-        bar_str = make_progress_bar(float(metric.get("percentage", 0.0)))
+        percentage = metric_percentage(metric)
+        if percentage is not None:
+            bar_str = make_progress_bar(percentage)
+            if metric.get("value_format") == "amount_ratio":
+                bar_str = bar_str.rsplit(" ", 1)[0] + " " + escape(metric_value(metric))
+        else:
+            bar_str = escape(metric_value(metric))
         bar_line = ("    " + _dim(bar_str, recede)) if recede else f"    {bar_str}"
 
         lines.append(label)
@@ -247,7 +330,7 @@ def format_provider_block(
 def format_loading_provider_block(
     provider_data, frame_index, selected_dir=None, selected_idx=None, selected_metric=None
 ):
-    provider = provider_data.get("provider", "AI Provider")
+    provider = escape(entry_name(provider_data))
     metrics = provider_data.get("metrics", [])
     if not metrics:
         return ""
@@ -256,7 +339,7 @@ def format_loading_provider_block(
     # indentation) so nothing shifts when loading resolves — only the bar (a
     # shimmer) and the value (a spinner) differ.
     is_selected = (
-        provider_data.get("_dir") == selected_dir
+        connection_key(provider_data) == selected_dir
         and provider_data.get("_idx") == selected_idx
     )
     prefix = "→ " if is_selected else "  "
@@ -270,18 +353,12 @@ def format_loading_provider_block(
     if not is_selected:
         header = _dim(header, DIM_INACTIVE)
 
-    sorted_metrics = sorted(
-        metrics, key=lambda m: TYPE_ORDER.get(m.get("type", "generic"), 4)
-    )
+    sorted_metrics = sorted(metrics, key=metric_sort_key)
     lines = [header, ""]
     for metric in sorted_metrics:
-        mtype = metric.get("type", "generic")
-        name = TYPE_NAMES.get(mtype, "Usage")
+        name = escape(metric_title(metric))
         is_active = is_selected and metric_key(metric) == selected_metric
-        seconds = metric.get("reset_in_seconds")
-        detail = metric.get("detail")
-        if detail is None:
-            detail = format_reset_time(seconds, mtype)
+        detail = metric_detail(metric)
 
         recede = None if is_active else DIM_INACTIVE
         label = f"•   {name}:" if is_active else f"    {name}:"
@@ -327,7 +404,7 @@ def build_loading_state(latest_data, frame, selected=None, pending=None):
     selected_metric = selected.get("metric") if selected else None
 
     def _is_pending(p):
-        return True if pending is None else (p.get("_dir") in pending)
+        return True if pending is None else (connection_key(p) in pending)
 
     if latest_data:
         blocks = []

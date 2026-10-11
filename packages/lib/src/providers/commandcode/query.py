@@ -16,7 +16,8 @@ no auth — matching the other CLI-backed providers.
 import json
 import os
 import urllib.parse
-from core.provider_http import output, request, require_token
+from core.metered import number
+from core.provider_http import QueryError, output, request, require_token
 
 AUTH_FILE = os.path.expanduser("~/.commandcode/auth.json")
 BASE_URL = os.environ.get("COMMANDCODE_API_URL", "https://api.commandcode.ai")
@@ -27,19 +28,27 @@ def _api_key():
     key = os.environ.get("COMMANDCODE_API_KEY")
     if key:
         return key
+    if os.environ.get("AI_STATUS_ACCOUNT_ID") and not os.environ.get("AI_STATUS_AUTH_FILE"):
+        return None
     try:
-        with open(AUTH_FILE, encoding="utf-8-sig") as f:
+        with open(os.environ.get("AI_STATUS_AUTH_FILE") or AUTH_FILE, encoding="utf-8-sig") as f:
             return json.load(f).get("apiKey")
     except (OSError, ValueError):
         return None
 
 
 def _get(path, token):
-    return json.loads(request(f"{BASE_URL}{path}", {
+    try:
+        value = json.loads(request(f"{BASE_URL}{path}", {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
             "User-Agent": "ai-status",
-    }, timeout=TIMEOUT))
+        }, timeout=TIMEOUT))
+    except (ValueError, TypeError):
+        raise QueryError("Command Code returned an invalid billing response.") from None
+    if not isinstance(value, dict) or "error" in value or "errors" in value:
+        raise QueryError("Command Code returned no compatible billing data; check authentication.")
+    return value
 
 
 def _q(org_id=None, since=None):
@@ -63,15 +72,22 @@ def query():
     since = sub_data.get("currentPeriodStart")
     period_end = sub_data.get("currentPeriodEnd")
 
-    credits = (_get(f"/alpha/billing/credits{_q(org_id)}", token) or {}).get("credits") or {}
-    remaining = (
-        max(0.0, float(credits.get("monthlyCredits") or 0))
-        + max(0.0, float(credits.get("purchasedCredits") or 0))
-        + max(0.0, float(credits.get("freeCredits") or 0))
-    )
+    credit_data = _get(f"/alpha/billing/credits{_q(org_id)}", token) or {}
+    credits = credit_data.get("credits") or {}
+    if not isinstance(credits, dict):
+        raise QueryError("Command Code returned an invalid credit ledger.")
+    balances = [number(credits[field]) for field in ("monthlyCredits", "purchasedCredits", "freeCredits") if field in credits]
+    if any(value is None for value in balances):
+        raise QueryError("Command Code returned an invalid credit amount.")
+    remaining = sum(balances) if balances else None
 
     summary = _get(f"/alpha/usage/summary{_q(org_id, since)}", token) or {}
-    used = max(0.0, float(summary.get("totalCost") or 0))
+    used = number(summary.get("totalCost"))
+    if "totalCost" in summary and (used is None or used < 0):
+        raise QueryError("Command Code returned an invalid spend amount.")
+    windows = credit_data.get("windowLimits") or credits.get("windowLimits") or {}
+    if used is None and remaining is None and not windows:
+        raise QueryError("Command Code returned no compatible billing metrics.")
 
     return {
         "used": used,
@@ -80,6 +96,7 @@ def query():
         "runs": summary.get("totalCount"),
         "period_end": period_end,
         "user": user_name,
+        "windows": windows,
     }
 
 

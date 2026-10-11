@@ -5,7 +5,13 @@ import time
 import select
 import re
 import struct
+import base64
+import json
+from pathlib import Path
+from datetime import datetime, timezone
 from core.paths import IS_WINDOWS
+from core.metered import json_request, number
+from core.provider_http import QueryError, output as query_output, require_token
 
 if not IS_WINDOWS:
     import pty
@@ -13,6 +19,41 @@ if not IS_WINDOWS:
     import termios
 
 ANSI_ESCAPE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+
+def query():
+    token = os.environ.get("ANTIGRAVITY_ACCESS_TOKEN")
+    if not token:
+        path = os.environ.get("AI_STATUS_AUTH_FILE")
+        if not path and os.environ.get("AI_STATUS_ACCOUNT_ID"):
+            raise QueryError("Configure an Antigravity account authentication file or ANTIGRAVITY_ACCESS_TOKEN.")
+        path = Path(path) if path else Path.home() / ".gemini/antigravity-cli/antigravity-oauth-token"
+        try:
+            raw = path.read_text(encoding="utf-8-sig").strip()
+            if raw.startswith("go-keyring-base64:"):
+                raw = base64.b64decode(raw.split(":", 1)[1], validate=True).decode("utf-8")
+            credentials = json.loads(raw)
+            credentials = credentials.get("token") if isinstance(credentials.get("token"), dict) else credentials
+            token = next((credentials[key] for key in ("access_token", "accessToken", "token", "id_token", "idToken", "bearerToken", "auth_token", "authToken")
+                          if isinstance(credentials.get(key), str) and credentials[key].strip()), None)
+            expiry = next((credentials[key] for key in ("expiry", "expires_at", "expiresAt") if key in credentials), None)
+            if expiry is not None:
+                stamp = number(expiry)
+                if stamp is None:
+                    expiry_date = datetime.fromisoformat(str(expiry).replace("Z", "+00:00"))
+                    if expiry_date.tzinfo is None:
+                        expiry_date = expiry_date.replace(tzinfo=timezone.utc)
+                    stamp = expiry_date.timestamp()
+                elif stamp >= 1e11:
+                    stamp /= 1000
+                if stamp <= time.time():
+                    raise QueryError("Antigravity account session expired; sign in again and update the credential reference.")
+        except (OSError, ValueError, TypeError, AttributeError, UnicodeError, OverflowError):
+            raise QueryError("Unable to read Antigravity account credentials; select a valid saved OAuth token file.") from None
+    token = require_token(token, "Configure an Antigravity account authentication file or ANTIGRAVITY_ACCESS_TOKEN.")
+    return json_request("https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary", {
+        "Authorization": f"Bearer {token}", "User-Agent": "antigravity",
+    }, method="POST", data={})
 
 def strip_ansi(text):
     return ANSI_ESCAPE.sub('', text)
@@ -103,6 +144,10 @@ def get_agy_usage():
         return strip_ansi(output.decode('utf-8', errors='replace'))
 
 def main():
+    if (os.environ.get("AI_STATUS_ACCOUNT_ID") or os.environ.get("AI_STATUS_AUTH_FILE") or
+            os.environ.get("ANTIGRAVITY_ACCESS_TOKEN")):
+        query_output(query)
+        return
     if IS_WINDOWS:
         from core.console import query_antigravity
         from core.provider_http import output
