@@ -24,22 +24,8 @@ export function InstallTabs({
 
 	return (
 		<div className="flex w-full min-w-0 flex-col items-start gap-4 motion-safe:animate-fade-up [animation-delay:200ms]">
-			<div className="grid w-full min-w-0">
-				<div
-					className={cn("col-start-1 row-start-1 min-w-0 self-start", activeOs !== "Linux" && "invisible")}
-					aria-hidden={activeOs !== "Linux"}
-					inert={activeOs !== "Linux"}
-				>{linux}</div>
-				<div
-					className={cn("col-start-1 row-start-1 min-w-0 self-start", activeOs !== "macOS" && "invisible")}
-					aria-hidden={activeOs !== "macOS"}
-					inert={activeOs !== "macOS"}
-				>{mac}</div>
-				<div
-					className={cn("col-start-1 row-start-1 min-w-0 self-start", activeOs !== "Windows" && "invisible")}
-					aria-hidden={activeOs !== "Windows"}
-					inert={activeOs !== "Windows"}
-				>{win}</div>
+			<div className="w-full min-w-0">
+				{activeOs === "Windows" ? win : activeOs === "macOS" ? mac : linux}
 			</div>
 
 			<div className="mt-1 flex flex-wrap items-center gap-3 text-sm font-medium">
