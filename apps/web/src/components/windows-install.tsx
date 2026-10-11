@@ -8,9 +8,6 @@ export async function WindowsInstall() {
 		<div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-4 text-left">
 			<div className="flex flex-col gap-1">
 				<p className="text-sm font-medium text-foreground">Windows 10 &amp; 11 · x64</p>
-				<p className="text-sm leading-relaxed text-muted-foreground">
-					Install the app and monitor usage from your system tray. No terminal setup required.
-				</p>
 			</div>
 			<div className="flex flex-wrap items-center gap-4">
 				<a
