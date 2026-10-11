@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.1](https://github.com/gelzinn/ai-status/compare/v0.12.0...v0.12.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **web:** keep platform setup guides focused on stable installation ([24b875c](https://github.com/gelzinn/ai-status/commit/24b875c0960644b44f3aaf2f727d6aa12866b89d))
+* **web:** keep Windows downloads on stable releases when the release lookup fails ([24b875c](https://github.com/gelzinn/ai-status/commit/24b875c0960644b44f3aaf2f727d6aa12866b89d))
+* **web:** match home installation card spacing without reserving height ([24b875c](https://github.com/gelzinn/ai-status/commit/24b875c0960644b44f3aaf2f727d6aa12866b89d))
+* **web:** preserve interactive preview state when switching operating systems ([24b875c](https://github.com/gelzinn/ai-status/commit/24b875c0960644b44f3aaf2f727d6aa12866b89d))
+* **web:** show a macOS desktop scene in the interactive preview ([24b875c](https://github.com/gelzinn/ai-status/commit/24b875c0960644b44f3aaf2f727d6aa12866b89d))
+
 ## [0.12.0](https://github.com/gelzinn/ai-status/compare/v0.11.0...v0.12.0) (2026-10-11)
 
 
