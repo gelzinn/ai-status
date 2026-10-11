@@ -25,7 +25,7 @@ T.Control {
     implicitHeight: implicitWidth
     background: Rectangle {
         id: backgroundRectangle
-        radius: Style.space(Plugin.PanelIcons.data.controls.radius)
+        radius: Style.cornerRadius
         color: root.tooltipHovered ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, Plugin.PanelIcons.data.controls.hoverOpacity) : "transparent"
         border.width: root.keyboardFocusVisible ? 1 : 0
         border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, Plugin.PanelIcons.data.controls.focusOpacity)

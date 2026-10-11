@@ -40,7 +40,16 @@ Plugin.PanelButton {
     function revealHighlight() {
         const item = options.itemAt(highlighted)
         if (!item) return
-        if (item.y < list.contentY) list.contentY = item.y
+        let top = item.y
+        const groupKey = choices[highlighted].groupKey
+        if (groupKey) {
+            let first = highlighted
+            while (first > 0 && choices[first - 1].groupKey === groupKey) first--
+            const header = options.itemAt(first)
+            // Keep the account heading visible along with the focused limit.
+            if (header && item.y + item.height - header.y <= list.height) top = header.y
+        }
+        if (top < list.contentY) list.contentY = top
         else if (item.y + item.height > list.contentY + list.height)
             list.contentY = item.y + item.height - list.height
     }
@@ -82,7 +91,7 @@ Plugin.PanelButton {
             y: Math.max(0, Math.min(trigger.y + Style.space(4) + height <= overlay.height ? trigger.y + Style.space(4) : trigger.y - root.height - height - Style.space(4), overlay.height - height))
             color: Qt.rgba(Commons.Color.popups.background.r, Commons.Color.popups.background.g, Commons.Color.popups.background.b, 1)
             border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.25)
-            radius: Style.space(4)
+            radius: Style.cornerRadius
             MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons }
             Flickable {
                 id: list
@@ -98,21 +107,69 @@ Plugin.PanelButton {
                     Repeater {
                         id: options
                         model: root.choices
-                        delegate: Plugin.PanelButton {
+                        delegate: Column {
+                            id: option
                             required property var modelData
                             required property int index
-                            objectName: modelData.objectName || root.objectName + "-option-" + index
+                            readonly property bool startsGroup: !!modelData.groupKey && (index === 0 || root.choices[index - 1].groupKey !== modelData.groupKey)
                             width: optionColumn.width
-                            text: modelData.label
-                            logoSource: modelData.logoSource || ""
-                            foreground: root.foreground
-                            fontFamily: root.fontFamily
-                            multiline: true
-                            alignLeft: true
-                            activeFocusOnTab: false
-                            color: root.highlighted === index ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12) : "transparent"
-                            Accessible.selected: root.currentIndex === index
-                            onClicked: root.choose(index)
+                            Item {
+                                objectName: root.objectName + "-group-" + option.modelData.groupKey
+                                visible: option.startsGroup
+                                width: parent.width
+                                height: visible ? Style.space(option.index === 0 ? 32 : 40) : 0
+                                Rectangle {
+                                    visible: option.index > 0
+                                    width: parent.width - Style.space(12)
+                                    x: Style.space(6)
+                                    height: 1
+                                    color: root.foreground
+                                    opacity: 0.12
+                                }
+                                Image {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: Style.space(10)
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: Style.space(8)
+                                    width: Style.space(16)
+                                    height: width
+                                    source: option.modelData.groupLogoSource || ""
+                                    fillMode: Image.PreserveAspectFit
+                                    asynchronous: true
+                                }
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: Style.space(34)
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: Style.space(10)
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: Style.space(8)
+                                    text: option.modelData.groupLabel || ""
+                                    textFormat: Text.PlainText
+                                    color: root.foreground
+                                    font.family: root.fontFamily
+                                    font.pixelSize: Style.font.body
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                    Accessible.role: Accessible.StaticText
+                                    Accessible.name: text
+                                }
+                            }
+                            Plugin.PanelButton {
+                                objectName: option.modelData.objectName || root.objectName + "-option-" + option.index
+                                width: optionColumn.width
+                                text: option.modelData.label
+                                logoSource: option.modelData.logoSource || ""
+                                prefixText: option.modelData.groupKey ? (root.currentIndex === option.index ? "✓" : " ") : ""
+                                foreground: root.foreground
+                                fontFamily: root.fontFamily
+                                alignLeft: true
+                                activeFocusOnTab: false
+                                color: root.highlighted === option.index ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12) : "transparent"
+                                Accessible.name: option.modelData.groupLabel ? option.modelData.groupLabel + " · " + text : text
+                                Accessible.selected: root.currentIndex === option.index
+                                onClicked: root.choose(option.index)
+                            }
                         }
                     }
                 }

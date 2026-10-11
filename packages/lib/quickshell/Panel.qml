@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui as Ui
@@ -16,6 +17,7 @@ Ui.Panel {
     property real settingsScrollPosition: 0
     property var resetProvider: null
     property real usageScrollPosition: 0
+    property Item restoredFocusControl: null
     readonly property var resetEntry: resetProvider ? Plugin.Model.snapshot.providers.find(entry => entry.id === resetProvider.id && entry.idx === resetProvider.idx) || null : null
     readonly property string panelFont: bar ? bar.fontFamily : Style.font.family
 
@@ -43,14 +45,14 @@ Ui.Panel {
         const previous = resetProvider
         resetProvider = null
         if (previous) Qt.callLater(() => {
-            scroller.contentY = Math.min(usageScrollPosition, Math.max(0, scroller.contentHeight - scroller.height))
+            restoreScrollPosition(usageScrollPosition)
             const button = usage.resetButton(previous.id, previous.idx)
-            if (button && button.visible) button.forceActiveFocus()
+            if (button && button.visible) restoreFocus(button)
             else keyCatcher.forceActiveFocus()
         })
         else if (wasUpdate) Qt.callLater(() => {
-            scroller.contentY = Math.min(usageScrollPosition, Math.max(0, scroller.contentHeight - scroller.height))
-            if (updateLink.visible) updateLink.forceActiveFocus()
+            restoreScrollPosition(usageScrollPosition)
+            if (updateLink.visible) restoreFocus(updateLink)
             else keyCatcher.forceActiveFocus()
         })
     }
@@ -67,8 +69,8 @@ Ui.Panel {
         if (aboutPage) {
             aboutPage = false
             Qt.callLater(() => {
-                scroller.contentY = Math.min(settingsScrollPosition, Math.max(0, scroller.contentHeight - scroller.height))
-                settings.focusAboutControl()
+                restoreScrollPosition(settingsScrollPosition)
+                restoredFocusControl = settings.focusAboutControl()
             })
         } else showUsage()
     }
@@ -95,6 +97,43 @@ Ui.Panel {
         return false
     }
 
+    function restoreFocus(item) {
+        // Returning to a page preserves its saved scroll position. The next
+        // keyboard focus change still reveals the newly focused control.
+        restoredFocusControl = item
+        item.forceActiveFocus()
+    }
+
+    function restoreScrollPosition(position) {
+        // Recompute the restored page before clamping to its scroll range.
+        content.forceLayout()
+        scroller.contentY = Math.min(position, Math.max(0, scroller.contentHeight - scroller.height))
+    }
+
+    function revealFocusedControl() {
+        const window = keyCatcher.Window.window
+        const item = window ? window.activeFocusItem : null
+        if (item !== restoredFocusControl) restoredFocusControl = null
+        if (!opened || !item || item === restoredFocusControl || !item.visible || scroller.height <= 0) return
+        let ancestor = item
+        while (ancestor && ancestor !== content) ancestor = ancestor.parent
+        if (ancestor !== content) return
+
+        const margin = Style.space(4)
+        const top = item.mapToItem(scroller, 0, 0).y
+        const bottom = top + item.height
+        let nextY = scroller.contentY
+        if (top < margin || item.height + margin * 2 > scroller.height)
+            nextY += top - margin
+        else if (bottom > scroller.height - margin)
+            nextY += bottom - scroller.height + margin
+        nextY = Math.max(0, Math.min(nextY, Math.max(0, scroller.contentHeight - scroller.height)))
+        if (nextY !== scroller.contentY) {
+            scroller.cancelFlick()
+            scroller.contentY = nextY
+        }
+    }
+
     onConfigurationPageChanged: scroller.contentY = 0
     onResetEntryChanged: if (resetProvider && !resetEntry) Qt.callLater(() => {
         if (resetProvider && !resetEntry) showUsage()
@@ -110,7 +149,15 @@ Ui.Panel {
         open: root.opened
         focusTarget: keyCatcher
         contentWidth: panel.fittedContentWidth(Style.space(380))
-        contentHeight: panel.fittedContentHeight(header.height + Style.space(21) + content.implicitHeight + (footer.visible ? footer.height + Style.space(12) : 0), Style.space(680))
+        contentHeight: panel.fittedContentHeight(header.height + panel.padding + Style.space(13) + content.implicitHeight + (footer.visible ? footer.height + Style.space(12) : 0), Style.space(680))
+
+        Connections {
+            target: keyCatcher.Window.window
+            function onActiveFocusItemChanged() {
+                // Wait for the focus chain and any page layout changes to settle.
+                Qt.callLater(root.revealFocusedControl)
+            }
+        }
 
         Ui.PanelKeyCatcher {
             id: keyCatcher
@@ -207,7 +254,7 @@ Ui.Panel {
                 id: divider
                 objectName: "panel-divider"
                 anchors.top: header.bottom
-                anchors.topMargin: Style.space(8)
+                anchors.topMargin: panel.padding
                 x: -panel.padding
                 width: parent.width + panel.padding * 2
                 height: Style.space(1)

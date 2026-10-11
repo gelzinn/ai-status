@@ -20,7 +20,7 @@ Rectangle {
 
     implicitWidth: (iconName ? Style.space(16) : label.implicitWidth) + Style.space(hasLogo ? 44 : 20) + prefixWidth
     implicitHeight: multiline ? Math.max(Style.space(30), label.implicitHeight + Style.space(16)) : Style.space(30)
-    radius: Style.space(3)
+    radius: Style.cornerRadius
     color: mouse.containsMouse || activeFocus ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.09) : "transparent"
     border.width: outlined || activeFocus ? 1 : 0
     border.color: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.2)

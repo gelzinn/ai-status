@@ -18,23 +18,54 @@ Column {
     signal aboutRequested()
     readonly property var choices: {
         const items = []
-        for (const name of enabledProviders) {
-            const entries = Plugin.Model.snapshot.providers.filter(p => p.id === name)
+        const providerIds = (Plugin.Model.snapshot.settings || {}).providerIds || {}
+        const providers = Plugin.Model.snapshot.providers || []
+        const connections = order.filter(name => enabledProviders.indexOf(name) !== -1)
+            .concat(enabledProviders.filter(name => order.indexOf(name) === -1))
+        // Keep accounts of the same provider together, retaining provider order.
+        const families = []
+        for (const name of connections) {
+            const entry = providers.find(p => p.id === name)
+            const family = providerIds[name] || (entry && entry.providerId) || name
+            if (families.indexOf(family) === -1) families.push(family)
+        }
+        let grouped = []
+        for (const family of families) {
+            grouped = grouped.concat(connections.filter(name => {
+                const entry = providers.find(p => p.id === name)
+                return (providerIds[name] || (entry && entry.providerId) || name) === family
+            }))
+        }
+        const titles = []
+        for (const name of grouped) {
+            const entries = providers.filter(p => p.id === name)
             if (entries.length === 0)
-                items.push({provider: name, idx: 0, metric: "rolling", label: root.providerName(name), logoSource: root.providerLogo(name)})
+                entries.push({idx: 0, name: root.providerName(name), metrics: []})
             for (const entry of entries) {
+                titles.push(entry.name)
+            }
+        }
+        const occurrences = {}
+        for (const name of grouped) {
+            const entries = providers.filter(p => p.id === name)
+            if (entries.length === 0)
+                entries.push({idx: 0, name: root.providerName(name), metrics: []})
+            for (const entry of entries) {
+                occurrences[entry.name] = (occurrences[entry.name] || 0) + 1
+                const title = entry.name + (titles.filter(value => value === entry.name).length > 1 ? " · Account " + occurrences[entry.name] : "")
+                const group = {provider: name, idx: entry.idx, groupKey: name + "/" + entry.idx,
+                    groupLabel: title, groupLogoSource: root.providerLogo(name, entry)}
                 for (const metric of entry.metrics) {
-                    const detail = metric.key.indexOf(":") === -1 ? "" : " (" + metric.key.split(":").slice(1).join(":") + ")"
-                    items.push({provider: name, idx: entry.idx, metric: metric.key, label: entry.name + " · " + metric.name + detail, logoSource: root.providerLogo(name, entry)})
+                    items.push(Object.assign({}, group, {metric: metric.key, label: root.limitLabel(metric)}))
                 }
                 if (entry.metrics.length === 0)
-                    items.push({provider: name, idx: entry.idx, metric: "rolling", label: entry.name, logoSource: root.providerLogo(name, entry)})
+                    items.push(Object.assign({}, group, {metric: "rolling", label: "Usage"}))
             }
         }
         return items
     }
     readonly property var selectedChoice: choices.find(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) || null
-    readonly property string selectedLabel: selectedChoice ? selectedChoice.label : "Choose a provider and limit"
+    readonly property string selectedLabel: selectedChoice ? selectedChoice.groupLabel + " · " + selectedChoice.label : "Choose a provider and limit"
     readonly property bool valid: enabledProviders.length > 0 && Object.keys(display).some(key => display[key]) && choices.some(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric)
     spacing: Style.space(22)
     enabled: !Plugin.Model.settingsSaving
@@ -58,6 +89,19 @@ Column {
         return (Plugin.Model.snapshot.settings.names || {})[name] || name
     }
 
+    function limitLabel(metric) {
+        const shortNames = {"Rolling Usage": "Rolling", "Daily Usage": "Daily", "Weekly Usage": "Weekly", "Monthly Usage": "Monthly",
+            "Cursor Models included quota": "Cursor Models", "Other Models included quota": "Other Models",
+            "On-demand spend this billing cycle": "On-demand spend"}
+        const label = shortNames[metric.name] || metric.name
+        // Key suffixes may be full names or opaque IDs, not display labels.
+        // Only legacy period metrics use a suffix as a model qualifier.
+        const parts = metric.key.split(":")
+        const qualifier = parts.slice(1).join(":")
+        const periodName = {rolling: "Rolling Usage", daily: "Daily Usage", weekly: "Weekly Usage", monthly: "Monthly Usage"}[parts[0]]
+        return qualifier && metric.name === periodName && qualifier !== metric.name ? label + " · " + qualifier : label
+    }
+
     function closeSelectors() {
         providerSelector.dismiss()
         iconSelector.dismiss()
@@ -78,7 +122,7 @@ Column {
     function focusFirstControl() {
         providerSelector.forceActiveFocus(Qt.TabFocusReason)
     }
-    function focusAboutControl() { aboutButton.forceActiveFocus() }
+    function focusAboutControl() { aboutButton.forceActiveFocus(); return aboutButton }
 
     function toggleProvider(name) {
         enabledProviders = enabledProviders.indexOf(name) === -1 ? enabledProviders.concat([name]) : enabledProviders.filter(item => item !== name)
@@ -131,8 +175,7 @@ Column {
             objectName: "active-provider"
             width: parent.width
             text: root.selectedLabel
-            logoSource: root.selectedChoice ? root.selectedChoice.logoSource : ""
-            multiline: true
+            logoSource: root.selectedChoice ? root.selectedChoice.groupLogoSource : ""
             popupParent: root.popupParent
             foreground: root.foreground
             fontFamily: root.fontFamily

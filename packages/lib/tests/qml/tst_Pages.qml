@@ -1,5 +1,6 @@
 import QtQuick
 import QtTest
+import qs.Commons
 import "plugin" as Plugin
 
 Item {
@@ -195,7 +196,7 @@ Item {
             mouseClick(findChild(settings, "active-provider"))
             verify(settings.selectionOpen)
         }
-        function test_provider_selector_logos_render_in_trigger_and_every_option() {
+        function test_provider_selector_logos_render_once_per_account_and_in_trigger() {
             settings.iconMode = "off"
             const trigger = findChild(settings, "active-provider")
             const triggerLogo = findChild(trigger, "provider-logo")
@@ -207,8 +208,10 @@ Item {
             for (const choice of settings.choices) {
                 const option = findChild(trigger.popupItem, "active-provider-option-" + choice.provider + "-" + choice.idx + "-" + choice.metric)
                 verify(option.visible)
-                tryCompare(findChild(option, "provider-logo"), "status", Image.Ready)
-                verify(option.logoSource.toString().endsWith("/" + choice.provider + ".png"))
+                compare(option.logoSource.toString(), "")
+                compare(option.height, 30)
+                const header = findChild(trigger.popupItem, "active-provider-group-" + choice.groupKey)
+                verify(header !== null && header.visible)
             }
             mouseClick(findChild(trigger.popupItem, "active-provider-option-codex-0-weekly"))
             compare(settings.selected.provider, "codex")
@@ -220,6 +223,49 @@ Item {
             settings.selected = {provider: "kiro", idx: 0, metric: "rolling"}
             verify(trigger.logoSource.toString().endsWith("/kiro.png"))
             tryCompare(triggerLogo, "status", Image.Ready)
+        }
+        function test_account_groups_keep_identity_and_omit_internal_key_labels() {
+            const snapshot = Plugin.Model.snapshot
+            snapshot.providers.push(
+                {id: "cursor", providerId: "cursor", idx: 0, name: "Cursor", loading: false, cached: false, metrics: [
+                    {key: "monthly:Cursor Models included quota", name: "Cursor Models included quota", detail: ""},
+                    {key: "monthly:Other Models included quota", name: "Other Models included quota", detail: ""},
+                    {key: "monthly:On-demand spend this billing cycle (USD)", name: "On-demand spend this billing cycle", detail: ""}
+                ]},
+                {id: "account:work", providerId: "claude", idx: 0, name: "Claude (Max) · Work", loading: false, cached: false, metrics: [
+                    {key: "weekly", name: "Weekly Usage", detail: ""}
+                ]})
+            snapshot.settings.order = ["claude", "cursor", "codex", "account:work"]
+            snapshot.settings.enabled = snapshot.settings.order.slice()
+            snapshot.settings.providerIds = {claude: "claude", cursor: "cursor", codex: "codex", "account:work": "claude"}
+            Plugin.Model.snapshot = Object.assign({}, snapshot)
+            settings.begin()
+            compare(settings.choices.map(item => item.provider).join(","), "claude,claude,claude,account:work,cursor,cursor,cursor,codex,codex")
+            compare(settings.choices.filter(item => item.provider === "cursor").map(item => item.label).join(","), "Cursor Models,Other Models,On-demand spend")
+            settings.selected = {provider: "cursor", idx: 0, metric: "monthly:On-demand spend this billing cycle (USD)"}
+            compare(settings.selectedLabel, "Cursor · On-demand spend")
+            const trigger = findChild(settings, "active-provider")
+            mouseClick(trigger)
+            wait(20)
+            keyClick(Qt.Key_Home)
+            for (let i = 0; i < 3; i++) keyClick(Qt.Key_Down)
+            keyClick(Qt.Key_Return)
+            compare(settings.selected.provider, "account:work")
+            compare(settings.selectedLabel, "Claude (Max) · Work · Weekly")
+            settings.save()
+            compare(Plugin.Model.saved.selected.provider, "account:work")
+            compare(Plugin.Model.saved.selected.metric, "weekly")
+        }
+        function test_identically_named_accounts_have_distinct_group_labels() {
+            const snapshot = Plugin.Model.snapshot
+            snapshot.providers.push({id: "claude", idx: 1, name: "Claude (Max)", loading: false, cached: false, metrics: [{key: "weekly", name: "Weekly Usage", detail: ""}]})
+            Plugin.Model.snapshot = Object.assign({}, snapshot)
+            settings.begin()
+            compare(settings.choices[0].groupLabel, "Claude (Max) · Account 1")
+            compare(settings.choices[3].groupLabel, "Claude (Max) · Account 2")
+            settings.selected = {provider: "claude", idx: 1, metric: "weekly"}
+            settings.save()
+            compare(Plugin.Model.saved.selected.idx, 1)
         }
         function test_both_selectors_overlay_without_resizing_and_support_keyboard() {
             const provider = findChild(settings, "active-provider")
@@ -410,7 +456,7 @@ Item {
             compare(findChild(table, "reset-remaining").text, "12d 2h left")
             compare(available.text, "5")
             verify(table.visible)
-            compare(table.radius, 8)
+            compare(table.radius, Style.cornerRadius)
             compare(findChild(footer, "reset-available"), available)
             compare(findChild(footer, "reset-available-label").text, "Available resets")
             compare(available.font.weight, Font.Medium)
@@ -419,7 +465,7 @@ Item {
             compare(findChild(header, "reset-type-header").text, "Reset type")
             compare(findChild(header, "reset-expires-header").text, "Expires")
             compare(header.color, Qt.rgba(credits.foreground.r, credits.foreground.g, credits.foreground.b, 0.04))
-            compare(header.radius, 7)
+            compare(header.radius, Math.max(0, table.radius - 1))
             compare(footer.color, header.color)
             compare(footer.radius, header.radius)
             const explanation = findChild(credits, "reset-explanation")
