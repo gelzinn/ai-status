@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/": ["../../packages/lib/VERSION"],
     "/opengraph-image": ["../../packages/lib/VERSION"],
+    "/macos": ["../../packages/lib/MACOS.md"],
   },
 };
 
