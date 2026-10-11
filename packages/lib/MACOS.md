@@ -1,8 +1,7 @@
 # AI Status for macOS
 
-AI Status runs as a native SwiftUI/AppKit menu bar app. Its usage, Settings,
-reset-credit and About pages follow the same structure as the Windows tray
-app and Omarchy Quickshell plugin, using the shared provider backend.
+AI Status runs as a native SwiftUI/AppKit menu bar app, with usage, Settings,
+reset-credit and About pages powered by its provider backend.
 
 ## Requirements
 
@@ -49,18 +48,6 @@ The bundle lives at `~/.local/share/ai-status/AI Status.app`, with a shortcut at
 | `--skip-check` | Skip the macOS version preflight; Python and build tools remain required |
 | `--no-interactive` | Accepted for scripted installs; installation is non-interactive |
 
-Before this macOS port has been released, install it from its branch checkout:
-
-```bash
-git clone --depth 1 --branch feat/macos-swiftbar \
-  https://github.com/gelzinn/ai-status /tmp/ai-status-macos
-bash /tmp/ai-status-macos/packages/lib/install-macos.sh
-```
-
-For an existing checkout, run `bash packages/lib/install-macos.sh` from the
-repository root. This installs the checkout's code, including local changes,
-instead of downloading a stable release.
-
 ## Usage panel
 
 Click the menu bar item to open or close the panel. The header contains
@@ -94,14 +81,13 @@ continues to use your provider's own apps and CLIs; Settings does not perform
 provider sign-in.
 
 Manage additional accounts with `~/.local/bin/ai-status accounts`. Saved
-connections have independent labels and credential sources; the native panel
-uses the same connections as Windows and Quickshell. For launches from Finder
-or at sign-in, file-based credential references avoid depending on shell-only
+connections have independent labels and credential sources. For launches from
+Finder or at sign-in, file-based credential references avoid depending on shell-only
 environment variables. See [multiple accounts and connections](PROVIDERS.md#multiple-accounts-and-connections)
 for commands and credential-source examples.
 
-The native app shares preferences and cache with the other integrations
-in `~/.config/ai-status/selected.json` and `~/.cache/ai-status.json`.
+The native app stores preferences in `~/.config/ai-status/selected.json`
+and cached usage in `~/.cache/ai-status.json`.
 `~/.local/bin/ai-status config` opens its native Settings page.
 
 Claude authentication also supports the local `Claude Code-credentials`
@@ -130,19 +116,3 @@ progress bars, reset timers and the active limit marker. Click a provider or
 limit to select it. **Refresh**, **Settings** and **About AI Status** appear
 as menu actions. SwiftBar Settings opens the shared terminal configuration
 interface; the full native pages are available in `--mode native`.
-
-## Development and validation
-
-The SwiftUI sources are in `packages/lib/macos/`. The native app consumes
-the shared JSON daemon and uses the same settings validation and provider
-selection commands as the other native panels.
-
-Run the installer from a checkout on a Mac to compile and launch it. Verify
-menu bar selection, popover open/close and Escape, manual and background
-refresh, settings Save/Cancel and reordering, reset-credit navigation, About,
-multiple displays, and launch at sign-in. Check both light and dark
-appearance, provider errors, missing credentials and cached results.
-
-Linux checks cover the backend and installer behavior. They do not verify
-AppKit/SwiftUI compilation or the on-screen macOS experience; those need a
-Mac.

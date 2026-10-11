@@ -140,7 +140,7 @@ The installer builds a native SwiftUI/AppKit menu bar app with the same usage, S
 
 Requires macOS 13+, Python 3.10+ and Xcode Command Line Tools (`xcode-select --install`). The native integration does not require SwiftBar. Re-run to update while keeping your preferences. Existing SwiftBar users can select `--mode stream` or `--mode periodic` instead.
 
-[macOS installation, branch testing and SwiftBar options →](packages/lib/MACOS.md)
+[macOS installation, updates and SwiftBar options →](packages/lib/MACOS.md)
 
 </details>
 
@@ -322,8 +322,8 @@ Available metrics depend on the account, plan and upstream API. Providers withou
 | Guide | What you will find |
 | --- | --- |
 | [Linux](https://ai-status.gelzin.com/linux) | Waybar and Omarchy Quickshell requirements, installation and configuration |
-| [Windows](packages/lib/WINDOWS.md) | Installer, portable app, sign-in option, compatibility and local builds |
-| [macOS](packages/lib/MACOS.md) | Native menu bar app, local builds, sign-in startup and optional SwiftBar modes |
+| [Windows](packages/lib/WINDOWS.md) | Installer, portable app, sign-in option, updates and provider compatibility |
+| [macOS](packages/lib/MACOS.md) | Native menu bar app, installation, updates, sign-in startup and optional SwiftBar modes |
 | [Guide for LLMs](https://ai-status.gelzin.com/llms.txt) | Select the Linux, Windows or macOS instructions for your system |
 | [Providers and authentication](packages/lib/PROVIDERS.md) | Credential sources, account setup and troubleshooting |
 | [Updates and rollback](packages/lib/UPDATES.md) | Stable releases, version selection, checksums and recovery |
@@ -349,6 +349,7 @@ Credentials come from your local provider authentication stores or explicitly co
 | `packages/lib/macos/` | Native macOS menu bar app and local build |
 | `packages/shared/providers/` | Provider names, logos and metadata |
 | `apps/web/` | Website, interactive preview and documentation |
+| `docs/development/` | Platform build and development validation instructions |
 | `manifest.json` | Omarchy plugin contract |
 
 </details>

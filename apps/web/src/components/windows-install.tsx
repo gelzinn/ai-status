@@ -26,11 +26,6 @@ export async function WindowsInstall() {
 					Setup guide <ArrowRight className="size-3.5" />
 				</Link>
 			</div>
-			{download.kind === "preview" && (
-				<p className="text-xs leading-relaxed text-muted-foreground">
-					Downloads currently open preview builds. A GitHub account is required to download previews.
-				</p>
-			)}
 		</div>
 	);
 }

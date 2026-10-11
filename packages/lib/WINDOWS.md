@@ -1,29 +1,29 @@
 # Windows 10 and 11
 
 AI Status has a native desktop adapter for x64 Windows 10 (1809 or newer) and
-Windows 11. It uses a notification-area icon and a dashboard instead of Waybar.
+Windows 11. It uses a notification-area icon and a desktop dashboard.
 No WSL, Bash, Git, jq, curl, Python installation, or Nerd Font is required for
 the packaged application.
 
 ## Install and use
 
 Download `ai-status-<version>-windows-x64-setup.exe` from the
-[GitHub release](https://github.com/gelzinn/ai-status/releases/latest) once a
-release containing Windows assets has been published. Run it as your normal
-user; installation does not require administrator access. Launch **AI Status**
-from the Start menu. A portable ZIP is also built: extract the entire folder
-and open `ai-status.exe`. Keep `ai-status-cli.exe` and `_internal` beside it.
+[latest GitHub release](https://github.com/gelzinn/ai-status/releases/latest).
+Run it as your normal user; installation does not require administrator access. Launch **AI Status**
+from the Start menu. For a portable installation, download
+`ai-status-<version>-windows-x64.zip` from the same release, extract the entire
+folder and open `ai-status.exe`. Keep `ai-status-cli.exe` and `_internal` beside it.
 For portable upgrades, extract into a fresh folder and replace the old app folder;
 settings/cache live in your user profile.
 
 - Click the selected provider's tray logo to toggle the usage panel. Windows may initially put it in
   the hidden-icons menu; move it beside the clock using Windows settings.
 - Click a provider or a metric to select it; the arrow/bullet marks the active
-  selection, matching the landing-page preview. The tray logo and short usage
+  selection. The tray logo and short usage
   tooltip follow that selection. Up/Down cycles metrics; Escape closes the panel.
 - The panel only lists providers with usable metrics. Failed/unconnected providers
-  do not occupy rows. The header has **Refresh** and **Settings** icons, matching
-  Quickshell. The tray context menu also contains **Connection details**,
+  do not occupy rows. The header has **Refresh** and **Settings** icons. The tray
+  context menu also contains **Connection details**,
   update/log actions and **Exit**. R refreshes usage and C opens settings.
 - **Settings** opens inside the panel, with the back arrow before the title.
   Choose the active provider/limit, with provider logos in the selector and its
@@ -56,23 +56,20 @@ settings/cache live in your user profile.
 
 The installer and app contain their own runtime. Provider applications and
 authenticated sessions are separate prerequisites; their CLIs are not bundled
-or installed automatically. Uninstalling removes the sign-in entry and keeps
-your AI Status settings/cache. It never deletes provider credentials.
+or installed automatically.
 
-Before a release includes Windows assets, use the **Windows package** workflow's
-separate **ai-status-<version>-windows-x64-setup** or
-**ai-status-<version>-windows-x64-portable** artifact. GitHub wraps each artifact
-in a ZIP. Extract the setup artifact and run
-`ai-status-<version>-windows-x64-setup.exe` inside it; do not rename the downloaded
-ZIP to `.exe`. The installer and portable payload are separate downloads.
-The UI uses the app's
-favicon for its executable/installer identity, bundled provider logos, and the
-same Geist Mono font as the landing-page preview, all available offline.
+To uninstall, remove **AI Status** in Windows Settings under **Apps**, or delete
+the portable application folder after exiting it. Disable **Start at sign-in**
+in Settings before removing a portable installation. The installer's uninstaller
+removes the sign-in entry and keeps your AI Status settings/cache. It never deletes provider credentials.
+
+The UI uses the app's favicon for its executable/installer identity, bundled
+provider logos, and the Geist Mono font, all available offline.
 
 ### Windows publisher and SmartScreen
 
-Preview packages are currently unsigned. Windows can show **Unknown publisher**
-and a **Windows protected your PC** SmartScreen prompt for these downloads.
+The Windows installer and executables are currently unsigned. Windows can show
+**Unknown publisher** and a **Windows protected your PC** SmartScreen prompt for these downloads.
 The application name, icon and version metadata identify the package, but they
 do not establish a verified publisher. Authenticode signing requires a trusted
 code-signing certificate or a signing service configured by the maintainer.
@@ -124,7 +121,7 @@ sign-in or incompatible-output failures; there is no WSL fallback.
 Its collector uses Windows' built-in ConPTY API directly and still depends on the
 CLI's interactive `/usage` output. No pywinpty/WinPTY runtime is shipped. CLI/API
 changes can require a collector/parser update. HTTP-backed providers likewise
-retain the same usage endpoints and account requirements as the Linux module.
+depend on their providers' usage endpoints and account requirements.
 
 ## Data and command line
 
@@ -132,7 +129,8 @@ Settings are stored in `%APPDATA%\ai-status`. Usage cache, runtime coordination
 files and `ai-status-error.log` live in `%LOCALAPPDATA%\ai-status\cache`.
 These directories are separate from the installation so upgrades preserve them.
 
-From the extracted/installed directory in PowerShell:
+Open PowerShell in the portable folder or the installed application directory
+(default: `%LOCALAPPDATA%\Programs\AI Status`):
 
 ```powershell
 .\ai-status-cli.exe doctor   # Version, directories, collectors, Qt/ConPTY availability
@@ -159,68 +157,5 @@ for the JSON format and provider options. HTTP 429 cooldowns persist across
 refreshes and restarts; they respect `Retry-After` and retain cached metrics.
 
 `status` is read-only with respect to provider sessions and saves usage cache.
-`daemon` remains a JSON stream adapter; Linux's Waybar output/controls are
-preserved. The desktop reads structured provider metrics directly rather than
-trying to render Waybar's Pango markup or Linux icon fonts.
-
-## Develop and build
-
-Use x64 Python 3.12, Inno Setup 6, and Visual Studio Build Tools with the x64
-C++ compiler and Windows SDK on a Windows build machine. Git for Windows
-supplies the OpenSSL **test tool** used to generate an untrusted localhost
-certificate; OpenSSL is not shipped with the app. From the repo:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r packages/lib/windows/requirements.txt
-python packages/lib/src/windows.py tray
-$env:QT_QPA_PLATFORM = "offscreen"
-python -m unittest discover -s packages/lib/tests -v
-Remove-Item Env:QT_QPA_PLATFORM
-.\packages\lib\windows\build.ps1
-```
-
-The build produces a small native windowed launcher and a console helper sharing
-one Python/Qt runtime in `dist/ai-status`, an installer and a portable ZIP. The
-launcher carries the app icon, preserves arguments/exit status, and starts the
-helper without a console window. The helper runs bundled collectors in isolated
-subprocesses with explicit timeouts; running `.py` files through Windows file
-associations is never required. Qt/Python remain external dynamic libraries in
-the folder. Dependency license texts accompany the package.
-
-The **Windows package** workflow runs tests, builds both distributions and
-smoke-tests the packaged collectors, GUI dependencies, silent install and
-uninstall on a Windows runner. Release automation attaches those artifacts to
-the existing versioned GitHub release. Hosted Windows runners do not replace
-interactive testing on Windows 10/11: validate tray interaction, scaling,
-Explorer restart, suspend/resume, upgrade and authenticated usage on both OSes
-before announcing full provider compatibility.
-
-The package ships only raster widgets and the required Windows/offscreen Qt
-platform plugins. OpenGL software emulation, QML/Quick, QtNetwork/QtSvg, unused
-image/TLS plugins, translations, legacy Bash collectors and bytecode caches are
-excluded. Windows HTTPS uses WinHTTP and the system certificate store, including
-normal certificate/hostname checks, timeouts, proxy settings and decompression.
-Authentication headers are retained on same-origin redirects and removed when
-the origin changes. HTTPS redirects to HTTP are rejected. Linux uses the
-standard-library HTTP client as before.
-
-Python/OpenSSL and Qt TLS libraries are omitted from the Windows bundle. The
-Universal CRT comes from Windows 10/11; duplicate MSVC 14 DLLs are consolidated
-to the newest backwards-compatible version. Qt remains dynamically linked and
-replaceable. The installer uses solid LZMA2 with a 64 MiB dictionary; the portable
-ZIP retains Deflate for Windows Explorer compatibility. Frozen Python bytecode
-uses optimization level 2 and maximum zlib compression, omitting development
-docstrings/assertions; runtime input validation uses explicit exceptions.
-
-CI renders the packaged widgets/logos, runs real ConPTY input/output checks,
-tests native HTTP against localhost (including invalid TLS certificates), and
-verifies public HTTPS from the frozen executable. It also tests the native
-launcher, silent install/upgrade/uninstall in a Unicode path (including removal
-of obsolete runtime DLLs and preservation of user data), and enforces size budgets
-of 56 MiB installed, 23 MiB for the portable ZIP, and 18 MiB for the installer.
-These budgets include the required SQLite runtime for Cursor/Kiro credential
-readers and live Google Cloud authentication fingerprints. Optional Qt/OpenSSL
-libraries remain excluded. The build summary lists the largest remaining
-runtime files.
+`daemon` provides a JSON stream of usage updates. The desktop reads structured
+provider metrics directly.

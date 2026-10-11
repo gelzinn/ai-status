@@ -79,16 +79,6 @@ export default async function WindowsPage() {
                 </footer>
               </div>
 
-              {download.kind === "preview" && <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                <div className="flex flex-col gap-2 p-4 text-sm">
-                  <span className="font-medium text-foreground">Preview downloads</span>
-                  <p className="leading-relaxed text-muted-foreground">Downloads currently open preview builds. A GitHub account is required to download them.</p>
-                </div>
-                <a href={`${repo.url}/actions/workflows/windows.yml`} target="_blank" rel="noreferrer" className="flex items-center justify-between gap-2 border-t border-border bg-muted p-4 text-xs text-muted-foreground transition-colors hover:text-foreground">
-                  Installer and portable builds <ArrowUpRight className="size-3.5 shrink-0" />
-                </a>
-              </div>}
-
               <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 <Link href="/windows/llms.txt" className="flex items-center justify-between gap-2 p-4 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                   Guide for LLMs <ArrowRight className="size-3.5 shrink-0" />

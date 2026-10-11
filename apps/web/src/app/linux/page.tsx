@@ -85,15 +85,6 @@ export default async function LinuxPage() {
               </div>
 
               <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                <Link href="/windows" className="flex items-center justify-between gap-2 p-4 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                  Windows setup <ArrowRight className="size-3.5 shrink-0" />
-                </Link>
-                <Link href="/macos" className="flex items-center justify-between gap-2 border-t border-border p-4 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                  macOS setup <ArrowRight className="size-3.5 shrink-0" />
-                </Link>
-              </div>
-
-              <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 <Link href="/linux/llms.txt" className="flex items-center justify-between gap-2 p-4 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                   Guide for LLMs <ArrowRight className="size-3.5 shrink-0" />
                 </Link>

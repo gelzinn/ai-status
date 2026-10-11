@@ -1,11 +1,10 @@
 import { repo } from "./env";
 
 export type WindowsDownload = {
-  kind: "release" | "preview";
   href: string;
 };
 
-/** Keep download links and preview notices based on the same release metadata. */
+/** Prefer the stable release installer and keep the release page as a fallback. */
 export async function getWindowsDownload(): Promise<WindowsDownload> {
   try {
     const response = await fetch(repo.apiUrl, {
@@ -23,10 +22,10 @@ export async function getWindowsDownload(): Promise<WindowsDownload> {
             asset.browser_download_url.startsWith(`${repo.url}/releases/download/`),
           )
         : undefined;
-      if (installer) return { kind: "release", href: installer.browser_download_url };
+      if (installer) return { href: installer.browser_download_url };
     }
   } catch {
-    // Release metadata may be unavailable; preview builds remain reachable.
+    // Stable release downloads remain reachable if the metadata lookup fails.
   }
-  return { kind: "preview", href: `${repo.url}/actions/workflows/windows.yml` };
+  return { href: `${repo.url}/releases/latest` };
 }

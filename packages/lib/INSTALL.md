@@ -1,9 +1,6 @@
 # Installing AI Status on Linux
 
-For the native Windows 10/11 tray app and bundled installer, follow the
-[Windows guide](WINDOWS.md). For the native macOS menu bar app, see
-[macOS setup](MACOS.md). The Linux instructions below cover Waybar and the
-Omarchy Quattro Quickshell widget.
+These instructions cover Waybar and the Omarchy Quattro Quickshell widget.
 
 ## Requirements and desktop integration
 
@@ -21,8 +18,7 @@ provider's existing session or API credentials.
 
 The [Linux web guide](https://ai-status.gelzin.com/linux) and
 [Linux LLM guide](https://ai-status.gelzin.com/linux/llms.txt) both use this
-document. Start at the [platform directory](https://ai-status.gelzin.com/llms.txt)
-if the operating system is unknown.
+document.
 
 ## One-command install (recommended for LLMs)
 
@@ -54,19 +50,19 @@ This integration targets the Omarchy Quattro Quickshell shell. Start the Omarchy
 omarchy plugin add https://github.com/gelzinn/ai-status.git --enable
 ```
 
-The repository contains the plugin manifest, native QML UI, Python backend, and provider scripts. Direct plugin installation needs no previous AI Status CLI install, no Node, and no NPM. It creates a Git checkout under `~/.config/omarchy/plugins/io.github.gelzinn.ai-status/`. This includes repository source but no website dependencies or build artifacts; the shell executes the bundled Python backend.
+The repository contains the plugin manifest, native QML UI, Python backend, and provider scripts. Direct plugin installation needs no previous AI Status CLI install, no Node, and no NPM. Omarchy manages the installed plugin under `~/.config/omarchy/plugins/io.github.gelzinn.ai-status/`; the shell executes the bundled Python backend.
 
 Dependencies: Linux, the compatible Omarchy Quickshell shell and its plugin CLI, `python3`, `jq`, `curl`, and `git`. Provider-specific authentication and optional CLIs are documented in [PROVIDERS.md](PROVIDERS.md). Quickshell settings run inside the panel without a terminal. The optional CLI configuration TUI (`ai-status config`) needs an available terminal (`foot`, `alacritty`, `kitty`, `ghostty`, `wezterm`, or `xterm`). Qt renders original SVG/raster logos, so no image rasterizer is required. Logos are downloaded from the URLs in the shared provider metadata and cached under `~/.cache/ai-status/quickshell-logos/`; failed images fall back to a placeholder. Provider logos in the panel are independent of the bar's icon preference.
 
-The widget runs inside the existing shell process, using a single Python daemon for all monitors. It shares `~/.config/ai-status/` and provider caches with Waybar. The usage panel shows only providers with valid metrics, including legitimate 0% usage and valid cached results. Providers without usable data stay available in Settings. Initial loading shows “Checking your connected providers…”; cached bars shimmer during refresh and finish independently as each provider responds. Bars use the Windows preview animation: a 1.5-second shimmer, a 1.5-second eased fill, and initial delays of 100 ms plus 150 ms per provider. The panel also shows provider logos, aligned percentages, reset details, and the installed version. Left-click opens/closes the panel. Its fixed header has **Refresh** and **Configure** icons. Right-click or **Configure** switches to the native settings page, where you choose the active provider/limit, toggle display fields and icon mode, and enable/disable or reorder providers. The back arrow sits before the Settings title. **Save** applies preferences and keeps settings open; **Cancel**, Back, or Escape discards any remaining unsaved edits and returns to usage. Saving errors stay in the form. Provider authentication remains documented in [PROVIDERS.md](PROVIDERS.md).
+The widget runs inside the existing shell process, using a single Python daemon for all monitors. It shares `~/.config/ai-status/` and provider caches with Waybar. The usage panel shows only providers with valid metrics, including legitimate 0% usage and valid cached results. Providers without usable data stay available in Settings. Initial loading shows “Checking your connected providers…”; cached bars shimmer during refresh and finish independently as each provider responds. Bars use a 1.5-second shimmer, a 1.5-second eased fill, and initial delays of 100 ms plus 150 ms per provider. The panel also shows provider logos, aligned percentages, reset details, and the installed version. Left-click opens/closes the panel. Its fixed header has **Refresh** and **Configure** icons. Right-click or **Configure** switches to the native settings page, where you choose the active provider/limit, toggle display fields and icon mode, and enable/disable or reorder providers. The back arrow sits before the Settings title. **Save** applies preferences and keeps settings open; **Cancel**, Back, or Escape discards any remaining unsaved edits and returns to usage. Saving errors stay in the form. Provider authentication remains documented in [PROVIDERS.md](PROVIDERS.md).
 
 Click a provider heading or usage metric to select it immediately. Scroll the bar to switch between providers with valid data; middle-click switches metrics. Escape on the usage page closes the panel; `r` refreshes, `c` opens settings, and Up/Down scroll. In settings, Tab focuses the form controls; Space or Enter activates the focused control. Preferences are saved only when you press **Save**.
 
-Both settings selectors open floating lists without expanding the form. Provider names match the landing page, and their logos appear in the active limit and its options and beside every provider checkbox. Both selectors use the same right-aligned chevron. The header divider reaches the panel borders, and only the Refresh icon rotates during updates.
+Both settings selectors open floating lists without expanding the form. Provider logos appear in the active limit and its options and beside every provider checkbox. Both selectors use the same right-aligned chevron. The header divider reaches the panel borders, and only the Refresh icon rotates during updates.
 
 The bar has no hover tutorial. Open **About AI Status** in Settings for the project logo, description, author, version, commit, MIT license, quick guide and links to GitHub, documentation and bug reports. Back returns to your settings draft. Reset details also use the header's back arrow; their provider logo/name is a plain heading above a rounded table.
 
-The header uses monochrome Lucide vector icons for refresh, configuration, and back, matching the landing page's icon family and following the shell's foreground color. Claude and Codex show **Reset credits: N available** when usable manual resets exist. Clicking it opens the same details layout as Windows: provider/back navigation, explanation, and a table with reset type, credit count, local expiry date, remaining time, and UTC offset. Expired credits are removed, details are bounded by the authoritative count, and missing expiry details are indicated explicitly. Back or Escape restores the usage page, scroll position, and focused button without changing the bar selection. The same inventory appears in the Waybar tooltip; see [PROVIDERS.md](PROVIDERS.md) for endpoint behavior.
+The header uses monochrome Lucide vector icons for refresh, configuration, and back, following the shell's foreground color. Claude and Codex show **Reset credits: N available** when usable manual resets exist. Clicking it opens a details page with provider/back navigation, explanation, and a table with reset type, credit count, local expiry date, remaining time, and UTC offset. Expired credits are removed, details are bounded by the authoritative count, and missing expiry details are indicated explicitly. Back or Escape restores the usage page, scroll position, and focused button without changing the bar selection. The same inventory appears in the Waybar tooltip; see [PROVIDERS.md](PROVIDERS.md) for endpoint behavior.
 
 ```bash
 # Place the widget (defaults to right on first enable):
@@ -80,7 +76,7 @@ omarchy plugin disable io.github.gelzinn.ai-status
 omarchy plugin remove io.github.gelzinn.ai-status
 ```
 
-The AI Status installer offers this same integration with `--bar quickshell --configure-bar true`. It keeps the existing lean CLI installation and uses Omarchy's Git-managed add/update commands for the plugin, preserving its placement. If a plugin folder is not Git-managed, it reports the conflict and leaves that folder untouched. A local development install clones the checkout's committed HEAD; uncommitted QML edits must be tested in a user-owned plugin copy instead.
+The AI Status installer offers this same integration with `--bar quickshell --configure-bar true`. It keeps the existing lean CLI installation and uses Omarchy's Git-managed add/update commands for the plugin, preserving its placement. If a plugin folder is not Git-managed, it reports the conflict and leaves that folder untouched.
 
 The script downloads the latest published stable release, even when `main`
 has newer commits. Add `--version v0.9.0` to select a specific compatible
@@ -189,12 +185,11 @@ The config TUI lets you enable/disable providers, reorder with Shift+J/K, toggle
 Run `ai-status --help` to see the commands and `ai-status help COMMAND` for
 details. Help accepts nested commands, such as `ai-status help accounts add`;
 `ai-status accounts add --help` works too. `ai-status --version` prints the
-installed version. On Linux, running `ai-status` without arguments shows help
-and exits successfully. On Windows and macOS, it opens the native app.
+installed version. Running `ai-status` without arguments shows help and exits
+successfully.
 
-The examples below use `ai-status`. If `~/.local/bin` is not on your Linux or
-macOS `PATH`, use `~/.local/bin/ai-status`. In the Windows installation or
-portable folder, use `.\ai-status-cli.exe` from PowerShell.
+The examples below use `ai-status`. If `~/.local/bin` is not on your `PATH`,
+use `~/.local/bin/ai-status`.
 
 | Task | Command |
 | --- | --- |
@@ -301,16 +296,3 @@ a release; the CLI's `ai-status --version` prints the installed version.
 `ai-status daemon` (or `--format waybar`) keeps the existing newline-delimited `{text, tooltip}` JSON/Pango contract. `ai-status daemon --format quickshell` emits snapshots with `schemaVersion: 1`, `text`, `version`, `selected`, `iconMode`, `logoPath`, `loading`, and `providers`. Providers contain stable `id`/`idx`, `name`, `loading`, `cached`, `error`, and `metrics`; metrics contain `key`, `type`, `name`, `percentage`, `resetInSeconds`, and plain-text `detail`. Loading snapshots arrive as each provider finishes; animation is handled by the UI rather than encoded as Pango. Providers without valid metrics are omitted; `settings` still contains all configurable providers. `resetCredits` contains live counts and structured display rows for the separate details page.
 
 `ai-status scroll-up --frontend quickshell` and `scroll-down --frontend quickshell` change the shared selection without writing Waybar's logo or sending it refresh signals. `ai-status select-metric --frontend quickshell --selection-json '{"provider":"codex","idx":0,"metric":"weekly"}'` selects an available metric without fetching again. Existing commands default to Waybar behavior. `ai-status revert` continues to restore only the Waybar backup.
-
-## Development validation
-
-```bash
-python3 -m unittest discover -s packages/lib/tests -v
-omarchy plugin validate ~/.config/omarchy/plugins/io.github.gelzinn.ai-status
-qmllint -I "$OMARCHY_PATH/shell" \
-  ~/.config/omarchy/plugins/io.github.gelzinn.ai-status/packages/lib/quickshell/*.qml
-omarchy-shell shell summon io.github.gelzinn.ai-status '{}'
-omarchy-shell shell hide io.github.gelzinn.ai-status
-```
-
-Validate a clean checkout/plugin folder: the Omarchy validator rejects symlinks, including those in local `node_modules`. On an Omarchy desktop, check click, Escape, repeat open/close, scroll, middle-click, configuration, themes, horizontal/vertical bars, and multiple monitors. Confirm one Python daemon across monitors and that disabling/removing the plugin stops it. Check hot reload, shell restart, backend restart, provider errors, and missing logos. Test Waybar separately with its existing modules and `ai-status revert`.
