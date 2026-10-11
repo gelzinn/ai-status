@@ -13,8 +13,13 @@ capture is retained from the original README.
 - `macos-usage.png` uses the production SwiftUI/AppKit view rendered by the
   native smoke test on `macos-14`, with the same sample usage and reset credits.
   The PNG is unchanged from the `macos-panel-preview` artifact in the
-  [successful release CI run](https://github.com/gelzinn/ai-status/actions/runs/38102624736/job/114361521777)
-  for commit `8efe38964bf2f72b9c486178f556e0eb00a4cb54`.
+  [successful native CI run](https://github.com/gelzinn/ai-status/actions/runs/38151285761/job/114505105012)
+  for commit `9de69022ab74fccc3b2022fe09c53089ef466e4b`.
+
+All three interfaces read the same bundled `assets/panel-icons.json` geometry for
+refresh, settings and navigation arrows. Header controls have transparent idle
+backgrounds, hover fills and keyboard focus outlines. The README captures show
+the controls without hover or focus.
 
 `waybar-tooltip.png` is the unchanged public screenshot previously hosted at
 `https://github.com/user-attachments/assets/dcba0b97-d462-452e-b1b6-000cc445b803`.
