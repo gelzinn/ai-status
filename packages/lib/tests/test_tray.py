@@ -262,6 +262,158 @@ class DesktopTests(IsolatedState):
         for name in config.available_providers():
             self.assertTrue(tray.icon_has_pixels(tray.provider_icon(name)), name)
 
+    def test_account_amounts_are_selectable_without_fake_percentage_bar(self):
+        from core import accounts
+        accounts.save_document({"version": 1, "accounts": [
+            {"id": "work", "provider": "openrouter", "label": "Work"},
+        ]}, config.accounts_file())
+        config.save_config([])
+        entry = {"provider": "OpenRouter", "_dir": "openrouter", "_connection_id": "account:work",
+                 "_account_label": "Work", "metrics": [{"type": "balance", "name": "Credits",
+                 "percentage": None, "amount": 42.5, "unit": "USD", "detail": "Available credits"}]}
+        self.dashboard.on_result("account:work", [entry])
+        button = self.dashboard.metric_buttons[0]
+        self.assertEqual(button.percentage.text(), "$42.50")
+        self.assertTrue(button.bar.isHidden())
+        self.assertIn("Work $42.50", self.dashboard.tray.toolTip())
+        button.click()
+        self.assertEqual(state.load_selected()["provider"], "account:work")
+
+    def test_long_metric_names_keep_percentages_and_amounts_in_the_viewport(self):
+        config.save_config(["openai-api"])
+        self.dashboard.on_result("openai-api", [{"provider": "OpenAI API", "metrics": [
+            {"type": "monthly", "name": "Reported month costs / configured budget (USD)",
+             "percentage": 38.75},
+            {"type": "balance", "name": "Available organization prepaid credit balance (USD)",
+             "percentage": None, "amount": 12345.67, "unit": "USD"},
+            {"type": "credits", "name": "Account spend / total credits (USD)",
+             "percentage": 25, "amount": 25, "limit": 100, "unit": "USD", "value_format": "amount_ratio"},
+        ]}])
+        self.dashboard.show()
+        self.app.processEvents()
+        viewport = self.dashboard.scroll.viewport()
+        self.assertLessEqual(self.dashboard.scroll.widget().width(), viewport.width())
+        self.assertEqual([button.percentage.text() for button in self.dashboard.metric_buttons],
+                         ["39%", "$12345.67", "$25.00 / $100.00"])
+        for button in self.dashboard.metric_buttons:
+            value = button.percentage
+            right = value.mapTo(viewport, tray.QPoint(value.width(), 0)).x()
+            self.assertLessEqual(right, viewport.width())
+            self.assertGreaterEqual(value.width(), value.fontMetrics().horizontalAdvance(value.text()))
+
+    def test_metric_values_align_above_full_width_bars_and_amounts_have_no_bar_row(self):
+        config.save_config(["openrouter"])
+        self.dashboard.on_result("openrouter", [{"provider": "OpenRouter", "metrics": [
+            {"type": "credits", "name": "Account credits", "percentage": 25,
+             "amount": 25, "limit": 100, "unit": "USD", "value_format": "amount_ratio"},
+            {"type": "monthly", "name": "Key limit", "percentage": 12,
+             "amount": 12, "limit": 100, "unit": "USD", "value_format": "amount_ratio"},
+            {"type": "balance", "name": "Available balance", "percentage": None,
+             "amount": 75, "unit": "USD"},
+        ]}])
+        self.dashboard.show()
+        self.app.processEvents()
+        rows = self.dashboard.metric_buttons
+        right_edges = [row.percentage.mapTo(self.dashboard.scroll.widget(),
+                       tray.QPoint(row.percentage.width(), 0)).x() for row in rows if not row.is_amount]
+        self.assertEqual(len(set(right_edges)), 1)
+        for row in rows:
+            self.assertEqual(row.title.parentWidget(), row.percentage.parentWidget())
+            if row.bar_container.isHidden():
+                self.assertTrue(row.bar.isHidden())
+            else:
+                self.assertGreater(row.bar_container.y(), row.percentage.y())
+                self.assertGreater(row.bar.width(), row.title.width())
+        rows[-1].click()
+        self.assertEqual(state.load_selected()["metric"], rows[-1].value[2])
+        self.assertEqual(rows[-1].bullet.text(), "•")
+
+    def test_native_metric_content_aligns_with_provider_name_and_amount_value_is_adjacent(self):
+        config.save_config(["deepseek"])
+        self.dashboard.on_result("deepseek", [{"provider": "DeepSeek", "metrics": [
+            {"type": "balance", "name": "Available balance", "id": "balance", "amount": 20.5,
+             "unit": "USD", "percentage": None, "detail": "Organization credits"},
+            {"type": "monthly", "name": "Monthly usage", "percentage": 25, "reset_in_seconds": 3600},
+        ]}])
+        self.dashboard.show()
+        self.app.processEvents()
+        content = self.dashboard.scroll.widget()
+        heading = self.dashboard.provider_buttons[("deepseek", 0)]
+        anchor = heading.name_label.mapTo(content, tray.QPoint(0, 0)).x()
+        marker = heading.arrow.mapTo(content, tray.QPoint(0, 0)).x()
+        for row in self.dashboard.metric_buttons:
+            self.assertEqual(row.title.mapTo(content, tray.QPoint(0, 0)).x(), anchor)
+            self.assertEqual(row.bullet.mapTo(content, tray.QPoint(0, 0)).x(), marker)
+            self.assertEqual(row.description.mapTo(content,
+                tray.QPoint(row.description.contentsMargins().left(), 0)).x(), anchor)
+            if not row.bar_container.isHidden():
+                self.assertEqual(row.open_bracket.mapTo(content, tray.QPoint(0, 0)).x(), anchor)
+            if row.is_amount:
+                self.assertTrue(row.percentage.alignment() & tray.Qt.AlignmentFlag.AlignLeft)
+                self.assertFalse(row.percentage.alignment() & tray.Qt.AlignmentFlag.AlignRight)
+                self.assertEqual(row.percentage.x() - row.title.geometry().right() - 1, 8)
+                self.assertTrue(row.bar_container.isHidden())
+                self.assertEqual(row.percentage.font().pixelSize(), 13)
+        amount = next(row for row in self.dashboard.metric_buttons if row.is_amount)
+        amount.setFocus()
+        QTest.keyClick(amount, tray.Qt.Key.Key_Return)
+        selected = amount.value
+        before = [(row.geometry(), row.percentage.geometry()) for row in self.dashboard.metric_buttons]
+        self.dashboard.pending.add("deepseek")
+        self.dashboard.animate()
+        self.app.processEvents()
+        self.assertEqual(before, [(row.geometry(), row.percentage.geometry()) for row in self.dashboard.metric_buttons])
+        self.assertEqual(self.dashboard.selected_value(), selected)
+        self.assertTrue(amount.hasFocus())
+
+    def test_cached_status_and_reset_credits_link_align_with_provider_name(self):
+        config.save_config(["codex"])
+        self.dashboard.on_result("codex", [{"provider": "Codex", "_cached": True,
+            "_error": "Session expired", "metrics": [{"type": "weekly", "percentage": 23}],
+            "reset_credits": {"available": 2}}])
+        self.dashboard.show()
+        self.app.processEvents()
+        heading = self.dashboard.provider_buttons[("codex", 0)]
+        content = self.dashboard.scroll.widget()
+        anchor = heading.name_label.mapTo(content, tray.QPoint(0, 0)).x()
+        self.assertFalse(heading.cached_label.isHidden())
+        self.assertEqual(heading.cached_label.mapTo(content,
+            tray.QPoint(heading.cached_label.contentsMargins().left(), 0)).x(), anchor)
+        self.assertFalse(heading.credits.isHidden())
+        self.assertEqual(heading.credits_title.mapTo(content, tray.QPoint(0, 0)).x(), anchor)
+        heading.credits.click()
+        self.assertEqual(self.dashboard.reset_provider, ("codex", 0))
+
+    def test_two_openrouter_accounts_fit_without_scrolling(self):
+        from core import accounts
+        import json
+        from test_metered_apis import load
+        parser = load("openrouter", "parse").parse
+        accounts.save_document({"version": 1, "accounts": [
+            {"id": "personal", "provider": "openrouter", "label": "Personal"},
+            {"id": "work", "provider": "openrouter", "label": "Work"},
+        ]}, config.accounts_file())
+        config.save_config([])
+        for identity, label, spent, key_used in (("personal", "Personal", 25, 12), ("work", "Work", 42, 29)):
+            parsed = parser(json.dumps({
+                "key": {"data": {"usage_monthly": key_used, "limit": 100, "limit_remaining": 100 - key_used,
+                                   "limit_reset": "monthly"}},
+                "credits": {"data": {"total_credits": 100, "total_usage": spent}},
+            }))
+            self.dashboard.on_result("account:" + identity, [{"provider": "OpenRouter",
+                "_dir": "openrouter", "_connection_id": "account:" + identity,
+                "_account_label": label, "metrics": parsed["metrics"]}])
+        self.dashboard.show()
+        self.app.processEvents()
+        self.assertEqual(len(self.dashboard.metric_buttons), 4)
+        self.assertEqual([row.description.text() for row in self.dashboard.metric_buttons if row.description.text()],
+                         ["Available balance: $75.00", "Available balance: $58.00"])
+        self.assertFalse(any(row.title.text().startswith("Available balance") for row in self.dashboard.metric_buttons))
+        self.assertLessEqual(self.dashboard.height(), 720)
+        self.assertEqual(self.dashboard.scroll.verticalScrollBar().maximum(), 0)
+        self.dashboard.metric_buttons[-1].click()
+        self.assertEqual(state.load_selected()["provider"], "account:work")
+
     def test_refresh_keeps_rows_and_geometry_while_providers_finish_independently(self):
         from core import fetch
         self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [

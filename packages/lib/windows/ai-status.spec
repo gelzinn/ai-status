@@ -21,7 +21,8 @@ analysis = Analysis(
            (str(lib.parents[1] / "LICENSE"), "."),
            (str(lib / "windows/THIRD_PARTY.md"), ".")]
           + collect_data_files("PySide6", includes=["**/licenses/**", "**/LICENSE*"]),
-    hiddenimports=["core.provider_http", "core.console", "html", "datetime"],
+    hiddenimports=["core.provider_http", "core.console", "core.metered", "core.extra_providers",
+                   "core.oscrypt", "sqlite3", "tomllib", "html", "datetime"],
     excludes=["tkinter", "curses", "pytest", "ssl", "_ssl", "_hashlib", "PySide6.QtNetwork", "PySide6.QtQml",
               "PySide6.QtQuick", "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets", "PySide6.QtSvg"],
     noarchive=False,

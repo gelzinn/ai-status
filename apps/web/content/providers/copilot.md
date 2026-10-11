@@ -1,8 +1,8 @@
-GitHub Copilot is tracked through **OpenCode**: AI Status reads the Copilot token that OpenCode stores when you authenticate it, then calls GitHub's Copilot API for your usage. So the setup is really "authenticate Copilot inside OpenCode once."
+GitHub Copilot uses `GITHUB_COPILOT_TOKEN`, an existing OpenCode Copilot session, or a token from `gh auth token`. Sign in through OpenCode or run `gh auth login`, then enable **Copilot** in Settings.
 
 ## Requirements
 
-- **OpenCode** installed, authenticated with GitHub Copilot
+- A GitHub account with Copilot access and a token from OpenCode, GitHub CLI, or `GITHUB_COPILOT_TOKEN`
 - `jq` and `curl` (already required by AI Status)
 
 ## Step 1 — Authenticate Copilot in OpenCode
@@ -42,3 +42,7 @@ Run the provider's fetch script by hand to see the raw response:
 ```bash
 bash ~/.local/share/ai-status/packages/lib/src/providers/copilot/query.sh
 ```
+
+## Multiple accounts
+
+Set `auth_file` to that account's OpenCode `auth.json`, or map `GITHUB_COPILOT_TOKEN` to its own environment variable. For GitHub CLI authentication, explicitly select the account's `GH_CONFIG_DIR`. There is no application-imposed account limit. See the [authentication and multiple-account guide](https://github.com/gelzinn/ai-status/blob/main/packages/lib/PROVIDERS.md).

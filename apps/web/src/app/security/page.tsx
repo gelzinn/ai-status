@@ -39,7 +39,7 @@ const CREDENTIAL_SOURCES: Record<string, { source: string; note: string }> = {
 	},
 	opencode: {
 		source: "~/.local/share/opencode/auth.json",
-		note: "The OpenCode token; usage is scraped from your own workspace dashboard.",
+		note: "The OpenCode token; usage is read directly from the Go usage API.",
 	},
 	zai: {
 		source: "~/.local/share/opencode/account.json",
@@ -63,7 +63,7 @@ const NEVER = [
 	{
 		icon: KeyRound,
 		title: "Ship API keys",
-		body: `${site.name} bundles no keys, tokens, or secrets of its own. It only ever reads the ones already on your disk.`,
+		body: `${site.name} bundles no keys, tokens, or secrets of its own. It reads your existing local credentials or explicitly configured environment and file references.`,
 	},
 	{
 		icon: ServerOff,
@@ -96,7 +96,7 @@ const STEPS = [
 	{
 		icon: Gauge,
 		title: "Show",
-		body: "The response — a usage percentage and reset time — is rendered in your bar. Nothing is written back or sent anywhere else.",
+		body: "Usage limits, reset times, costs and balances are rendered in your bar. Nothing is written back or sent anywhere else.",
 	},
 ];
 
@@ -301,7 +301,7 @@ export default function SecurityPage() {
 						</div>
 						<ul className="divide-y divide-border">
 							{SUPPORTED_PROVIDERS.map((provider) => {
-								const src = CREDENTIAL_SOURCES[provider.slug];
+								const src = CREDENTIAL_SOURCES[provider.slug] || { source: provider.auth, note: "Explicit credential source; external login files are read only." };
 								return (
 									<li key={provider.slug}>
 										<a

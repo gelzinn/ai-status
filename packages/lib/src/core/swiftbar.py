@@ -57,8 +57,10 @@ def _image(path):
 
 
 def _snapshot(cache, selected, spinner=None):
-    paths = {name: macos.LogoCache().get(name) for name in config.enabled_order()}
-    pending = config.enabled_order() if spinner else ()
+    connections = config.enabled_connections()
+    logos = macos.LogoCache()
+    paths = {entry["provider"]: logos.get(entry["provider"]) for entry in connections}
+    pending = [entry["connection_id"] for entry in connections] if spinner else ()
     return quickshell.build_snapshot(cache, selected, pending=pending, logo_paths=paths)
 
 
@@ -106,7 +108,9 @@ def render_menu(cache, selected, spinner=None, title_image=None):
             checked = active and metric["key"] == choice.get("metric")
             params = [f"font={BAR_FONT}", "size=13", *_action("swiftbar-select", *select, metric["key"])]
             params.append("checked=true" if checked else f"color={DIM}")
-            out.append(_line(f"{metric['name']}:  {_bar(metric['percentage'])}  {metric['percentage']:.0f}%", *params))
+            value = metric["value"]
+            bar = f"{_bar(metric['percentage'])}  " if metric["hasPercentage"] else ""
+            out.append(_line(f"{metric['name']}:  {bar}{value}", *params))
             if metric["detail"]:
                 out.append(_line(metric["detail"], "size=11", f"color={FAINT}"))
         credits = provider.get("resetCredits")

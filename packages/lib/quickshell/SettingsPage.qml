@@ -51,7 +51,7 @@ Column {
     }
 
     function providerLogo(name, entry) {
-        return entry && entry.logoPath ? "file://" + entry.logoPath : Qt.resolvedUrl("../assets/providers/" + name + ".png")
+        return entry && entry.logoPath ? "file://" + entry.logoPath : Qt.resolvedUrl("../assets/providers/" + ((Plugin.Model.snapshot.settings.providerIds || {})[name] || name) + ".png")
     }
 
     function providerName(name) {
@@ -154,7 +154,7 @@ Column {
                 {key: "show_provider", label: "Provider name"},
                 {key: "show_model", label: "Model / plan"},
                 {key: "show_metric", label: "Limit name"},
-                {key: "show_pct", label: "Percentage"}
+                {key: "show_pct", label: "Usage value"}
             ]
             delegate: Button {
                 required property var modelData

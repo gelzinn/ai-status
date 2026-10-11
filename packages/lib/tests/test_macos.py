@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from core import cli, config, daemon, fetch, macos, paths, quickshell, state
+from core import accounts, cli, config, daemon, fetch, macos, paths, quickshell, state
 
 
 DATA = [
@@ -30,6 +30,11 @@ SELECTED = {"provider": "claude", "idx": 0, "metric": "rolling", "icon_mode": "l
 
 class MacOSFrontendTests(unittest.TestCase):
     def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="macos connections ")
+        self.addCleanup(temporary.cleanup)
+        configuration = patch.object(config, "CONFIG_FILE", str(Path(temporary.name) / "providers.json"))
+        configuration.start()
+        self.addCleanup(configuration.stop)
         enabled = patch.object(config, "enabled_order", return_value=["claude", "codex"])
         enabled.start()
         self.addCleanup(enabled.stop)
@@ -85,8 +90,9 @@ class MacOSFrontendTests(unittest.TestCase):
                 patch.object(state, "_save_json") as save, patch.object(state, "trigger_refresh") as refresh:
             result, errors = self.invoke(["save-settings", "--frontend", "macos", "--settings-json", json.dumps(payload)])
         self.assertIn(result, (0, None), errors)
-        self.assertEqual(save.call_args_list[0].args, (config.CONFIG_FILE, ["codex", "claude"]))
-        saved_selection = save.call_args_list[1].args[1]
+        self.assertEqual(config.load_config(), ["codex", "claude"])
+        self.assertEqual(save.call_count, 1)
+        saved_selection = save.call_args.args[1]
         self.assertEqual(saved_selection["idx"], 1)
         self.assertEqual(saved_selection["icon_mode"], "bot")
         self.assertFalse(saved_selection["show_provider"])
@@ -128,6 +134,43 @@ class MacOSFrontendTests(unittest.TestCase):
         network.assert_not_called()
 
     def test_macos_daemon_streams_shared_snapshot_without_remote_logos_or_pango(self):
+        snapshots = self.daemon_snapshots(DATA, SELECTED)
+        self.assertEqual(snapshots[-1]["selected"]["metric"], "rolling")
+        self.assertTrue(snapshots[-1]["providers"][0]["logoPath"].endswith(".png"))
+
+    def test_macos_daemon_keeps_account_identity_loading_selection_and_local_logo(self):
+        accounts.save_document({"version": 1, "accounts": [
+            {"id": "work", "provider": "openrouter", "label": "Work"},
+            {"id": "personal", "provider": "openrouter", "label": "Personal"},
+        ]}, config.accounts_file())
+        data = [dict(_dir="openrouter", _connection_id="account:" + identity,
+                     _account_label=label, _idx=idx, provider="OpenRouter", metrics=[
+                         dict(type="balance", percentage=None, amount=amount, unit="USD")])
+                for identity, label, idx, amount in (("personal", "Personal", 0, 8.25), ("work", "Work", 1, 42.5))]
+        selected = dict(SELECTED, provider="account:work", idx=1, metric="balance")
+        with patch.object(config, "enabled_order", return_value=[]):
+            snapshots = self.daemon_snapshots(data, selected)
+            with patch.object(state, "load_cache", return_value=data), \
+                    patch.object(state, "load_selected", return_value=selected), \
+                    patch.object(state, "save_selected") as save:
+                result, errors = self.invoke(["select-metric", "--frontend", "macos",
+                                              "--selection-json", json.dumps(selected)])
+            self.assertIn(result, (0, None), errors)
+            save.assert_called_once_with(selected)
+        self.assertTrue(all(provider["loading"] for provider in snapshots[0]["providers"]))
+        snapshot = snapshots[-1]
+        self.assertEqual(snapshot["text"], "OpenRouter · Work $42.50")
+        self.assertEqual(snapshot["selected"]["provider"], "account:work")
+        self.assertEqual(snapshot["selected"]["idx"], 1)
+        self.assertTrue(snapshot["logoPath"].endswith("openrouter.png"))
+        self.assertEqual(snapshot["settings"]["providerIds"]["account:work"], "openrouter")
+        self.assertEqual(snapshot["settings"]["names"]["account:work"], "OpenRouter · Work")
+        metric = snapshot["providers"][0]["metrics"][0]
+        self.assertIsNone(metric["percentage"])
+        self.assertFalse(metric["hasPercentage"])
+        self.assertEqual(metric["value"], "$42.50")
+
+    def daemon_snapshots(self, data, selected):
         class PendingThread:
             def __init__(self, **kwargs):
                 pass
@@ -154,8 +197,9 @@ class MacOSFrontendTests(unittest.TestCase):
             stack.enter_context(patch.object(daemon.os, "setsid", create=True))
             stack.enter_context(patch.object(state, "register_pid"))
             stack.enter_context(patch.object(state, "unregister_pid"))
-            stack.enter_context(patch.object(state, "load_cache", return_value=DATA))
-            stack.enter_context(patch.object(state, "load_selected", return_value=SELECTED.copy()))
+            stack.enter_context(patch.object(state, "load_cache", return_value=data))
+            stack.enter_context(patch.object(state, "load_selected", return_value=selected.copy()))
+            stack.enter_context(patch.object(state, "save_selected"))
             stack.enter_context(patch.object(fetch, "check_for_updates"))
             network = stack.enter_context(patch.object(quickshell.urllib.request, "urlopen"))
             remote_cache = stack.enter_context(patch.object(quickshell.LogoCache, "get"))
@@ -176,10 +220,9 @@ class MacOSFrontendTests(unittest.TestCase):
         self.assertTrue(all(snapshot["schemaVersion"] == 1 for snapshot in snapshots))
         self.assertTrue(snapshots[0]["loading"])
         self.assertFalse(snapshots[-1]["loading"])
-        self.assertEqual(snapshots[-1]["selected"]["metric"], "rolling")
         self.assertNotIn("<span", output.getvalue())
         self.assertNotIn("tooltip", snapshots[-1])
-        self.assertTrue(snapshots[-1]["providers"][0]["logoPath"].endswith(".png"))
+        return snapshots
 
     def test_refresh_uses_the_platform_signal_number(self):
         with tempfile.TemporaryDirectory() as directory:

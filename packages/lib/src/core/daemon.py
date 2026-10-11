@@ -26,7 +26,7 @@ _pending = set()
 def _group_by_dir(data):
     groups = {}
     for p in (data or []):
-        groups.setdefault(p.get("_dir"), []).append(p)
+        groups.setdefault(render.connection_key(p), []).append(p)
     return groups
 
 
@@ -52,7 +52,7 @@ def update_task(output_format="waybar"):
                     if output_format in ("quickshell", "macos"):
                         # Clicks must be able to select newly streamed metrics
                         # while another provider is still being queried.
-                        state.save_cache(_ordered_merged(cfgmod.enabled_order()))
+                        state.save_cache(_ordered_merged(cfgmod.enabled_connection_order()))
                     _pending.discard(dir_name)
 
                 data = fetch.fetch_all_data(on_result=on_result, include_errors=output_format in ("quickshell", "macos"))
@@ -85,10 +85,10 @@ def _run(output_format="waybar"):
     if not state.load_selected():
         for p in latest_data:
             if p.get("metrics"):
-                state.save_selected({"provider": p["_dir"], "idx": p.get("_idx", 0), "metric": "rolling"})
+                state.save_selected({"provider": render.connection_key(p), "idx": p.get("_idx", 0), "metric": "rolling"})
                 break
         else:
-            providers = cfgmod.enabled_order()
+            providers = cfgmod.enabled_connection_order()
             if providers:
                 state.save_selected({"provider": providers[0], "idx": 0, "metric": "rolling"})
 
@@ -106,8 +106,8 @@ def _run(output_format="waybar"):
     def emit(data, selected, frame=None):
         nonlocal last_snapshot
         if output_format in ("quickshell", "macos"):
-            logo_paths = {name: logo_cache.get(name) for name in cfgmod.enabled_order()}
-            logo = logo_paths.get(selected.get("provider"), "") if state.get_icon_mode(selected) == "logo" else ""
+            logo_paths = {name: logo_cache.get(name) for name in cfgmod.available_providers()}
+            logo = logo_paths.get((cfgmod.connection_info(selected.get("provider", "")) or {}).get("provider", ""), "") if state.get_icon_mode(selected) == "logo" else ""
             output = quickshell.build_snapshot(data, selected, pending=_pending.copy(), logo_path=logo, logo_paths=logo_paths)
             if output["providers"] and any(selected.get(key) != output["selected"].get(key) for key in ("provider", "idx", "metric")):
                 selected.update(output["selected"])
@@ -125,14 +125,14 @@ def _run(output_format="waybar"):
 
     last_auto_update = time.time()
     last_update_check = 0
-    last_config_mtime = 0
+    last_config_mtime = None
     last_selected_mtime = 0
     last_refresh = paths.read_json(state.REFRESH_FILE)
     should_update = True
     selected = state.load_selected() or {}
 
     if output_format in ("quickshell", "macos"):
-        _pending = set(cfgmod.enabled_order())
+        _pending = set(cfgmod.enabled_connection_order())
         emit(latest_data, selected)
 
     while True:
@@ -148,9 +148,8 @@ def _run(output_format="waybar"):
                 fetch.check_for_updates()
                 last_update_check = now
             
-            config_mtime = 0
-            if os.path.exists(cfgmod.CONFIG_FILE):
-                config_mtime = os.path.getmtime(cfgmod.CONFIG_FILE)
+            config_mtime = tuple(os.path.getmtime(p) if os.path.exists(p) else 0
+                                 for p in (cfgmod.CONFIG_FILE, cfgmod.accounts_file()))
             if config_mtime != last_config_mtime:
                 last_config_mtime = config_mtime
                 should_update = True
@@ -171,7 +170,7 @@ def _run(output_format="waybar"):
                 # Seed streaming state: start from the cached data (so each
                 # provider animates its previous value) and mark every enabled
                 # provider pending until its fresh result arrives.
-                order = cfgmod.enabled_order()
+                order = cfgmod.enabled_connection_order()
                 _results_by_dir = _group_by_dir(latest_data)
                 _pending = set(order)
 

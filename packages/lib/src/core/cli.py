@@ -4,12 +4,13 @@ import time
 import subprocess
 import argparse
 import json
+import uuid
 from . import daemon
 from . import state
 from . import logos
 from . import render
 from . import config as cfgmod
-from . import quickshell, paths, fetch
+from . import quickshell, paths, fetch, accounts
 
 TERMINALS = ["foot", "alacritty", "kitty", "ghostty", "wezterm", "xterm"]
 
@@ -19,10 +20,10 @@ def _provider_metric_keys(cache, dir_name, idx):
     Keys, not types, so metrics that share a type (e.g. Claude's general vs
     Fable weekly) are individually selectable."""
     for p in cache:
-        if p.get("_dir") == dir_name and p.get("_idx") == idx:
+        if (p.get("_connection_id") or p.get("_dir")) == dir_name and p.get("_idx", 0) == idx:
             metrics = sorted(
                 p.get("metrics", []),
-                key=lambda m: render.TYPE_ORDER.get(m.get("type", "generic"), 4),
+                key=render.metric_sort_key,
             )
             return [render.metric_key(m) for m in metrics]
     return []
@@ -33,7 +34,7 @@ def _first_metric_for(cache, dir_name, idx):
     return keys[0] if keys else "rolling"
 
 def _scroll(direction, frontend="waybar"):
-    providers = cfgmod.enabled_order()
+    providers = cfgmod.enabled_connection_order()
     if not providers:
         return
 
@@ -43,8 +44,9 @@ def _scroll(direction, frontend="waybar"):
     items = []
     seen = set()
     for p in cache:
-        if p.get("metrics") and p.get("_dir") in providers:
-            key = (p.get("_dir"), p.get("_idx", 0))
+        identity = p.get("_connection_id") or p.get("_dir")
+        if p.get("metrics") and identity in providers:
+            key = (identity, p.get("_idx", 0))
             if key not in seen:
                 seen.add(key)
                 items.append(key)
@@ -213,7 +215,7 @@ def _swiftbar_sig():
             return os.path.getmtime(path)
         except OSError:
             return 0
-    return (mt(state.CACHE_FILE), mt(state.SELECTED_FILE), mt(cfgmod.CONFIG_FILE))
+    return (mt(state.CACHE_FILE), mt(state.SELECTED_FILE), mt(cfgmod.CONFIG_FILE), mt(cfgmod.accounts_file()))
 
 
 def swiftbar_stream():
@@ -362,6 +364,115 @@ def revert_waybar():
         print("Restart Waybar to apply the change.")
 
 
+def _accounts_main(argv=None):
+    parser = argparse.ArgumentParser(prog="ai-status accounts", description="Manage independently collected account connections.")
+    commands = parser.add_subparsers(dest="action", required=True)
+    listing = commands.add_parser("list", help="List account metadata without credential or option values")
+    listing.add_argument("--json", action="store_true")
+    for verb in ("add", "edit"):
+        command = commands.add_parser(verb, help=f"{verb.title()} an account using credential references")
+        if verb == "add":
+            command.add_argument("provider", nargs="?")
+            command.add_argument("--id", dest="account_id")
+        else:
+            command.add_argument("account_id")
+        command.add_argument("--label")
+        command.add_argument("--auth-file", help="Path to an existing provider credential file")
+        command.add_argument("--env", action="append", default=[], metavar="TARGET=SOURCE_ENV", help="Resolve TARGET from SOURCE_ENV at query time")
+        command.add_argument("--file", help="Account JSON file, or - to read stdin; options and references belong in this JSON")
+        command.add_argument("--disabled", action="store_true")
+        command.add_argument("--enabled", action="store_true")
+    removing = commands.add_parser("remove", help="Remove an account connection; credential files are retained")
+    removing.add_argument("account_id")
+    args = parser.parse_args(sys.argv[2:] if argv is None else argv)
+    try:
+        document = accounts.load_document(cfgmod.accounts_file())
+        records = document["accounts"]
+        if args.action == "list":
+            public = [accounts.public_record(record) for record in records]
+            if args.json:
+                print(json.dumps(public, ensure_ascii=False))
+            elif not public:
+                print("No account connections configured.")
+            else:
+                for record in public:
+                    status = "enabled" if record["enabled"] else "disabled"
+                    print(f"{record['id']}\t{record['provider']}\t{record['label']}\t{status}")
+            return 0
+        if args.action == "remove":
+            if not any(record["id"] == args.account_id for record in records):
+                raise accounts.AccountError("Unknown account ID.")
+            document["accounts"] = [record for record in records if record["id"] != args.account_id]
+            if "order" in document:
+                document["order"] = [identity for identity in document["order"] if identity != "account:" + args.account_id]
+            accounts.save_document(document, cfgmod.accounts_file())
+            state.trigger_refresh()
+            print("Account connection removed.")
+            return 0
+        payload = {}
+        if args.file:
+            try:
+                if args.file == "-":
+                    payload = json.load(sys.stdin)
+                else:
+                    with open(args.file, encoding="utf-8-sig") as stream:
+                        payload = json.load(stream)
+            except (OSError, ValueError):
+                raise accounts.AccountError("Unable to read account JSON; check its format and permissions.") from None
+            if not isinstance(payload, dict):
+                raise accounts.AccountError("Account JSON must be an object.")
+        if args.action == "edit":
+            previous = next((record for record in records if record["id"] == args.account_id), None)
+            if previous is None:
+                raise accounts.AccountError("Unknown account ID.")
+            record = {**previous, **payload, "id": args.account_id}
+        else:
+            record = dict(payload)
+            if args.provider:
+                record["provider"] = args.provider
+            record["id"] = args.account_id or record.get("id") or uuid.uuid4().hex
+        if args.label is not None:
+            record["label"] = args.label
+        if args.auth_file is not None:
+            record["auth_file"] = args.auth_file
+        if args.disabled and args.enabled:
+            raise accounts.AccountError("Choose either enabled or disabled.")
+        if args.disabled or args.enabled:
+            record["enabled"] = args.enabled
+        if args.env:
+            overrides = dict(record.get("env") or {})
+            for reference in args.env:
+                if "=" not in reference:
+                    raise accounts.AccountError("Environment references must use TARGET=SOURCE_ENV.")
+                target, source = reference.split("=", 1)
+                overrides[target] = {"from_env": source}
+            record["env"] = overrides
+        record = accounts.normalize(record)
+        if record["provider"] not in cfgmod.available_providers():
+            raise accounts.AccountError("Unknown provider; use ai-status doctor to list installed providers.")
+        if args.action == "add":
+            if any(existing["id"] == record["id"] for existing in records):
+                raise accounts.AccountError("Account ID already exists; use accounts edit.")
+            records.append(record)
+        else:
+            document["accounts"] = [record if existing["id"] == record["id"] else existing for existing in records]
+        if "order" in document:
+            identity = "account:" + record["id"]
+            document["order"] = [item for item in document["order"] if item != identity]
+            if record["enabled"]:
+                document["order"].append(identity)
+        accounts.save_document(document, cfgmod.accounts_file())
+        state.trigger_refresh()
+        print(f"Account connection saved: {record['id']}")
+        return 0
+    except (accounts.AccountError, OSError):
+        # AccountError messages are deliberately secret-free; filesystem errors
+        # may echo arbitrary paths and therefore use a fixed message.
+        error = sys.exc_info()[1]
+        print(str(error) if isinstance(error, accounts.AccountError) else "Unable to save account configuration.", file=sys.stderr)
+        return 1
+
+
 def main():
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -371,6 +482,8 @@ def main():
         if len(sys.argv) != 3:
             raise SystemExit("Usage: ai-status --query PROVIDER")
         fetch.run_query(sys.argv[2])
+    elif command == "accounts":
+        return _accounts_main()
     elif command == "doctor":
         info = {"version": fetch.get_version_info()["current"],
                 "providers": cfgmod.available_providers(), "config": str(paths.CONFIG_DIR),

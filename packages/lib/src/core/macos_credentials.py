@@ -20,7 +20,7 @@ def _usable(credentials):
         return False
 
 
-def claude_credentials(root, scoped=False):
+def claude_credentials(root, scoped=False, environ=None):
     # Claude Code scopes non-default config directories to a distinct item.
     # Never fall back to another account's unscoped Keychain entry.
     service = "Claude Code-credentials"
@@ -28,8 +28,9 @@ def claude_credentials(root, scoped=False):
         directory = str(Path(root).expanduser().absolute())
         service += "-" + hashlib.sha256(directory.encode()).hexdigest()[:8]
     args = ["/usr/bin/security", "find-generic-password", "-s", service, "-w"]
-    if os.environ.get("USER"):
-        args += ["-a", os.environ["USER"]]
+    environment = os.environ if environ is None else environ
+    if environment.get("USER"):
+        args += ["-a", environment["USER"]]
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=8)
     except (OSError, subprocess.TimeoutExpired):
@@ -45,4 +46,5 @@ def claude_credentials(root, scoped=False):
         except ValueError:
             pass
     data = read_json(Path(root) / ".credentials.json")
-    return data.get("claudeAiOauth", {}) if isinstance(data, dict) else {}
+    credentials = data.get("claudeAiOauth", {}) if isinstance(data, dict) else {}
+    return credentials if isinstance(credentials, dict) else {}

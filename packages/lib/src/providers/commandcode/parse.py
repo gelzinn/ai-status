@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timezone
+from core.metered import amount_metric, number
 
 
 def _reset_seconds(period_end):
@@ -7,37 +8,43 @@ def _reset_seconds(period_end):
     if not period_end:
         return None
     try:
-        end = datetime.fromisoformat(str(period_end).replace("Z", "+00:00"))
+        if isinstance(period_end, (int, float)):
+            end = datetime.fromtimestamp(period_end / 1000, tz=timezone.utc)
+        else:
+            end = datetime.fromisoformat(str(period_end).replace("Z", "+00:00"))
         if end.tzinfo is None:
             end = end.replace(tzinfo=timezone.utc)
         delta = (end - datetime.now(timezone.utc)).total_seconds()
         return int(delta) if delta > 0 else None
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError, OSError):
         return None
 
 
 def parse(raw_output):
     try:
         data = json.loads(raw_output)
-    except (json.JSONDecodeError, ValueError):
-        return {"provider": "Command Code", "metrics": []}
+    except (ValueError, TypeError):
+        data = None
+    if not isinstance(data, dict) or "error" in data or "errors" in data:
+        return {"provider": "Command Code", "metrics": [], "_error": "Command Code returned no compatible billing data."}
 
-    used = float(data.get("used") or 0)
-    remaining = float(data.get("remaining") or 0)
-    total = used + remaining
-    # Mirrors the CLI/dashboard: percent = spend / (spend + remaining credits).
-    percentage = round(used / total * 100) if total > 0 else 0
-
-    # Show the real spend truncated to the cent (never rounded up, so it never
-    # overstates usage). The API exposes no plan-limit field; used + remaining is
-    # the real budget (~$9.955), which the dashboard shows as the nominal plan
-    # amount ($10) — so only the budget is rounded to a whole dollar.
-    used_display = int(used * 100) / 100
-    metric = {
-        "type": "monthly",
-        "percentage": percentage,
-        "reset_in_seconds": _reset_seconds(data.get("period_end")),
-        "detail": f"${used_display:.2f} of ${total:.0f} used",
-    }
-
-    return {"provider": "Command Code", "metrics": [metric]}
+    used = number(data.get("used"))
+    remaining = number(data.get("remaining"))
+    metrics = []
+    windows = data.get("windows") or {}
+    for key, kind, label in (("fiveHour", "rolling", "5-hour spend"), ("weekly", "weekly", "Weekly spend")):
+        window = windows.get(key) if isinstance(windows, dict) else None
+        if not isinstance(window, dict):
+            continue
+        spend, cap = number(window.get("used")), number(window.get("cap"))
+        if spend is None or spend < 0 or cap is None or cap <= 0:
+            continue
+        metrics.append(amount_metric(spend, "USD", f"{label}: ${spend:.2f} of ${cap:.2f} used", kind,
+                                     cap, _reset_seconds(window.get("resetAt"))))
+    # Spend + all remaining pools is not a provider-enforced monthly limit:
+    # purchased and free credits can change that sum. Keep these amounts honest.
+    if used is not None and used >= 0:
+        metrics.append(amount_metric(used, "USD", "Monthly spend", "monthly", reset_in_seconds=_reset_seconds(data.get("period_end"))))
+    if remaining is not None:
+        metrics.append(amount_metric(remaining, "USD", "Available credits", "balance"))
+    return {"provider": "Command Code", "metrics": metrics, **({"_error": "Command Code returned no compatible billing metrics."} if not metrics else {})}

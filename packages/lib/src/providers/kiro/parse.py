@@ -1,10 +1,41 @@
 import json
 import re
 from datetime import datetime, timezone
+from core.metered import amount_metric, number
+
+
+def parse_api(raw_output):
+    try:
+        data = json.loads(raw_output)
+        rows = data.get("usageBreakdownList")
+        if not isinstance(rows, list):
+            raise ValueError
+        credits = [row for row in rows if isinstance(row, dict) and row.get("resourceType") == "CREDIT"]
+        if len(credits) == 1:
+            row = credits[0]
+        elif not credits and len(rows) == 1 and isinstance(rows[0], dict) and not rows[0].get("resourceType"):
+            row = rows[0]
+        else:
+            raise ValueError
+        used, limit = number(row.get("currentUsageWithPrecision")), number(row.get("usageLimitWithPrecision"))
+        if used is None or limit is None or used < 0 or limit < 0:
+            raise ValueError
+        reset = number(data.get("nextDateReset"))
+        if data.get("nextDateReset") is not None and (reset is None or reset < 0):
+            raise ValueError
+        reset = max(0, int(reset - datetime.now(timezone.utc).timestamp())) if reset else None
+        plan = (data.get("subscriptionInfo") or {}).get("subscriptionTitle") or ""
+        return {"provider": "Kiro", "plan": str(plan), "metrics": [
+            amount_metric(used, "credits", "Monthly credits used", "monthly", limit, reset)
+        ]}
+    except (ValueError, TypeError, AttributeError, OverflowError):
+        return {"provider": "Kiro", "metrics": [], "_error": "Kiro returned no compatible credit quota; check the session and response format."}
 
 def parse(raw_output):
     if not raw_output:
         return {"provider": "Kiro", "metrics": []}
+    if raw_output.lstrip().startswith("{"):
+        return parse_api(raw_output)
 
     text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', raw_output)
     text = text.replace('\u00a0', ' ')

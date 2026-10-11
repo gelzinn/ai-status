@@ -35,9 +35,11 @@ Right-click the AI Status module to open the config TUI, make sure **Command Cod
 
 ## What it tracks
 
-Your **monthly spend** for the current billing period, shown as a percentage of your budget (spend ÷ (spend + remaining credits)) with a reset timer for when the period rolls over. The tooltip also shows the dollar figures, e.g. `$6.99 of $10 used`.
+Your **five-hour and weekly spend limits** use the caps reported by the service. Monthly spend and available credits appear as dollar amounts; they do not imply an enforced monthly budget. Reset timers appear when the API reports them.
 
 Behind the scenes it calls the same public endpoints the CLI's own usage view uses, on `api.commandcode.ai`: `whoami` → `billing/subscriptions` → `billing/credits` → `usage/summary`. It works for both personal and organization accounts.
+
+For multiple accounts, create named connections with separate `auth_file` paths or `COMMANDCODE_API_KEY` references. See the [multiple-account configuration](https://github.com/gelzinn/ai-status/blob/main/packages/lib/PROVIDERS.md#multiple-accounts-and-connections).
 
 ## Troubleshooting
 

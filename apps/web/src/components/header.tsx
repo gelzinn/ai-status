@@ -23,6 +23,7 @@ async function getStarCount(): Promise<number | null> {
 			// Fetch at most every 6h — one request every few hours stays well
 			// under the 60/h anonymous limit, and the value is cached in between.
 			next: { revalidate: 21600 },
+			signal: AbortSignal.timeout(5000),
 		});
 		if (res.ok) {
 			const data = await res.json();

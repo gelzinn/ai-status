@@ -63,9 +63,27 @@ struct Selection: Codable, Hashable {
 struct Metric: Decodable, Identifiable {
     let key: String
     let name: String
-    let percentage: Double
+    let percentage: Double?
+    let value: String?
+    let isAmount: Bool
     let detail: String
     var id: String { key }
+    var displayValue: String {
+        if let value = value, !value.isEmpty { return value }
+        if let percentage = percentage { return String(format: "%.0f%%", percentage) }
+        return "Unavailable"
+    }
+    var usable: Bool { percentage.map { $0.isFinite } ?? (value?.isEmpty == false) }
+    enum CodingKeys: String, CodingKey { case key, name, percentage, value, isAmount, detail }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        key = try values.decode(String.self, forKey: .key)
+        name = try values.decode(String.self, forKey: .name)
+        percentage = try values.decodeIfPresent(Double.self, forKey: .percentage)
+        value = try values.decodeIfPresent(String.self, forKey: .value)
+        isAmount = try values.decodeIfPresent(Bool.self, forKey: .isAmount) ?? false
+        detail = try values.decode(String.self, forKey: .detail)
+    }
 }
 
 struct CreditRow: Decodable {
@@ -83,6 +101,7 @@ struct ResetCredits: Decodable {
 }
 
 struct Provider: Decodable, Identifiable {
+    let connectionID: String
     let providerID: String
     let idx: Int
     let name: String
@@ -92,19 +111,34 @@ struct Provider: Decodable, Identifiable {
     let error: String
     let metrics: [Metric]
     let resetCredits: ResetCredits?
-    var id: String { "\(providerID):\(idx)" }
+    var id: String { "\(connectionID):\(idx)" }
     enum CodingKeys: String, CodingKey {
-        case providerID = "id"
+        case connectionID = "id"
+        case providerID = "providerId"
         case idx, name, logoPath, loading, cached, error, metrics, resetCredits
     }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        connectionID = try values.decode(String.self, forKey: .connectionID)
+        providerID = try values.decodeIfPresent(String.self, forKey: .providerID) ?? connectionID
+        idx = try values.decode(Int.self, forKey: .idx)
+        name = try values.decode(String.self, forKey: .name)
+        logoPath = try values.decode(String.self, forKey: .logoPath)
+        loading = try values.decode(Bool.self, forKey: .loading)
+        cached = try values.decode(Bool.self, forKey: .cached)
+        error = try values.decode(String.self, forKey: .error)
+        metrics = try values.decode([Metric].self, forKey: .metrics)
+        resetCredits = try values.decodeIfPresent(ResetCredits.self, forKey: .resetCredits)
+    }
     func selection(_ metric: Metric) -> Selection {
-        Selection(provider: providerID, idx: idx, metric: metric.key)
+        Selection(provider: connectionID, idx: idx, metric: metric.key)
     }
 }
 
 struct Settings: Decodable {
     let available: [String]
     let names: [String: String]
+    let providerIds: [String: String]?
     let order: [String]
     let enabled: [String]
     let display: [String: Bool]
@@ -212,16 +246,16 @@ final class Model: ObservableObject {
     var choices: [Choice] {
         guard let snapshot = snapshot else { return [] }
         return draft.order.filter { draft.enabled.contains($0) }.flatMap { name -> [Choice] in
-            let providers = snapshot.providers.filter { $0.providerID == name }
+            let providers = snapshot.providers.filter { $0.connectionID == name }
             if providers.isEmpty {
                 return [Choice(selection: Selection(provider: name, metric: "rolling"),
-                               label: providerName(name), provider: name, logoPath: "")]
+                               label: providerName(name), provider: logoProviderID(name), logoPath: "")]
             }
             return providers.flatMap { provider in
                 provider.metrics.map { metric in
                     let suffix = metric.key.split(separator: ":", maxSplits: 1).dropFirst().first.map { " (\($0))" } ?? ""
                     return Choice(selection: provider.selection(metric), label: provider.name + " · " + metric.name + suffix,
-                                  provider: name, logoPath: provider.logoPath)
+                                  provider: provider.providerID, logoPath: provider.logoPath)
                 }
             }
         }
@@ -231,8 +265,12 @@ final class Model: ObservableObject {
         !draft.enabled.isEmpty && draft.display.values.contains(true) && choices.contains { $0.selection == draft.selected }
     }
     func providerName(_ name: String) -> String { snapshot?.settings.names[name] ?? name }
+    func logoProviderID(_ connection: String) -> String {
+        snapshot?.settings.providerIds?[connection]
+            ?? snapshot?.providers.first { $0.connectionID == connection }?.providerID ?? connection
+    }
     var selectedProvider: Provider? {
-        snapshot?.providers.first { $0.providerID == snapshot?.selected.provider && $0.idx == snapshot?.selected.idx }
+        snapshot?.providers.first { $0.connectionID == snapshot?.selected.provider && $0.idx == snapshot?.selected.idx }
     }
     var creditProvider: Provider? {
         guard case .credits(let id) = page else { return nil }
@@ -256,7 +294,7 @@ final class Model: ObservableObject {
     func accept(_ data: Data) {
         // Ignore partial/incompatible output and preserve the last usable snapshot.
         guard let next = try? JSONDecoder().decode(Snapshot.self, from: data), next.schemaVersion == 1,
-              next.providers.allSatisfy({ $0.metrics.allSatisfy { $0.percentage.isFinite } }) else { return }
+              next.providers.allSatisfy({ $0.metrics.allSatisfy { $0.usable } }) else { return }
         snapshot = next
         error = ""
         retryDelay = 1
@@ -532,7 +570,7 @@ struct UsagePage: View {
                 HoverButton(action: model.showSettings) { Text("Settings") }
             }
             ForEach(Array((model.snapshot?.providers ?? []).enumerated()), id: \.element.id) { groupIndex, provider in
-                let selected = provider.providerID == model.snapshot?.selected.provider && provider.idx == model.snapshot?.selected.idx
+                let selected = provider.connectionID == model.snapshot?.selected.provider && provider.idx == model.snapshot?.selected.idx
                 VStack(alignment: .leading, spacing: 16) {
                     HoverButton(action: { if let metric = provider.metrics.first { model.select(provider.selection(metric)) } }) {
                         HStack(spacing: 8) {
@@ -551,13 +589,19 @@ struct UsagePage: View {
                             HStack(alignment: .top, spacing: 8) {
                                 Text(active ? "•" : " ").frame(width: 16)
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(metric.name + ":")
-                                    HStack(spacing: 5) {
-                                        Text("[")
-                                        UsageBar(percentage: metric.percentage, selected: active,
-                                                 loading: provider.loading && model.isPresented, index: groupIndex)
-                                        Text("]")
-                                        Text(String(format: "%.0f%%", metric.percentage)).frame(width: 38, alignment: .trailing)
+                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                        Text(metric.name + (metric.isAmount ? ":" : ""))
+                                        if !metric.isAmount { Spacer(minLength: 0) }
+                                        Text(provider.loading && model.isPresented ? "…" : metric.displayValue)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    if let percentage = metric.percentage {
+                                        HStack(spacing: 5) {
+                                            Text("[")
+                                            UsageBar(percentage: percentage, selected: active,
+                                                     loading: provider.loading && model.isPresented, index: groupIndex)
+                                            Text("]")
+                                        }
                                     }
                                     if !metric.detail.isEmpty {
                                         Text(metric.detail).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(Palette.dim.opacity(0.7))
@@ -565,7 +609,7 @@ struct UsagePage: View {
                                     }
                                 }
                             }.foregroundColor(active ? Palette.bright : Palette.dim)
-                        }.accessibilityLabel("\(provider.name), \(metric.name), \(String(format: "%.0f", metric.percentage)) percent")
+                        }.accessibilityLabel("\(provider.name), \(metric.name), \(metric.displayValue)")
                     }
                     if let credits = provider.resetCredits, credits.available > 0 {
                         HoverButton(action: { model.showCredits(provider) }) {
@@ -585,7 +629,7 @@ struct UsagePage: View {
 struct SettingsPage: View {
     @ObservedObject var model: Model
     private let fields = [("show_provider", "Provider name"), ("show_model", "Model / plan"),
-                          ("show_metric", "Limit name"), ("show_pct", "Percentage")]
+                          ("show_metric", "Limit name"), ("show_pct", "Usage value")]
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 8) {
@@ -622,7 +666,7 @@ struct SettingsPage: View {
                     HStack(spacing: 4) {
                         Toggle(isOn: Binding(get: { model.draft.enabled.contains(provider) }, set: { _ in model.toggleProvider(provider) })) {
                             HStack(spacing: 6) {
-                                ProviderLogo(provider: provider)
+                                ProviderLogo(provider: model.logoProviderID(provider))
                                 Text(model.providerName(provider))
                             }
                         }.toggleStyle(.checkbox)
@@ -998,7 +1042,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         let model = Model()
         model.accept(Data(sample.utf8))
-        guard let snapshot = model.snapshot, snapshot.providers.count == 2 else { throw AppError.message("Snapshot decoding failed.") }
+        guard let snapshot = model.snapshot, snapshot.providers.count == 2,
+              model.selectedProvider?.providerID == "codex" else { throw AppError.message("Legacy snapshot decoding failed.") }
         model.showSettings()
         guard model.settingsValid, model.choices.count == 4 else { throw AppError.message("Settings model failed.") }
         model.draft.display["show_provider"] = false
@@ -1007,39 +1052,101 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let malformed = Data(sample.replacingOccurrences(of: "\"schemaVersion\":1", with: "\"schemaVersion\":2").utf8)
         model.accept(malformed)
         guard model.snapshot?.schemaVersion == 1 else { throw AppError.message("Invalid snapshot replaced usable data.") }
+        try smokeAccounts(sample: sample, directory: previewDirectory)
         model.isPresented = true
         let pages: [(String, Page)] = [("usage", .usage), ("settings", .settings),
                                       ("reset-credits", .credits(snapshot.providers[0].id)), ("about", .about)]
         for (name, page) in pages {
             model.page = page
-            let host = NSHostingController(rootView: PanelView(model: model).transaction {
-                $0.disablesAnimations = true
-                $0.animation = nil
-            })
-            host.view.frame = NSRect(x: 0, y: 0, width: 380, height: model.panelHeight)
-            host.view.layoutSubtreeIfNeeded()
-            if let directory = previewDirectory {
-                let window = NSWindow(contentRect: host.view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-                window.isReleasedWhenClosed = false
-                window.appearance = NSAppearance(named: .darkAqua)
-                window.contentViewController = host
-                window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
-                window.orderFront(nil)
-                // Let SwiftUI mount once with animations disabled for deterministic fills.
-                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-                host.view.layoutSubtreeIfNeeded()
-                host.view.displayIfNeeded()
-                guard let bitmap = host.view.bitmapImageRepForCachingDisplay(in: host.view.bounds) else {
-                    throw AppError.message("Unable to render the \(name) preview.")
-                }
-                host.view.cacheDisplay(in: host.view.bounds, to: bitmap)
-                guard let png = bitmap.representation(using: .png, properties: [:]) else {
-                    throw AppError.message("Unable to encode the \(name) preview.")
-                }
-                try png.write(to: directory.appendingPathComponent(name + ".png"), options: .atomic)
-                window.close()
-            }
+            try renderSmokePage(model, name: name, directory: previewDirectory)
         }
-        print("AI Status macOS smoke OK: usage, settings, reset credits, about, resources, snapshot validation")
+        print("AI Status macOS smoke OK: usage, settings, reset credits, about, accounts, metered values, resources, snapshot validation")
+    }
+
+    private static func smokeAccounts(sample: String, directory: URL?) throws {
+        guard var document = try JSONSerialization.jsonObject(with: Data(sample.utf8)) as? [String: Any],
+              var settings = document["settings"] as? [String: Any] else {
+            throw AppError.message("Account sample setup failed.")
+        }
+        let identities = ["account:personal", "account:work"]
+        document["providers"] = zip(identities, ["Personal", "Work"]).map { identity, label -> [String: Any] in
+            let balance = label == "Work" ? "$42.50" : "$8.25"
+            return ["id": identity, "providerId": "openrouter", "idx": 0, "name": "OpenRouter · " + label,
+                    "logoPath": "", "loading": false, "cached": false, "error": "", "resetCredits": NSNull(),
+                    "metrics": [
+                        ["key": "balance:Available balance", "name": "Available balance", "percentage": NSNull(),
+                         "value": balance, "isAmount": true, "hasPercentage": false, "detail": ""],
+                        ["key": "credits:Account credits", "name": "Account credits", "percentage": 25,
+                         "value": "$25.00 / $100.00", "isAmount": false, "hasPercentage": true, "detail": "Available balance: $75.00"],
+                        ["key": "monthly", "name": "Monthly Usage", "percentage": NSNull(),
+                         "value": "Unlimited", "isAmount": false, "hasPercentage": false, "detail": "Included usage"],
+                    ]]
+        }
+        settings["available"] = identities
+        settings["enabled"] = identities
+        settings["order"] = identities
+        settings["names"] = ["account:personal": "OpenRouter · Personal", "account:work": "OpenRouter · Work"]
+        settings["providerIds"] = ["account:personal": "openrouter", "account:work": "openrouter"]
+        document["settings"] = settings
+        document["selected"] = ["provider": "account:work", "idx": 0, "metric": "balance:Available balance"] as [String: Any]
+        document["text"] = "OpenRouter · Work $42.50"
+        let model = Model()
+        model.accept(try JSONSerialization.data(withJSONObject: document))
+        guard let snapshot = model.snapshot, snapshot.providers.count == 2,
+              Set(snapshot.providers.map { $0.id }).count == 2,
+              let current = model.selectedProvider, current.connectionID == "account:work", current.providerID == "openrouter",
+              current.metrics[0].percentage == nil, current.metrics[0].isAmount, current.metrics[0].displayValue == "$42.50",
+              current.metrics[1].percentage == 25, current.metrics[1].displayValue == "$25.00 / $100.00",
+              current.metrics[2].percentage == nil, current.metrics[2].displayValue == "Unlimited" else {
+            throw AppError.message("Account identities or metered metric decoding failed.")
+        }
+        let selection = current.selection(current.metrics[0])
+        guard selection.provider == "account:work", selection.metric == "balance:Available balance" else {
+            throw AppError.message("Account metric selection lost its connection identity.")
+        }
+        model.isPresented = true
+        try renderSmokePage(model, name: "accounts-usage", directory: directory)
+        model.showSettings()
+        guard model.settingsValid, model.choices.count == 6,
+              Set(model.choices.map { $0.selection.provider }) == Set(identities),
+              model.logoProviderID("account:work") == "openrouter" else {
+            throw AppError.message("Account settings or provider artwork mapping failed.")
+        }
+        model.moveProvider("account:work", -1)
+        model.toggleProvider("account:personal")
+        guard model.draft.order.first == "account:work", model.draft.enabled == Set(["account:work"]),
+              model.settingsValid, model.draft.selected.provider == "account:work" else {
+            throw AppError.message("Reordering or disabling one account changed another account.")
+        }
+    }
+
+    private static func renderSmokePage(_ model: Model, name: String, directory: URL?) throws {
+        let host = NSHostingController(rootView: PanelView(model: model).transaction {
+            $0.disablesAnimations = true
+            $0.animation = nil
+        })
+        host.view.frame = NSRect(x: 0, y: 0, width: 380, height: model.panelHeight)
+        host.view.layoutSubtreeIfNeeded()
+        if let directory = directory {
+            let window = NSWindow(contentRect: host.view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.contentViewController = host
+            window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+            window.orderFront(nil)
+            // Let SwiftUI mount once with animations disabled for deterministic fills.
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            host.view.layoutSubtreeIfNeeded()
+            host.view.displayIfNeeded()
+            guard let bitmap = host.view.bitmapImageRepForCachingDisplay(in: host.view.bounds) else {
+                throw AppError.message("Unable to render the \(name) preview.")
+            }
+            host.view.cacheDisplay(in: host.view.bounds, to: bitmap)
+            guard let png = bitmap.representation(using: .png, properties: [:]) else {
+                throw AppError.message("Unable to encode the \(name) preview.")
+            }
+            try png.write(to: directory.appendingPathComponent(name + ".png"), options: .atomic)
+            window.close()
+        }
     }
 }

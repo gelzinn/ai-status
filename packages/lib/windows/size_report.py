@@ -4,10 +4,12 @@ import os
 
 root = Path("dist")
 version = Path("packages/lib/VERSION").read_text().strip()
+# Include the required SQLite runtime for native credentials and auth fingerprints.
+# Keep tight limits so optional Qt/OpenSSL libraries cannot return unnoticed.
 sizes = [
-    ("Installed folder", sum(path.stat().st_size for path in (root / "ai-status").rglob("*") if path.is_file()), 54),
-    ("Portable ZIP", (root / f"ai-status-{version}-windows-x64.zip").stat().st_size, 22),
-    ("Installer EXE", (root / f"ai-status-{version}-windows-x64-setup.exe").stat().st_size, 17),
+    ("Installed folder", sum(path.stat().st_size for path in (root / "ai-status").rglob("*") if path.is_file()), 56),
+    ("Portable ZIP", (root / f"ai-status-{version}-windows-x64.zip").stat().st_size, 23),
+    ("Installer EXE", (root / f"ai-status-{version}-windows-x64-setup.exe").stat().st_size, 18),
 ]
 report = "| Windows package | Size | Budget |\n| --- | ---: | ---: |\n"
 for name, count, budget in sizes:

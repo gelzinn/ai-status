@@ -9,7 +9,8 @@ app and Omarchy Quickshell plugin, using the shared provider backend.
 - macOS 13 or newer.
 - Python 3.10 or newer, available as `python3` when you install.
 - Xcode Command Line Tools, including `swiftc`.
-- Provider apps or CLIs with authenticated sessions. See
+- Provider apps or CLIs with authenticated sessions, or explicitly configured
+  API credential sources. See
   [PROVIDERS.md](PROVIDERS.md) for each provider's credential sources.
 
 Install the Command Line Tools with `xcode-select --install`. If your existing
@@ -63,9 +64,12 @@ instead of downloading a stable release.
 ## Usage panel
 
 Click the menu bar item to open or close the panel. The header contains
-**Refresh** and **Settings** controls. Provider cards show their logos,
-account or plan names, usage bars, percentages and reset countdowns. Click
-a provider heading or a limit to choose what appears in the menu bar.
+**Refresh** and **Settings** controls. Connection cards show their provider
+logos and account or plan names, with usage bars and reset countdowns for
+quotas, and reported costs or balances for API services. Click a connection
+heading or a metric to choose what appears in the menu bar. Balances have
+no invented percentage; a cost percentage requires a reported limit or a
+configured monitoring budget.
 
 Usage refreshes every five minutes. Loading feedback appears during a
 refresh, and usable cached data stays visible if a provider request fails.
@@ -79,8 +83,8 @@ the usage panel without changing the selected limit.
 
 ## Settings and About
 
-Settings includes the selected provider and limit, menu bar display fields,
-icon mode, and a list of providers to enable, disable or reorder. **Save**
+Settings includes the selected connection and metric, menu bar display fields,
+icon mode, and connections to enable, disable or reorder. **Save**
 applies changes and keeps Settings open. Back or **Cancel** returns to usage
 and discards unsaved edits.
 
@@ -88,6 +92,13 @@ and discards unsaved edits.
 usage guide and links. Its back control returns to Settings. Authentication
 continues to use your provider's own apps and CLIs; Settings does not perform
 provider sign-in.
+
+Manage additional accounts with `~/.local/bin/ai-status accounts`. Saved
+connections have independent labels and credential sources; the native panel
+uses the same connections as Windows and Quickshell. For launches from Finder
+or at sign-in, file-based credential references avoid depending on shell-only
+environment variables. See [multiple accounts and connections](PROVIDERS.md#multiple-accounts-and-connections)
+for commands and credential-source examples.
 
 The native app shares preferences and cache with the other integrations
 in `~/.config/ai-status/selected.json` and `~/.cache/ai-status.json`.
