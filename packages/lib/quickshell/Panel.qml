@@ -12,9 +12,7 @@ Ui.Panel {
     property var anchorItem: null
     property var hostWidget: null
     property bool configurationPage: false
-    property bool aboutPage: false
     property bool updatePage: false
-    property real settingsScrollPosition: 0
     property var resetProvider: null
     property var creditSelection: null
     property real usageScrollPosition: 0
@@ -23,6 +21,7 @@ Ui.Panel {
     readonly property var creditProvider: creditSelection ? Plugin.Model.snapshot.providers.find(entry => entry.id === creditSelection.id && entry.idx === creditSelection.idx) || null : null
     readonly property var creditEntry: creditSelection && creditProvider ? (creditProvider.monetaryCredits || []).find(entry => entry.id === creditSelection.creditId) || null : null
     readonly property string panelFont: bar ? bar.fontFamily : Style.font.family
+    readonly property real settingsTabGap: Style.space(12)
 
     component IconButton: Plugin.PanelIconButton {
         bar: root.bar
@@ -32,7 +31,6 @@ Ui.Panel {
     function configure() {
         if (!Plugin.Model.snapshot.settings || Plugin.Model.settingsSaving) return
         settings.begin()
-        aboutPage = false
         updatePage = false
         resetProvider = null
         creditSelection = null
@@ -43,7 +41,6 @@ Ui.Panel {
     function showUsage() {
         if (Plugin.Model.settingsSaving) return
         configurationPage = false
-        aboutPage = false
         const wasUpdate = updatePage
         updatePage = false
         const previous = resetProvider
@@ -70,21 +67,14 @@ Ui.Panel {
     }
 
     function showAbout() {
-        settings.closeSelectors()
-        settingsScrollPosition = scroller.contentY
-        aboutPage = true
-        scroller.contentY = 0
-        backButton.focusProgrammatically()
+        if (Plugin.Model.settingsSaving) return
+        if (!configurationPage) configure()
+        settings.selectSection("about")
+        Qt.callLater(() => settingsNavigation.focusCurrentControl())
     }
 
     function goBack() {
-        if (aboutPage) {
-            aboutPage = false
-            Qt.callLater(() => {
-                restoreScrollPosition(settingsScrollPosition)
-                restoredFocusControl = settings.focusAboutControl()
-            })
-        } else showUsage()
+        showUsage()
     }
 
     function showResetCredits(provider, idx) {
@@ -143,11 +133,13 @@ Ui.Panel {
         if (ancestor !== content) return
 
         const margin = Style.space(4)
-        const top = item.mapToItem(scroller, 0, 0).y
-        const bottom = top + item.height
+        const safeTop = scroller.navigationInset + (root.configurationPage ? root.settingsTabGap : margin)
+        const target = item.parent && item.parent.inputItem === item ? item.parent : item
+        const top = target.mapToItem(scroller, 0, 0).y
+        const bottom = top + target.height
         let nextY = scroller.contentY
-        if (top < margin || item.height + margin * 2 > scroller.height)
-            nextY += top - margin
+        if (top < safeTop || target.height + safeTop + margin > scroller.height)
+            nextY += top - safeTop
         else if (bottom > scroller.height - margin)
             nextY += bottom - scroller.height + margin
         nextY = Math.max(0, Math.min(nextY, Math.max(0, scroller.contentHeight - scroller.height)))
@@ -164,7 +156,7 @@ Ui.Panel {
     onCreditEntryChanged: if (creditSelection && !creditEntry) Qt.callLater(() => {
         if (creditSelection && !creditEntry) showUsage()
     })
-    onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; aboutPage = false; updatePage = false; resetProvider = null; creditSelection = null }
+    onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; updatePage = false; resetProvider = null; creditSelection = null }
 
     Connections {
         target: keyCatcher.Window.window
@@ -183,7 +175,9 @@ Ui.Panel {
         open: root.opened
         focusTarget: keyCatcher
         contentWidth: panel.fittedContentWidth(Style.space(380))
-        contentHeight: panel.fittedContentHeight(header.height + panel.padding + Style.space(13) + content.implicitHeight + (footer.visible ? footer.height + Style.space(12) : updateFooter.visible ? updateFooter.height + Style.space(12) : 0), Style.space(680))
+        contentHeight: panel.fittedContentHeight(header.height + panel.padding + Style.space(1) + scroller.contentHeight
+            + (settingsNavigation.visible && !scroller.supportsMask ? settingsNavigation.height : 0)
+            + (footer.visible ? footer.height : updateFooter.visible ? updateFooter.height : -panel.padding), Style.space(680))
 
         Ui.PanelKeyCatcher {
             id: keyCatcher
@@ -194,8 +188,7 @@ Ui.Panel {
                 else root.close()
             }
             onTabRequested: direction => {
-                if (root.aboutPage) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
-                else if (root.configurationPage) settings.focusFirstControl()
+                if (root.configurationPage) settingsNavigation.focusCurrentControl()
                 else if (root.resetProvider || root.creditSelection) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
                 else if (root.updatePage) updates.focusFirstControl()
                 else root.switchPanel(direction)
@@ -219,7 +212,7 @@ Ui.Panel {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: root.configurationPage || !!root.resetProvider || !!root.creditSelection || root.updatePage
                     iconName: "arrow-left"
-                    tooltipText: root.aboutPage ? "Back to settings (Esc)" : "Back to usage (Esc)"
+                    tooltipText: "Back to usage (Esc)"
                     enabled: !Plugin.Model.settingsSaving
                     onPressed: button => { if (button === Qt.LeftButton) root.goBack() }
                 }
@@ -230,7 +223,7 @@ Ui.Panel {
                     anchors.right: controls.left
                     anchors.rightMargin: Style.space(8)
                     anchors.verticalCenter: parent.verticalCenter
-                    text: root.aboutPage ? "About" : root.configurationPage ? "Settings" : root.updatePage ? "Update AI Status" : "AI Status"
+                    text: root.configurationPage ? "Settings" : root.updatePage ? "Update AI Status" : "AI Status"
                     textFormat: Text.PlainText
                     color: root.barForeground
                     font.family: root.panelFont
@@ -284,26 +277,121 @@ Ui.Panel {
                 x: -panel.padding
                 width: parent.width + panel.padding * 2
                 height: Style.space(1)
-                color: Qt.rgba(root.barForeground.r, root.barForeground.g, root.barForeground.b, 0.12)
+                color: Commons.Color.popups.border
+            }
+
+            Flickable {
+                id: settingsNavigation
+                objectName: "settings-navigation"
+                anchors.top: divider.bottom
+                x: -panel.padding
+                width: parent.width + panel.padding * 2
+                height: sectionTabs.height + root.settingsTabGap
+                contentWidth: sectionTabs.width + panel.padding * 2
+                contentHeight: height
+                clip: true
+                flickableDirection: Flickable.HorizontalFlick
+                boundsBehavior: Flickable.StopAtBounds
+                visible: root.configurationPage
+                z: 1
+                enabled: !Plugin.Model.settingsSaving
+                MouseArea {
+                    // The fixed strip owns its gaps, even with controls scrolling below.
+                    anchors.fill: parent
+                    z: -1
+                    onClicked: {}
+                }
+                function focusCurrentControl() {
+                    sectionButtons.itemAt(settings.sections.findIndex(item => item.key === settings.section)).forceActiveFocus(Qt.TabFocusReason)
+                }
+                function revealTab(button) {
+                    if (!button) return
+                    let nextX = contentX
+                    const left = sectionTabs.x + button.x - panel.padding
+                    const right = sectionTabs.x + button.x + button.width + panel.padding
+                    if (left < contentX) nextX = left
+                    else if (right > contentX + width) nextX = right - width
+                    contentX = Math.max(0, Math.min(nextX, Math.max(0, contentWidth - width)))
+                }
+                function moveFocus(index, offset) {
+                    const next = (index + offset + sectionButtons.count) % sectionButtons.count
+                    sectionButtons.itemAt(next).forceActiveFocus(Qt.TabFocusReason)
+                    settings.selectSection(settings.sections[next].key)
+                }
+                WheelHandler {
+                    target: null
+                    onWheel: event => {
+                        const delta = event.pixelDelta.x || event.pixelDelta.y || event.angleDelta.x / 3 || event.angleDelta.y / 3
+                        settingsNavigation.contentX = Math.max(0, Math.min(settingsNavigation.contentWidth - settingsNavigation.width, settingsNavigation.contentX - delta))
+                        event.accepted = true
+                    }
+                }
+                Row {
+                    id: sectionTabs
+                    x: panel.padding
+                    y: root.settingsTabGap
+                    spacing: root.settingsTabGap
+                    Repeater {
+                        id: sectionButtons
+                        model: settings.sections
+                        delegate: Plugin.PanelButton {
+                            required property var modelData
+                            required property int index
+                            objectName: "settings-nav-" + modelData.key
+                            width: implicitWidth + Style.space(12)
+                            text: modelData.label
+                            leadingIconName: modelData.icon
+                            alignLeft: true
+                            fontFamily: root.panelFont
+                            foreground: root.barForeground
+                            opacity: 1
+                            contentOpacity: enabled ? 1 : 0.35
+                            outlined: true
+                            // Opaque faces preserve the existing composited theme colors
+                            // and keep scrolling text behind each tab's label.
+                            color: Qt.tint(Commons.Color.popups.background, settings.section === modelData.key
+                                ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.12)
+                                : activeFocus ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.06) : "transparent")
+                            Accessible.role: Accessible.PageTab
+                            Accessible.selected: settings.section === modelData.key
+                            onClicked: settings.selectSection(modelData.key)
+                            onActiveFocusChanged: if (activeFocus) settingsNavigation.revealTab(sectionButtons.itemAt(index))
+                            Keys.onLeftPressed: settingsNavigation.moveFocus(index, -1)
+                            Keys.onRightPressed: settingsNavigation.moveFocus(index, 1)
+                        }
+                    }
+                }
             }
 
             Flickable {
                 id: scroller
                 objectName: "panel-scroller"
-                anchors.top: divider.bottom
-                anchors.topMargin: Style.space(12)
+                anchors.top: settingsNavigation.visible && !supportsMask ? settingsNavigation.bottom : divider.bottom
                 anchors.bottom: footer.visible ? footer.top : updateFooter.visible ? updateFooter.top : parent.bottom
-                anchors.bottomMargin: footer.visible || updateFooter.visible ? Style.space(12) : 0
-                width: parent.width
+                anchors.bottomMargin: footer.visible || updateFooter.visible ? 0 : -panel.padding
+                x: -panel.padding
+                width: parent.width + panel.padding * 2
                 contentWidth: width
-                contentHeight: content.implicitHeight
+                readonly property bool supportsMask: GraphicsInfo.api !== GraphicsInfo.Software
+                readonly property real navigationInset: settingsNavigation.visible && supportsMask ? settingsNavigation.height : 0
+                contentHeight: content.implicitHeight + Style.space(24) + navigationInset
                 clip: true
+                layer.enabled: navigationInset > 0 && contentY > 0
+                layer.effect: ShaderEffect {
+                    property var source
+                    property real fadeStart: Math.max(0, scroller.navigationInset - root.settingsTabGap) / Math.max(1, scroller.height)
+                    property real fadeEnd: (scroller.navigationInset + root.settingsTabGap) / Math.max(1, scroller.height)
+                    fragmentShader: Qt.resolvedUrl("scroll-fade.frag.qsb")
+                }
                 boundsBehavior: Flickable.StopAtBounds
                 onContentYChanged: settings.closeSelectors()
+                onContentHeightChanged: Qt.callLater(root.revealFocusedControl)
 
                 Column {
                     id: content
-                    width: scroller.width
+                    x: panel.padding
+                    y: Style.space(12) + scroller.navigationInset
+                    width: scroller.width - panel.padding * 2
                     spacing: Style.space(20)
                     Text {
                         width: parent.width
@@ -367,17 +455,23 @@ Ui.Panel {
                         id: settings
                         objectName: "panel-settings-page"
                         width: parent.width
-                        visible: root.configurationPage && !root.aboutPage
+                        visible: root.configurationPage
                         foreground: root.barForeground
                         fontFamily: root.panelFont
                         popupParent: keyCatcher
-                        onAboutRequested: root.showAbout()
-                    }
-                    Plugin.AboutPage {
-                        width: parent.width
-                        visible: root.aboutPage
-                        foreground: root.barForeground
-                        fontFamily: root.panelFont
+                        inlineValidation: false
+                        onAlertsAdvancedChanged: Qt.callLater(root.revealFocusedControl)
+                        onSectionChanged: {
+                            scroller.cancelFlick()
+                            scroller.contentY = 0
+                            Qt.callLater(() => {
+                                content.forceLayout()
+                                if (!root.configurationPage) return
+                                settingsNavigation.revealTab(sectionButtons.itemAt(settings.sections.findIndex(item => item.key === settings.section)))
+                                const item = keyCatcher.Window.window ? keyCatcher.Window.window.activeFocusItem : null
+                                if (item && !item.visible) settingsNavigation.focusCurrentControl()
+                            })
+                        }
                     }
                 }
             }
@@ -517,8 +611,8 @@ Ui.Panel {
                 objectName: "settings-footer"
                 anchors.bottom: parent.bottom
                 width: parent.width
-                height: footerDivider.height + Style.space(12) + footerActions.height
-                visible: root.configurationPage && !root.aboutPage
+                height: footerDivider.height + panel.padding + footerActions.height + (footerFeedback.visible ? footerFeedback.height + Style.space(8) : 0)
+                visible: root.configurationPage
                 Rectangle {
                     id: footerDivider
                     objectName: "settings-footer-divider"
@@ -526,6 +620,33 @@ Ui.Panel {
                     width: parent.width + panel.padding * 2
                     height: Style.space(1)
                     color: divider.color
+                }
+                Column {
+                    id: footerFeedback
+                    anchors.top: footerDivider.bottom
+                    anchors.topMargin: panel.padding
+                    width: parent.width
+                    spacing: Style.space(6)
+                    visible: !Plugin.Model.settingsSaving && (Plugin.Model.settingsError !== "" || settings.validationSection !== "")
+                    Text {
+                        objectName: "settings-validation-message"
+                        width: parent.width
+                        text: Plugin.Model.settingsError || settings.validationMessage
+                        textFormat: Text.PlainText
+                        wrapMode: Text.WordWrap
+                        color: Commons.Color.urgent
+                        font.family: root.panelFont
+                        font.pixelSize: Style.font.caption
+                    }
+                    Plugin.PanelButton {
+                        objectName: "settings-review-section"
+                        visible: settings.validationSection !== "" && (settings.validationSection !== settings.section || (settings.section === "alerts" && !settings.alertsAdvanced))
+                        text: settings.validationSection ? "Review " + settings.sections.find(item => item.key === settings.validationSection).label : ""
+                        fontFamily: root.panelFont
+                        foreground: root.barForeground
+                        outlined: true
+                        onClicked: settings.selectSection(settings.validationSection)
+                    }
                 }
                 Item {
                     id: saveStatus

@@ -7,6 +7,7 @@ Rectangle {
     id: root
     property string text: ""
     property string iconName: ""
+    property string leadingIconName: ""
     property string trailingIconName: ""
     property string prefixText: ""
     readonly property real prefixWidth: prefixText ? prefix.implicitWidth + Style.space(8) : 0
@@ -18,9 +19,10 @@ Rectangle {
     property bool outlined: false
     property bool primary: false
     property bool multiline: false
+    property real contentOpacity: 1
     signal clicked()
 
-    implicitWidth: (iconName ? Style.space(16) : label.implicitWidth) + Style.space(hasLogo ? 44 : 20) + prefixWidth
+    implicitWidth: (iconName ? Style.space(16) : label.implicitWidth) + Style.space(hasLogo || leadingIconName ? 44 : 20) + prefixWidth
     implicitHeight: multiline ? Math.max(Style.space(30), label.implicitHeight + Style.space(16)) : Style.space(30)
     radius: Style.cornerRadius
     color: primary ? (mouse.containsMouse || activeFocus ? Qt.lighter(Commons.Color.accent, 1.12) : Commons.Color.accent)
@@ -40,9 +42,10 @@ Rectangle {
 
     Text {
         id: label
+        opacity: root.contentOpacity
         visible: root.iconName === ""
         anchors.fill: parent
-        anchors.leftMargin: Style.space(root.hasLogo ? 34 : 10) + root.prefixWidth
+        anchors.leftMargin: Style.space(root.hasLogo || root.leadingIconName ? 34 : 10) + root.prefixWidth
         anchors.rightMargin: Style.space(root.trailingIconName ? 34 : 10)
         text: root.text
         textFormat: Text.PlainText
@@ -88,6 +91,18 @@ Rectangle {
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
         }
+    }
+    Plugin.PanelIcon {
+        objectName: "leading-icon"
+        opacity: root.contentOpacity
+        anchors.left: parent.left
+        anchors.leftMargin: Style.space(10)
+        anchors.verticalCenter: parent.verticalCenter
+        width: Style.space(16)
+        height: width
+        visible: root.leadingIconName !== ""
+        name: root.leadingIconName
+        foreground: root.foreground
     }
     Plugin.PanelIcon {
         anchors.centerIn: parent

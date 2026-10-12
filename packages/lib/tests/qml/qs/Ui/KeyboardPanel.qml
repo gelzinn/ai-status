@@ -15,7 +15,7 @@ Rectangle {
     height: contentHeight
     color: "#111111"
     radius: Style.cornerRadius
-    border.color: "#282828"
+    border.color: Color.popups.border
     function fittedContentWidth(value) { return value }
     function fittedContentHeight(value, cap) { return Math.min(value + 32, cap) }
     onOpenChanged: if (open && focusTarget) focusTarget.forceActiveFocus()
