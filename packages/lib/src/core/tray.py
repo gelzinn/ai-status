@@ -2184,7 +2184,8 @@ class UpdateView(QWidget):
         latest = version.get("latest")
         self.versions.setText(f"v{current}" + (f" → v{latest}" if latest and latest != current else ""))
         notes = guide.get("releaseNotes") or {}
-        body = notes.get("body", "") if (version.get("has_update") and isinstance(notes, dict)
+        already_current = self.completed and "already up to date" in self.status.toolTip().lower()
+        body = notes.get("body", "") if (version.get("has_update") and not already_current and isinstance(notes, dict)
                                           and notes.get("version") == latest and latest != current) else ""
         body = body if isinstance(body, str) else ""
         if body != self.notes_markdown:

@@ -1911,6 +1911,10 @@ class DesktopTests(IsolatedState):
             self.assertTrue(view.action.isVisible())
             self.assertLess(view.action.width(), view.footer.width() / 2)
             self.assertLess(view.status.geometry().right(), view.action.geometry().left())
+            self.dashboard.on_update_finished("AI Status is already up to date.", True)
+            view.set_guide(guide, version)
+            self.assertTrue(view.notes_body.isHidden())
+            view.completed = False
             guide["releaseNotes"]["version"] = "0.12.0"
             view.set_guide(guide, version)
             self.assertTrue(view.notes_body.isHidden())
