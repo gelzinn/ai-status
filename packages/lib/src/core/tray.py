@@ -1987,6 +1987,7 @@ class UpdateView(QWidget):
         self.running = False
         self.completed = False
         self.failed = False
+        self.download_known = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 18, 16, 18)
         layout.setSpacing(14)
@@ -2063,7 +2064,7 @@ class UpdateView(QWidget):
         self.progress_bar.setObjectName("update-progress")
         self.progress_bar.setAccessibleName("Update download progress")
         self.progress_bar.setTextVisible(False)
-        self.progress_bar.setFixedHeight(5)
+        self.progress_bar.setFixedHeight(3)
         self.progress_bar.setStyleSheet(
             "QProgressBar { background: #262626; border: none; border-radius: 2px; }"
             "QProgressBar::chunk { background: #89b4fa; border-radius: 2px; }")
@@ -2072,7 +2073,17 @@ class UpdateView(QWidget):
         self.transferred = plain_label("")
         self.transferred.setObjectName("update-transferred")
         self.transferred.hide()
-        footer.addWidget(self.transferred)
+        self.remaining = plain_label("")
+        self.remaining.setObjectName("update-remaining")
+        self.remaining.hide()
+        self.transfer_row = QWidget()
+        transfer_layout = QHBoxLayout(self.transfer_row)
+        transfer_layout.setContentsMargins(0, 0, 0, 0)
+        transfer_layout.setSpacing(8)
+        transfer_layout.addWidget(self.transferred, 1)
+        transfer_layout.addWidget(self.remaining)
+        self.transfer_row.hide()
+        footer.addWidget(self.transfer_row)
         self.action = QPushButton()
         self.action.setObjectName("update-action")
         self.action.setStyleSheet("color: #89b4fa; border: 1px solid #294666; border-radius: 6px; padding: 8px;")
@@ -2112,11 +2123,13 @@ class UpdateView(QWidget):
         self.action.setEnabled(available and not self.running)
         self.action.setText("Retry update" if self.failed else "Done" if self.completed else
                             self.guide.get("actionLabel", "Update now"))
-        self.spinner.set_running(self.running)
+        self.spinner.set_running(self.running and not self.download_known)
         if not self.running:
             self.progress_bar.hide()
             self.percent.hide()
             self.transferred.hide()
+            self.remaining.hide()
+            self.transfer_row.hide()
 
     def request_action(self):
         if self.completed:
@@ -2136,24 +2149,29 @@ class UpdateView(QWidget):
         self.status.setToolTip(message)
         self.status.setStyleSheet("color: #89b4fa;")
         self.status.setVisible(bool(message))
-        self.spinner.set_running(self.running)
         self.progress_bar.setVisible(self.running)
         downloaded = event.get("downloadedBytes")
         total = event.get("totalBytes")
         downloading = self.running and event.get("stage") == "downloading"
         known_total = downloading and isinstance(total, (int, float)) and total > 0
-        if known_total and isinstance(downloaded, (int, float)):
+        self.download_known = bool(known_total and isinstance(downloaded, (int, float)) and downloaded >= 0)
+        self.spinner.set_running(self.running and not self.download_known)
+        if self.download_known:
             percent = min(100, max(0, int(downloaded * 100 / total)))
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(percent)
             self.percent.setText(f"{percent}%")
             self.transferred.setText(f"{downloaded / 1_000_000:.1f} / {total / 1_000_000:.1f} MB")
+            self.remaining.setText(f"{max(0, total - downloaded) / 1_000_000:.1f} MB left")
         else:
             self.progress_bar.setRange(0, 0)
             self.transferred.setText(f"{downloaded / 1_000_000:.1f} MB downloaded"
                                      if downloading and isinstance(downloaded, (int, float)) else "")
-        self.percent.setVisible(known_total and isinstance(downloaded, (int, float)))
+            self.remaining.clear()
+        self.percent.setVisible(self.download_known)
+        self.remaining.setVisible(self.download_known)
         self.transferred.setVisible(downloading and bool(self.transferred.text()))
+        self.transfer_row.setVisible(downloading and bool(self.transferred.text()))
         dashboard = self.window()
         if hasattr(dashboard, "fit_content") and dashboard.viewing_updates():
             dashboard.fit_content()

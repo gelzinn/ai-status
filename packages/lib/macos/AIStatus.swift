@@ -319,9 +319,15 @@ struct UpdateProgress: Decodable {
     }
     var transferred: String {
         guard stage == "downloading", let downloaded = downloadedBytes, downloaded >= 0 else { return "" }
-        let value = ByteCountFormatter.string(fromByteCount: downloaded, countStyle: .file)
-        guard let total = totalBytes, total > 0 else { return value + " downloaded" }
-        return value + " / " + ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
+        guard let total = totalBytes, total > 0 else {
+            return String(format: "%.1f MB downloaded", Double(downloaded) / 1_000_000)
+        }
+        return String(format: "%.1f / %.1f MB", Double(downloaded) / 1_000_000, Double(total) / 1_000_000)
+    }
+    var remaining: String {
+        guard stage == "downloading", let downloaded = downloadedBytes, downloaded >= 0,
+              let total = totalBytes, total > 0 else { return "" }
+        return String(format: "%.1f MB left", Double(max(0, total - downloaded)) / 1_000_000)
     }
     var label: String {
         switch stage {
@@ -2057,11 +2063,11 @@ struct UpdateProgressBar: View {
                                     geometry.size.width * (phase * 1.3 - 0.3))
                     }
                 }.clipped()
-            }.frame(height: 5)
+            }.frame(height: 3)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Update progress")
-        .accessibilityValue(percent.map { String(format: "%.0f%%", $0) } ?? "In progress")
+        .accessibilityValue(percent.map { "\(Int($0))%" } ?? "In progress")
     }
 }
 
@@ -2071,17 +2077,21 @@ struct UpdateActions: View {
         VStack(alignment: .leading, spacing: 8) {
             if model.updateStarting {
                 HStack(spacing: 8) {
-                    ActionSpinner()
+                    if model.updateProgress?.downloadPercent == nil { ActionSpinner() }
                     Text(model.updateProgress?.stage == "complete" ? model.updateCompletionLabel :
                          model.updateStatusLabel)
                     Spacer(minLength: 0)
                     if let percent = model.updateProgress?.downloadPercent {
-                        Text(String(format: "%.0f%%", percent)).monospacedDigit()
+                        Text("\(Int(percent))%").monospacedDigit().foregroundColor(Palette.bright)
                     }
                 }.foregroundColor(Palette.update)
                 UpdateProgressBar(percent: model.updateProgress?.downloadPercent)
                 if let transferred = model.updateProgress?.transferred, !transferred.isEmpty {
-                    Text(transferred).font(.custom("GeistMono-Regular", size: 11)).monospacedDigit()
+                    HStack {
+                        Text(transferred)
+                        Spacer(minLength: 0)
+                        if let remaining = model.updateProgress?.remaining, !remaining.isEmpty { Text(remaining) }
+                    }.font(.custom("GeistMono-Regular", size: 11)).monospacedDigit()
                 }
             } else {
                 if !model.updateError.isEmpty {
@@ -3167,7 +3177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         try renderSmokePage(model, name: "update-checking", directory: directory)
         try awaitSmokeUpdateStage(model) { $0?.stage == "downloading" && $0?.totalBytes == nil }
         guard model.updateStarting, model.updateProgress?.downloadPercent == nil,
-              model.updateProgress?.transferred.isEmpty == false else {
+              model.updateProgress?.transferred == "5.2 MB downloaded", model.updateProgress?.remaining.isEmpty == true else {
             throw AppError.message("Unknown-size download did not show active progress and transferred bytes.")
         }
         try renderSmokePage(model, name: "update-downloading-unknown", directory: directory)
@@ -3177,8 +3187,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             throw AppError.message("Navigating away erased an active update.")
         }
         try awaitSmokeUpdateStage(model) { $0?.downloadPercent == 37.5 }
-        guard model.updateStarting, model.updateProgress?.transferred.contains(" / ") == true else {
-            throw AppError.message("Known-size download did not report live percentage and bytes.")
+        guard model.updateStarting, model.updateProgress?.transferred == "31.5 / 83.9 MB",
+              model.updateProgress?.remaining == "52.4 MB left" else {
+            throw AppError.message("Known-size download did not report live percentage, transferred bytes and remaining bytes.")
         }
         try renderSmokePage(model, name: "update-downloading", directory: directory)
         model.showSettings()
@@ -3265,7 +3276,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             throw AppError.message("Missing completion was reported as a successful update.")
         }
         let bounded = UpdateProgress(stage: "downloading", message: "", downloadedBytes: 12, totalBytes: 10)
-        guard bounded.downloadPercent == 100 else { throw AppError.message("Update percentage exceeded its progress bar.") }
+        guard bounded.downloadPercent == 100, bounded.remaining == "0.0 MB left" else {
+            throw AppError.message("Update percentage or remaining bytes exceeded its download bounds.")
+        }
         var terminalDocument = document
         guard var terminalGuide = terminalDocument["update"] as? [String: Any] else {
             throw AppError.message("Terminal update fixture setup failed.")
