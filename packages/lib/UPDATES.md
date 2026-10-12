@@ -2,7 +2,11 @@
 
 Updates are optional. The **Update available** link opens an in-app guide for
 your installation. Opening the guide does not download or install anything.
-The page includes release notes and a short explanation of the next step.
+The page shows the new stable release's GitHub notes under **What's new**, using
+the same source as the web changelog. Long notes scroll above the fixed footer.
+**Release notes**, **Update manually…** and **Installation guide** use outlined
+controls. **Update now** starts the update; result notices appear on the left
+with a compact **Retry** or **Done** action on the right.
 Windows and the native macOS app show a spinner and progress bar in the fixed
 actions footer. Downloads show the percentage and transferred bytes when the
 server supplies a size; other stages use an indeterminate bar.
@@ -28,7 +32,7 @@ Linux and SwiftBar report when the terminal opens; follow the download and
 installation there. The native macOS app follows the update through installation
 and briefly closes to reopen the new version. Errors offer a retry in the app,
 or appear on stderr with a nonzero CLI exit status. If no supported Linux terminal
-is available, expand **Terminal command** and run it in your own terminal.
+is available, expand **Update manually…** and run the command in your own terminal.
 
 Only newer stable versions trigger the notice. Drafts, prereleases, and older
 version numbers are excluded. There are no forced updates or support-expiration
@@ -42,15 +46,15 @@ is preserved. Checking for a release does not install it.
 
 ## Windows
 
-For an installed copy, **Download and open installer** downloads the exact
+For an installed copy, **Update now** downloads the exact
 stable release installer and its `SHA256SUMS` file from GitHub. The installer
 is opened only after its checksum matches. It remains a normal setup wizard;
 the app does not silently replace itself.
 
 The footer shows checking, download, verification and automatic setup opening.
 The progress remains available when you close the panel or navigate back to usage.
-Once setup opens, the footer explains how to finish and reopen AI Status; this
-handoff does not claim that installation has finished.
+Once setup opens, the footer shows **Updater opened** with **Done**. Installation
+continues in Setup; this handoff does not claim that installation has finished.
 
 Keep your existing installation folder. If setup asks to close AI Status,
 allow it to do so, and leave **Launch AI Status** selected at the end to start

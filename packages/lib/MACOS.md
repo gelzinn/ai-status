@@ -32,14 +32,16 @@ installer uses the latest stable release with checksum verification. Re-run
 the command to update; your provider selection and display preferences are
 preserved. A user LaunchAgent starts the app when you sign in.
 
-When a newer version is available, **Update available: vX.Y.Z →** opens an
-compact update page inside the usage panel. **Update now** downloads and installs
+When a newer version is available, **Update available: vX.Y.Z →** opens a
+compact update page with the new GitHub release's notes. **Update now** downloads and installs
 for a supported native installation. The fixed footer shows a spinner, download
 percentage and transferred bytes, followed by verification, installation and
 automatic restart. AI Status closes briefly and reopens with your settings kept.
 **Update manually…** reveals the copyable Terminal command and installation
 guide. Back or **Esc** returns to usage; returning to Updates keeps the running
-progress. Errors offer **Retry update**. Updating is optional.
+progress. Results show a notice on the left and a compact **Retry** or **Done**
+button on the right. Release notes, manual update and guide controls have matching
+borders and padding. Updating is optional.
 
 You can also run `~/.local/bin/ai-status update` to start the updater. SwiftBar
 updates continue in Terminal. Development
