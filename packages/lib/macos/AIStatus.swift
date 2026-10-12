@@ -959,6 +959,7 @@ final class Model: ObservableObject {
 private enum Palette {
     static let surface = Color(red: 17 / 255, green: 17 / 255, blue: 17 / 255)
     static let border = Color.white.opacity(0.10)
+    static let controlBorder = Color(red: 48 / 255, green: 48 / 255, blue: 48 / 255)
     static let bright = Color(red: 238 / 255, green: 238 / 255, blue: 238 / 255)
     static let dim = Color(red: 136 / 255, green: 136 / 255, blue: 136 / 255)
     static let update = Color(red: 137 / 255, green: 180 / 255, blue: 250 / 255)
@@ -974,6 +975,67 @@ struct ProviderLogo: View {
                 Image(nsImage: image).resizable().scaledToFit()
             } else { Image(systemName: "sparkles") }
         }.frame(width: 16, height: 16).accessibilityHidden(true)
+    }
+}
+
+struct PanelSelectOption<Value: Hashable>: Identifiable {
+    let value: Value
+    let title: String
+    var provider: String? = nil
+    var logoPath = ""
+    var id: Value { value }
+
+    @ViewBuilder var label: some View {
+        if let provider = provider {
+            Label { Text(title) } icon: { ProviderLogo(provider: provider, path: logoPath) }
+        } else { Text(title) }
+    }
+}
+
+struct PanelSelect<Value: Hashable>: View {
+    let title: String
+    let options: [PanelSelectOption<Value>]
+    @Binding var selection: Value
+    var placeholder = "Choose an option"
+    @State private var hovering = false
+    @State private var focusID = UUID().uuidString
+    @FocusState private var focused: Bool
+    @Environment(\.controlKeyboardFocusVisible) private var keyboardFocusVisible
+    @Environment(\.isEnabled) private var enabled
+
+    private var selected: PanelSelectOption<Value>? { options.first { $0.value == selection } }
+
+    var body: some View {
+        Menu {
+            // A Picker inside the native menu keeps checked items and standard
+            // keyboard selection while the closed face uses the panel's style.
+            Picker(title, selection: $selection) {
+                if options.isEmpty { Text(placeholder).tag(selection) }
+                ForEach(options) { option in option.label.tag(option.value) }
+            }.labelsHidden().pickerStyle(.inline)
+        } label: {
+            HStack(spacing: 8) {
+                if let provider = selected?.provider {
+                    ProviderLogo(provider: provider, path: selected?.logoPath ?? "")
+                }
+                Text(selected?.title ?? placeholder).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 8)
+                PanelIcon(name: "chevron-down")
+            }
+            .font(Assets.font).foregroundColor(Palette.dim)
+            .padding(.horizontal, 8).frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden)
+        .id(focusID).focused($focused)
+        .background(PanelFocusGeometry(id: focusID, focused: focused))
+        .background(RoundedRectangle(cornerRadius: 6)
+            .fill(hovering && enabled ? Palette.bright.opacity(0.045) : Palette.surface))
+        .overlay(RoundedRectangle(cornerRadius: 6)
+            .stroke(focused && keyboardFocusVisible ? Palette.bright.opacity(0.5) : Palette.controlBorder))
+        .opacity(enabled ? 1 : 0.4)
+        .onHover { hovering = $0 }
+        .accessibilityLabel(title).accessibilityValue(selected?.title ?? placeholder)
     }
 }
 
@@ -1324,15 +1386,11 @@ struct SettingsPage: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
                 SettingsHeading(title: "Active provider & limit", detail: SettingsSection.general.detail)
-                Picker("Active provider & limit", selection: Binding(get: { model.draft.selected }, set: {
+                PanelSelect(title: "Active provider & limit", options: model.choices.map {
+                    PanelSelectOption(value: $0.selection, title: $0.label, provider: $0.provider, logoPath: $0.logoPath)
+                }, selection: Binding(get: { model.draft.selected }, set: {
                     model.draft.selected = $0; model.draft.saved = false
-                })) {
-                    if model.choices.isEmpty { Text("Choose a provider and limit").tag(Selection()) }
-                    ForEach(model.choices) { choice in
-                        Label { Text(choice.label) } icon: { ProviderLogo(provider: choice.provider, path: choice.logoPath) }
-                            .tag(choice.selection)
-                    }
-                }.labelsHidden().pickerStyle(.menu).modifier(PanelFocusTarget()).frame(maxWidth: .infinity, alignment: .leading)
+                }), placeholder: "Choose a provider and limit")
             }
         }
     }
@@ -1341,12 +1399,11 @@ struct SettingsPage: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
                 SettingsHeading(title: "Usage display")
-                Picker("Usage display", selection: Binding(get: { model.draft.usageDisplay }, set: {
+                PanelSelect(title: "Usage display", options: [PanelSelectOption(value: "used", title: "Used"),
+                                                             PanelSelectOption(value: "remaining", title: "Remaining")],
+                            selection: Binding(get: { model.draft.usageDisplay }, set: {
                     model.draft.usageDisplay = $0; model.draft.saved = false
-                })) {
-                    Text("Used").tag("used")
-                    Text("Remaining").tag("remaining")
-                }.labelsHidden().pickerStyle(.menu).modifier(PanelFocusTarget()).frame(maxWidth: .infinity, alignment: .leading)
+                }))
             }
             VStack(alignment: .leading, spacing: 8) {
                 SettingsHeading(title: "Bar display")
@@ -1355,13 +1412,12 @@ struct SettingsPage: View {
                         model.draft.display[key] = $0; model.draft.saved = false
                     })).toggleStyle(.checkbox).modifier(PanelFocusTarget())
                 }
-                Picker("Icon", selection: Binding(get: { model.draft.iconMode }, set: {
+                PanelSelect(title: "Icon", options: [PanelSelectOption(value: "off", title: "None"),
+                                                    PanelSelectOption(value: "bot", title: "Bot"),
+                                                    PanelSelectOption(value: "logo", title: "Provider logo")],
+                            selection: Binding(get: { model.draft.iconMode }, set: {
                     model.draft.iconMode = $0; model.draft.saved = false
-                })) {
-                    Text("None").tag("off")
-                    Text("Bot").tag("bot")
-                    Text("Provider logo").tag("logo")
-                }.pickerStyle(.menu).modifier(PanelFocusTarget()).frame(maxWidth: .infinity, alignment: .leading)
+                }))
             }
         }
     }
@@ -2028,11 +2084,33 @@ struct PanelView: View {
     }
 }
 
+final class PanelMenuTracking {
+    private let center: NotificationCenter
+    private var menus: Set<ObjectIdentifier> = []
+    private var observers: [NSObjectProtocol] = []
+    var isTracking: Bool { !menus.isEmpty }
+
+    init(center: NotificationCenter = .default) {
+        self.center = center
+        observers = [
+            center.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { [weak self] notification in
+                if let menu = notification.object as? NSMenu { self?.menus.insert(ObjectIdentifier(menu)) }
+            },
+            center.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: nil) { [weak self] notification in
+                if let menu = notification.object as? NSMenu { self?.menus.remove(ObjectIdentifier(menu)) }
+            }
+        ]
+    }
+
+    deinit { for observer in observers { center.removeObserver(observer) } }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNotificationCenterDelegate {
     private let model: Model
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var inputMonitor: Any?
+    private let menuTracking = PanelMenuTracking()
     private var signalSources: [DispatchSourceSignal] = []
     private var spinnerTimer: Timer?
     private var spinnerFrame = 0
@@ -2262,7 +2340,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
     }
     private func handleKey(_ event: NSEvent) -> NSEvent? {
-        guard popover.isShown else { return event }
+        // Let an open native select consume Escape and its navigation keys
+        // before the panel's Back/close shortcuts see the same event.
+        guard popover.isShown, !menuTracking.isTracking else { return event }
         if event.keyCode == 53 {
             if model.page == .usage { popover.performClose(nil) } else { model.back() }
             return nil
@@ -2370,6 +2450,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
         _ = try PanelIcons.load()
         try smokeFocusInput()
+        try smokeMenuTracking()
         let model = Model()
         model.accept(Data(sample.utf8))
         guard let snapshot = model.snapshot, snapshot.providers.count == 2,
@@ -2794,6 +2875,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         guard model.settingsSection == .alerts, model.keyboardFocusVisible else {
             throw AppError.message("Settings subnavigation discarded keyboard focus feedback.")
         }
+    }
+
+    private static func smokeMenuTracking() throws {
+        let center = NotificationCenter()
+        let tracking = PanelMenuTracking(center: center)
+        let menu = NSMenu()
+        let submenu = NSMenu()
+        guard !tracking.isTracking else { throw AppError.message("A closed select blocked panel shortcuts.") }
+        center.post(name: NSMenu.didBeginTrackingNotification, object: menu)
+        guard tracking.isTracking else { throw AppError.message("An open select did not keep native keyboard handling.") }
+        center.post(name: NSMenu.didBeginTrackingNotification, object: submenu)
+        center.post(name: NSMenu.didEndTrackingNotification, object: submenu)
+        guard tracking.isTracking else { throw AppError.message("Closing a submenu restored panel shortcuts before its select closed.") }
+        center.post(name: NSMenu.didEndTrackingNotification, object: NSMenu())
+        guard tracking.isTracking else { throw AppError.message("An unrelated menu ended select keyboard handling.") }
+        center.post(name: NSMenu.didEndTrackingNotification, object: menu)
+        guard !tracking.isTracking else { throw AppError.message("Closing a select left panel shortcuts blocked.") }
     }
 
     private static func smokeCloudCredits(sample: String, directory: URL?) throws {
