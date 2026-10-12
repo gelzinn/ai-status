@@ -743,26 +743,29 @@ final class Model: ObservableObject {
         return updateAlreadyCurrent ? "Up to date" : "Update complete"
     }
     var updateStatusLabel: String { updateProgress?.label ?? "Updating…" }
-    var updateFailureReason: String {
-        for prefix in ["Download failed.", "The download was interrupted.", "Update download failed.", "Installer download failed."] {
-            if updateError.hasPrefix(prefix) {
-                let reason = String(updateError.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
-                return reason.isEmpty ? "Check your connection and retry." : reason
+    var updateFailureLabel: String {
+        let message = updateError.lowercased()
+        if message.contains("checksum") {
+            if message.contains("not match") || message.contains("mismatch") { return "Verification failed: checksum mismatch" }
+            if message.contains("could not download") || message.contains("could not get") { return "Update failed: checksum unavailable" }
+            if message.contains("no valid") || message.contains("missing") || message.contains("invalid") {
+                return "Update failed: invalid release checksum"
             }
         }
-        return updateError
-    }
-    var updateDescription: String {
-        if updateProgress?.stage == "complete" { return "Your settings are kept." }
-        if let version = snapshot?.version, version.latest == version.current, !version.hasUpdate {
-            return "Your settings are kept."
+        if message.contains("powershell") && message.contains("unavailable") { return "Update failed: PowerShell unavailable" }
+        if message.contains("runtime") && message.contains("unavailable") { return "Update failed: updater unavailable" }
+        if message.contains("no supported terminal") || message.contains("terminal not found") { return "Update failed: Terminal unavailable" }
+        if message.contains("terminal") && message.contains("did not respond") { return "Update failed: Terminal not responding" }
+        if message.contains("could not open terminal") { return "Update failed: could not open Terminal" }
+        if message.contains("timed out") { return "Update failed: updater timed out" }
+        if message.contains("download") && message.contains("interrupted") { return "Download failed: transfer interrupted" }
+        if message.contains("download") && (message.contains("failed") || message.contains("connection")) {
+            return "Download failed. Check your connection."
         }
-        guard updateGuide.canUpdate else {
-            return updateGuide.command.isEmpty ? updateGuide.description : "Run the installer in Terminal. Your settings are kept."
-        }
-        return updateGuide.updatesInTerminal ?
-            "Updates in Terminal.\nYour settings are kept." :
-            "Installs and restarts automatically.\nYour settings are kept."
+        if message.contains("invalid") && (message.contains("progress") || message.contains("output")) { return "Update failed: invalid updater response" }
+        if message.contains("without confirmation") || message.contains("missing completion") || message.contains("before confirming") { return "Update failed: completion not confirmed" }
+        return updateError.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty } ?? updateError
     }
     var panelHeight: CGFloat {
         switch page {
@@ -2030,7 +2033,6 @@ struct UpdatePage: View {
                     Text("v\(version.current)" + (version.latest.map { $0 == version.current ? "" : " → v" + $0 } ?? ""))
                         .font(.custom("GeistMono-Regular", size: 11))
                 }
-                Text(model.updateDescription).fixedSize(horizontal: false, vertical: true)
             }
             HoverButton(action: { open(guide.releaseUrl) }) {
                 HStack { Text("Release notes"); Spacer(); PanelIcon(name: "arrow-right") }
@@ -2122,22 +2124,17 @@ struct UpdateActions: View {
                 }
             } else {
                 if !model.updateError.isEmpty {
-                    HStack(spacing: 8) {
-                        PanelIcon(name: "info")
-                        Text("Update failed")
-                    }.foregroundColor(Palette.error)
-                    Text(model.updateFailureReason).font(.custom("GeistMono-Regular", size: 12))
-                        .foregroundColor(Palette.control).fixedSize(horizontal: false, vertical: true)
-                        .help(model.updateError)
+                    HStack(alignment: .top, spacing: 8) {
+                        PanelIcon(name: "info").foregroundColor(Palette.error)
+                        Text(model.updateFailureLabel).foregroundColor(Palette.error)
+                            .fixedSize(horizontal: false, vertical: true).help(model.updateError)
+                    }
                 }
                 if model.updateProgress?.stage == "complete" {
                     HStack(spacing: 8) {
                         PanelIcon(name: "check")
                         Text(model.updateCompletionLabel)
                     }.foregroundColor(Palette.update)
-                    if model.updateHandedOff {
-                        Text("Finish the update in Terminal.").font(.custom("GeistMono-Regular", size: 11))
-                    }
                 }
                 if model.updateGuide.canUpdate || model.updateProgress?.stage == "complete" {
                     Button(action: {
@@ -3140,7 +3137,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         try renderSmokePage(model, name: "update-manual-alternative", directory: directory)
         model.updateManualVisible = false
         model.startUpdate()
-        guard !model.updateStarting, !model.updateError.isEmpty, model.updateMessage.isEmpty else {
+        guard !model.updateStarting, !model.updateError.isEmpty, model.updateMessage.isEmpty,
+              model.updateFailureLabel == "Update failed: updater unavailable" else {
             throw AppError.message("Unavailable update runtime did not expose retry feedback.")
         }
         try renderSmokePage(model, name: "update-error", directory: directory)
@@ -3180,7 +3178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         model.startUpdate()
         try awaitSmokeUpdateResult(model)
         guard model.updateError.isEmpty, model.updateMessage == "AI Status is already up to date.",
-              model.updateCompletionLabel == "Up to date", !model.updateDescription.lowercased().contains("download") else {
+              model.updateCompletionLabel == "Up to date" else {
             throw AppError.message("Update result did not preserve the CLI status.")
         }
         model.isPresented = true
@@ -3284,7 +3282,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         model.startUpdate()
         try awaitSmokeUpdateResult(model)
         guard model.updateError == "The download was interrupted. Check your connection and retry.",
-              model.updateFailureReason == "Check your connection and retry.",
+              model.updateFailureLabel == "Download failed: transfer interrupted",
               model.updateProgress?.stage == "error", model.updateMessage.isEmpty else {
             throw AppError.message("A failed update command reported a successful handoff.")
         }
@@ -3309,7 +3307,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             .write(to: script, atomically: true, encoding: .utf8)
         model.startUpdate()
         try awaitSmokeUpdateResult(model)
-        guard model.updateError == "The update could not finish.", model.updateFailureReason == model.updateError,
+        guard model.updateError == "The update could not finish.", model.updateFailureLabel == model.updateError,
               model.updateMessage.isEmpty else {
             throw AppError.message("A plain updater failure did not preserve stderr feedback.")
         }
@@ -3374,8 +3372,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             .write(to: script, atomically: true, encoding: .utf8)
         terminalModel.startUpdate()
         try awaitSmokeUpdateResult(terminalModel)
-        guard !terminalModel.updateHandedOff, terminalModel.updateCompletionLabel == "Up to date",
-              !terminalModel.updateDescription.contains("Terminal") else {
+        guard !terminalModel.updateHandedOff, terminalModel.updateCompletionLabel == "Up to date" else {
             throw AppError.message("An up-to-date terminal installation retained a previous updater handoff.")
         }
     }

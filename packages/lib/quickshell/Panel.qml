@@ -77,14 +77,26 @@ Ui.Panel {
         showUsage()
     }
 
-    function updateFailureReason(message) {
-        if (message.indexOf("No supported terminal found.") === 0)
-            return "Run the manual command or try again."
-        const prefixes = ["Download failed.", "The download was interrupted.", "Update download failed.", "Installer download failed."]
-        for (const prefix of prefixes) {
-            if (message.indexOf(prefix) === 0) return message.slice(prefix.length).trim()
+    function updateFailureSummary(message) {
+        const lower = message.toLowerCase().replace(/\s+/g, " ")
+        if (lower.indexOf("checksum") !== -1) {
+            if (lower.indexOf("not match") !== -1 || lower.indexOf("mismatch") !== -1) return "Verification failed: checksum mismatch"
+            if (lower.indexOf("could not download") !== -1 || lower.indexOf("could not get") !== -1) return "Update failed: checksum unavailable"
+            if (lower.indexOf("no valid") !== -1 || lower.indexOf("missing") !== -1 || lower.indexOf("invalid") !== -1) return "Update failed: invalid release checksum"
         }
-        return message
+        if (lower.indexOf("powershell") !== -1 && lower.indexOf("unavailable") !== -1) return "Update failed: PowerShell unavailable"
+        if (lower.indexOf("runtime") !== -1 && lower.indexOf("unavailable") !== -1) return "Update failed: updater unavailable"
+        if (lower.indexOf("no supported terminal") !== -1 || lower.indexOf("terminal not found") !== -1) return "Update failed: Terminal unavailable"
+        if (lower.indexOf("terminal") !== -1 && lower.indexOf("did not respond") !== -1) return "Update failed: Terminal not responding"
+        if (lower.indexOf("could not open terminal") !== -1) return "Update failed: could not open Terminal"
+        if (lower.indexOf("timed out") !== -1) return "Update failed: updater timed out"
+        if (lower.indexOf("download") !== -1) {
+            if (lower.indexOf("interrupted") !== -1) return "Download failed: transfer interrupted"
+            if (lower.indexOf("failed") !== -1 || lower.indexOf("connection") !== -1) return "Download failed. Check your connection."
+        }
+        if (lower.indexOf("invalid") !== -1 && (lower.indexOf("progress") !== -1 || lower.indexOf("output") !== -1)) return "Update failed: invalid updater response"
+        if (lower.indexOf("without confirmation") !== -1 || lower.indexOf("missing completion") !== -1 || lower.indexOf("before confirming") !== -1) return "Update failed: completion not confirmed"
+        return message.split(/\r?\n/).map(line => line.trim()).find(line => line !== "") || "Update failed"
     }
 
     function showResetCredits(provider, idx) {
@@ -512,7 +524,7 @@ Ui.Panel {
                         id: updateStatus
                         objectName: "update-status"
                         width: parent.width
-                        height: Style.space(16)
+                        height: updateFooter.failed ? Math.max(Style.space(16), updateStatusLabel.implicitHeight) : Style.space(16)
                         visible: Plugin.Model.updateRunning || updateFooter.failed || updateFooter.finished
                         Plugin.PanelIcon {
                             id: updateStatusIcon
@@ -523,7 +535,8 @@ Ui.Panel {
                             height: width
                             visible: Plugin.Model.updateRunning || updateFooter.failed || updateFooter.finished
                             name: Plugin.Model.updateRunning ? "loader-circle" : updateFooter.failed ? "info" : "check"
-                            foreground: updateFooter.failed ? Commons.Color.urgent : Commons.Color.accent
+                            foreground: updateFooter.failed ? "#f5a3a3" : Commons.Color.accent
+                            Accessible.description: updateFooter.failed ? Plugin.Model.updateError : ""
                             NumberAnimation on rotation {
                                 from: 0
                                 to: 360
@@ -534,15 +547,17 @@ Ui.Panel {
                             }
                         }
                         Text {
+                            id: updateStatusLabel
                             objectName: "update-status-label"
                             anchors.left: parent.left
                             anchors.leftMargin: updateStatusIcon.visible ? updateStatusIcon.width + Style.space(6) : 0
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
-                            text: Plugin.Model.updateRunning ? (Plugin.Model.updateStage === "checking" ? "Checking for updates…" : "Opening updater…") : updateFooter.failed ? "Update failed" : updateFooter.current ? "Up to date" : "Updater opened"
+                            text: Plugin.Model.updateRunning ? (Plugin.Model.updateStage === "checking" ? "Checking for updates…" : "Opening updater…") : updateFooter.failed ? root.updateFailureSummary(Plugin.Model.updateError) : updateFooter.current ? "Up to date" : "Updater opened"
                             textFormat: Text.PlainText
-                            elide: Text.ElideRight
-                            color: updateFooter.failed ? Commons.Color.urgent : Commons.Color.accent
+                            wrapMode: updateFooter.failed ? Text.WordWrap : Text.NoWrap
+                            elide: updateFooter.failed ? Text.ElideNone : Text.ElideRight
+                            color: updateFooter.failed ? "#f5a3a3" : Commons.Color.accent
                             font.family: root.panelFont
                             font.pixelSize: Style.font.body
                             Accessible.role: Accessible.StaticText
@@ -580,22 +595,6 @@ Ui.Panel {
                             loops: Animation.Infinite
                             running: Plugin.Model.updateRunning && updateFooter.visible
                         }
-                    }
-                    Text {
-                        id: updateDetail
-                        objectName: "update-status-detail"
-                        width: parent.width
-                        visible: !Plugin.Model.updateRunning && text !== ""
-                        text: updateFooter.failed ? root.updateFailureReason(Plugin.Model.updateError) : updateFooter.finished && !updateFooter.current ? "Finish the update in Terminal." : ""
-                        textFormat: Text.PlainText
-                        wrapMode: Text.WordWrap
-                        color: root.barForeground
-                        opacity: 0.7
-                        font.family: root.panelFont
-                        font.pixelSize: Style.space(updateFooter.failed ? 12 : 11)
-                        Accessible.role: Accessible.StaticText
-                        Accessible.name: text
-                        Accessible.description: updateFooter.failed ? Plugin.Model.updateError : ""
                     }
                     Plugin.PanelButton {
                         id: updateAction

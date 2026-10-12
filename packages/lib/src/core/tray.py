@@ -1973,6 +1973,38 @@ class UpdateResultIcon(QWidget):
         draw_control_icon(painter, QRectF(self.rect()), self.icon_name, color=self.color)
 
 
+def update_failure_label(message):
+    lower = message.lower()
+    if "checksum" in lower:
+        if "not match" in lower or "mismatch" in lower:
+            return "Verification failed: checksum mismatch"
+        if "could not download" in lower or "could not get" in lower:
+            return "Update failed: checksum unavailable"
+        if any(word in lower for word in ("no valid", "missing", "invalid")):
+            return "Update failed: invalid release checksum"
+    if "powershell" in lower and "unavailable" in lower:
+        return "Update failed: PowerShell unavailable"
+    if "runtime" in lower and "unavailable" in lower:
+        return "Update failed: updater unavailable"
+    if "no supported terminal" in lower or "terminal not found" in lower:
+        return "Update failed: Terminal unavailable"
+    if "terminal" in lower and "did not respond" in lower:
+        return "Update failed: Terminal not responding"
+    if "could not open terminal" in lower:
+        return "Update failed: could not open Terminal"
+    if "timed out" in lower:
+        return "Update failed: updater timed out"
+    if "download" in lower and "interrupted" in lower:
+        return "Download failed: transfer interrupted"
+    if "download" in lower and ("failed" in lower or "connection" in lower):
+        return "Download failed. Check your connection."
+    if "invalid" in lower and ("progress" in lower or "output" in lower):
+        return "Update failed: invalid updater response"
+    if "without confirmation" in lower or "missing completion" in lower or "before confirming" in lower:
+        return "Update failed: completion not confirmed"
+    return next((line.strip() for line in message.splitlines() if line.strip()), message)
+
+
 class UpdateWorker(QObject):
     progress = Signal(object)
     finished = Signal(str, bool)
@@ -2009,12 +2041,6 @@ class UpdateView(QWidget):
         self.versions = plain_label("")
         self.versions.setWordWrap(True)
         layout.addWidget(self.versions)
-        self.description = plain_label("")
-        self.description.setWordWrap(True)
-        layout.addWidget(self.description)
-        self.steps = plain_label("")
-        self.steps.setWordWrap(True)
-        layout.addWidget(self.steps)
         self.manual_toggle = QPushButton("Show terminal command")
         self.manual_toggle.setCheckable(True)
         self.manual_toggle.toggled.connect(self.toggle_command)
@@ -2068,6 +2094,7 @@ class UpdateView(QWidget):
         self.result_icon.hide()
         status_row.addWidget(self.result_icon, 0, Qt.AlignmentFlag.AlignTop)
         self.status = plain_label("")
+        self.status.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.status.setWordWrap(True)
         self.status.hide()
         status_row.addWidget(self.status, 1)
@@ -2100,12 +2127,6 @@ class UpdateView(QWidget):
         transfer_layout.addWidget(self.remaining)
         self.transfer_row.hide()
         footer.addWidget(self.transfer_row)
-        self.detail = plain_label("")
-        self.detail.setObjectName("update-detail")
-        self.detail.setWordWrap(True)
-        self.detail.setStyleSheet("color: #888888; font-size: 11px;")
-        self.detail.hide()
-        footer.addWidget(self.detail)
         self.action = QPushButton()
         self.action.setObjectName("update-action")
         self.action.setStyleSheet("color: #89b4fa; border: 1px solid #294666; border-radius: 6px; padding: 8px;")
@@ -2119,11 +2140,6 @@ class UpdateView(QWidget):
         current = version.get("current") or __version__
         latest = version.get("latest")
         self.versions.setText(f"v{current}" + (f" → v{latest}" if latest and latest != current else ""))
-        current_release = bool(version.get("current") and version.get("latest") == version.get("current")
-                               and not version.get("has_update"))
-        self.description.setText("Your settings are kept." if current_release else guide.get("description", ""))
-        self.steps.setText("" if current_release else "\n".join(guide.get("steps", [])))
-        self.steps.setVisible(bool(self.steps.text()))
         command = guide.get("command", "")
         if self.command.text() != command:
             self.reset_copy_feedback()
@@ -2167,37 +2183,16 @@ class UpdateView(QWidget):
     def show_progress(self, event):
         event = {"message": event} if isinstance(event, str) else event
         message = event.get("message", "")
-        self.detail.clear()
-        self.detail.hide()
-        self.detail.setStyleSheet("color: #aaaaaa; font-size: 12px;" if self.failed else
-                                 "color: #888888; font-size: 11px;")
         label = {
             "checking": "Checking for updates…", "downloading": "Downloading…",
             "verifying": "Verifying download…", "installing": "Installing…",
             "opening": "Opening updater…", "restarting": "Restarting AI Status…",
         }.get(event.get("stage"), message)
         if self.failed and not self.running:
-            label = "Update failed"
-            detail = message
-            for prefix in ("Download failed.", "The download was interrupted.",
-                           "Update download failed.", "Installer download failed."):
-                if message.startswith(prefix):
-                    detail = message[len(prefix):].strip() or "Check your connection and retry."
-                    break
-            self.detail.setText(detail)
-            self.detail.setToolTip(message)
-            self.detail.setVisible(bool(message))
+            label = update_failure_label(message)
         elif self.completed and not self.running:
             current = "already up to date" in message.lower()
             label = "Up to date" if current else "Updater opened"
-            self.description.setText("Your settings are kept.")
-            self.steps.clear()
-            self.steps.hide()
-            if not current:
-                destination = "Setup" if self.guide.get("method") == "windows-installer" else "Terminal"
-                self.detail.setText(f"Finish the update in {destination}.")
-                self.detail.setToolTip(message)
-                self.detail.show()
         self.status.setText(label)
         self.status.setToolTip(message)
         self.status.setStyleSheet("color: #f5a3a3;" if self.failed else "color: #89b4fa;")
@@ -2528,8 +2523,6 @@ class Dashboard(QWidget):
                 self.update_view.completed = False
                 self.update_view.status.clear()
                 self.update_view.status.hide()
-                self.update_view.detail.clear()
-                self.update_view.detail.hide()
         self.reset_provider = None
         self.monetary_credit = None
         self.update_view.set_guide(updates.update_guide(), fetch.get_version_info())

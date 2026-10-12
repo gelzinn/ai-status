@@ -9,7 +9,6 @@ Column {
     readonly property color linkColor: "#89b4fa"
     readonly property var guide: Plugin.Model.snapshot.update || {}
     readonly property var version: Plugin.Model.snapshot.version || {}
-    readonly property bool finished: !Plugin.Model.updateRunning && Plugin.Model.updateError === "" && Plugin.Model.updateMessage !== ""
     readonly property bool alreadyCurrent: version.has_update === false || (!Plugin.Model.updateRunning && Plugin.Model.updateError === "" && Plugin.Model.updateMessage.indexOf("already up to date") !== -1)
     property Item actionControl: null
     property bool commandExpanded: false
@@ -40,11 +39,6 @@ Column {
             objectName: "update-versions"
             text: "v" + (root.version.current || "—") +
                   (!root.alreadyCurrent && root.version.latest && root.version.latest !== root.version.current ? "  →  v" + root.version.latest : "")
-            opacity: 0.7
-        }
-        Label {
-            objectName: "update-description"
-            text: root.alreadyCurrent || root.finished ? "Your settings are kept." : root.guide.description || "See the update guide for your installation."
             opacity: 0.7
         }
     }

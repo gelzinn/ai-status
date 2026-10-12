@@ -403,26 +403,42 @@ Item {
             verify(action.enabled)
             verify(action.visible)
             compare(action.text, "Retry update")
-            compare(findChild(panel, "update-status-detail").text, Plugin.Model.updateError)
-            compare(findChild(panel, "update-status-label").text, "Update failed")
-            const detail = findChild(panel, "update-status-detail")
+            const label = findChild(panel, "update-status-label")
+            compare(label.text, "Update failed: Terminal unavailable")
             const icon = findChild(panel, "update-status-icon")
-            compare(detail.font.pixelSize, Style.space(12))
-            compare(detail.wrapMode, Text.WordWrap)
-            compare(detail.color, panel.barForeground)
-            compare(detail.Accessible.description, Plugin.Model.updateError)
+            verify(!findChild(panel, "update-status-detail"))
+            compare(label.wrapMode, Text.WordWrap)
+            compare(label.Accessible.description, Plugin.Model.updateError)
             verify(icon.visible)
             compare(icon.name, "info")
             compare(icon.width, Style.space(16))
-            compare(icon.foreground, findChild(panel, "update-status-label").color)
-            for (const prefix of ["Download failed.", "The download was interrupted.", "Update download failed.", "Installer download failed."]) {
-                Plugin.Model.updateError = prefix + " Check your connection and retry."
-                compare(detail.text, "Check your connection and retry.")
-                compare(detail.Accessible.description, Plugin.Model.updateError)
+            compare(icon.foreground, label.color)
+            compare(icon.foreground, "#f5a3a3")
+            const failures = [
+                ["The checksum did not match. Nothing was installed.", "Verification failed: checksum mismatch"],
+                ["Could not download the release checksum.", "Update failed: checksum unavailable"],
+                ["This release has no valid update checksum.", "Update failed: invalid release checksum"],
+                ["Windows PowerShell is unavailable.", "Update failed: PowerShell unavailable"],
+                ["The AI Status runtime is unavailable.", "Update failed: updater unavailable"],
+                ["Terminal did not respond.", "Update failed: Terminal not responding"],
+                ["Could not open Terminal.", "Update failed: could not open Terminal"],
+                ["The updater timed out.", "Update failed: updater timed out"],
+                ["The download was interrupted. Check your connection and retry.", "Download failed: transfer interrupted"],
+                ["Installer download failed. Check your connection.", "Download failed. Check your connection."],
+                ["The updater returned invalid progress.", "Update failed: invalid updater response"],
+                ["The updater stopped before confirming the update.", "Update failed: completion not confirmed"],
+                ["Unknown updater failure. Keep the complete original text.", "Unknown updater failure. Keep the complete original text."],
+                ["\n Unknown updater failure.\nAdditional diagnostic detail", "Unknown updater failure."]
+            ]
+            for (const failure of failures) {
+                Plugin.Model.updateError = failure[0]
+                compare(label.text, failure[1])
+                compare(label.Accessible.description, failure[0])
+                verify(!findChild(panel, "update-status-detail"))
             }
             Plugin.Model.updateError = "No supported terminal found. Run the command shown in the guide in your terminal."
-            compare(detail.text, "Run the manual command or try again.")
-            compare(detail.Accessible.description, Plugin.Model.updateError)
+            compare(label.text, "Update failed: Terminal unavailable")
+            compare(label.Accessible.description, Plugin.Model.updateError)
             verify(findChild(panel, "update-command-box").visible)
             compare(findChild(panel, "update-manual-command").text, "Hide manual update")
             action.forceActiveFocus(Qt.TabFocusReason)
@@ -440,7 +456,7 @@ Item {
             verify(panel.updatePage)
             verify(!findChild(panel, "update-action").visible)
             verify(!findChild(panel, "update-footer").visible)
-            verify(!findChild(panel, "update-status-detail").visible)
+            verify(!findChild(panel, "update-status-detail"))
             verify(findChild(panel, "update-release-notes").visible)
             compare(findChild(panel, "update-guide-link").text, "Installation guide")
             verify(!findChild(panel, "update-guide-link").outlined)
@@ -465,7 +481,6 @@ Item {
             const icon = findChild(panel, "update-status-icon")
             const progress = findChild(panel, "update-progress")
             const label = findChild(panel, "update-status-label")
-            const detail = findChild(panel, "update-status-detail")
             const action = findChild(panel, "update-action")
             const command = findChild(panel, "update-command-box")
             verify(footer.visible)
@@ -484,8 +499,7 @@ Item {
             compare(action.x, 0)
             compare(icon.width, Style.space(16))
             compare(label.font.pixelSize, Style.font.body)
-            compare(detail.font.pixelSize, Style.space(11))
-            verify(!detail.visible)
+            verify(!findChild(panel, "update-status-detail"))
             compare(findChild(panel, "update-manual-command").text, "Update manually…")
             mouseClick(findChild(panel, "update-manual-command"))
             wait(20)
@@ -503,7 +517,7 @@ Item {
             tryVerify(() => icon.rotation > 0)
             compare(label.text, "Checking for updates…")
             verify(!action.visible)
-            verify(!detail.visible)
+            verify(!findChild(panel, "update-status-detail"))
             verify(progress.visible)
             verify(progress.animating)
             const phase = progress.phase
@@ -512,7 +526,7 @@ Item {
             Plugin.Model.updateStage = "opening"
             Plugin.Model.updateMessage = "Opening the updater in a terminal…"
             compare(label.text, "Opening updater…")
-            verify(!detail.visible)
+            verify(!findChild(panel, "update-status-detail"))
             verify(!action.visible)
             compare(footer.y + footer.height, footerBottom)
             panel.showUsage()
@@ -529,12 +543,10 @@ Item {
             tryCompare(icon, "rotation", 0)
             verify(!progress.visible)
             verify(!progress.animating)
-            verify(detail.visible)
+            verify(!findChild(panel, "update-status-detail"))
             verify(action.visible)
-            compare(detail.text, "Finish the update in Terminal.")
-            compare(findChild(panel, "update-description").text, "Your settings are kept.")
+            verify(!findChild(panel, "update-description"))
             verify(!findChild(panel, "update-next-step"))
-            verify(detail.mapToItem(action, 0, detail.height).y <= 0)
             compare(action.text, "Done")
             mouseClick(action)
             verify(!panel.updatePage)
@@ -548,12 +560,10 @@ Item {
             Plugin.Model.updateMessage = "AI Status is already up to date."
             Plugin.Model.updateRunning = false
             compare(findChild(panel, "update-status-label").text, "Up to date")
-            verify(findChild(panel, "update-description").visible)
-            compare(findChild(panel, "update-description").text, "Your settings are kept.")
+            verify(!findChild(panel, "update-description"))
             verify(!findChild(panel, "update-next-step"))
             compare(findChild(panel, "update-versions").text, "v0.11.0")
-            compare(findChild(panel, "update-status-detail").text, "")
-            verify(!findChild(panel, "update-status-detail").visible)
+            verify(!findChild(panel, "update-status-detail"))
             compare(findChild(panel, "update-status-icon").name, "check")
             compare(findChild(panel, "update-status-icon").foreground, findChild(panel, "update-status-label").color)
             compare(findChild(panel, "update-action").text, "Done")
