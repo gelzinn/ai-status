@@ -11,9 +11,10 @@ Column {
     property var enabledProviders: []
     property var display: ({})
     property string iconMode: "bot"
+    property string usageDisplay: "used"
     property var selected: ({})
     property Item popupParent: parent
-    readonly property bool selectionOpen: providerSelector.popupOpen
+    readonly property bool selectionOpen: providerSelector.popupOpen || iconSelector.popupOpen || usageDisplaySelector.popupOpen
     property bool saved: false
     signal aboutRequested()
     readonly property var choices: {
@@ -66,13 +67,14 @@ Column {
     }
     readonly property var selectedChoice: choices.find(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) || null
     readonly property string selectedLabel: selectedChoice ? selectedChoice.groupLabel + " · " + selectedChoice.label : "Choose a provider and limit"
-    readonly property bool valid: enabledProviders.length > 0 && Object.keys(display).some(key => display[key]) && choices.some(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric)
+    readonly property bool valid: enabledProviders.length > 0 && Object.keys(display).some(key => display[key]) && ["used", "remaining"].indexOf(usageDisplay) !== -1 && choices.some(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric)
     spacing: Style.space(22)
     enabled: !Plugin.Model.settingsSaving
     onOrderChanged: saved = false
     onEnabledProvidersChanged: saved = false
     onDisplayChanged: saved = false
     onIconModeChanged: saved = false
+    onUsageDisplayChanged: saved = false
     onSelectedChanged: saved = false
     onVisibleChanged: if (!visible) closeSelectors()
 
@@ -91,7 +93,9 @@ Column {
 
     function limitLabel(metric) {
         const shortNames = {"Rolling Usage": "Rolling", "Daily Usage": "Daily", "Weekly Usage": "Weekly", "Monthly Usage": "Monthly",
+            "Rolling Remaining": "Rolling", "Daily Remaining": "Daily", "Weekly Remaining": "Weekly", "Monthly Remaining": "Monthly",
             "Cursor Models included quota": "Cursor Models", "Other Models included quota": "Other Models",
+            "Cursor Models included quota remaining": "Cursor Models", "Other Models included quota remaining": "Other Models",
             "On-demand spend this billing cycle": "On-demand spend"}
         const label = shortNames[metric.name] || metric.name
         // Key suffixes may be full names or opaque IDs, not display labels.
@@ -99,12 +103,14 @@ Column {
         const parts = metric.key.split(":")
         const qualifier = parts.slice(1).join(":")
         const periodName = {rolling: "Rolling Usage", daily: "Daily Usage", weekly: "Weekly Usage", monthly: "Monthly Usage"}[parts[0]]
-        return qualifier && metric.name === periodName && qualifier !== metric.name ? label + " · " + qualifier : label
+        const remainingName = periodName ? periodName.replace("Usage", "Remaining") : ""
+        return qualifier && (metric.name === periodName || metric.name === remainingName) && qualifier !== metric.name ? label + " · " + qualifier : label
     }
 
     function closeSelectors() {
         providerSelector.dismiss()
         iconSelector.dismiss()
+        usageDisplaySelector.dismiss()
     }
 
     function begin() {
@@ -113,6 +119,7 @@ Column {
         enabledProviders = (settings.enabled || []).slice()
         display = Object.assign({}, settings.display || {})
         iconMode = settings.iconMode || "bot"
+        usageDisplay = settings.usageDisplay === "remaining" ? "remaining" : "used"
         selected = Object.assign({}, Plugin.Model.snapshot.selected)
         closeSelectors()
         saved = false
@@ -149,6 +156,7 @@ Column {
             enabled: order.filter(name => enabledProviders.indexOf(name) !== -1),
             display: display,
             iconMode: iconMode,
+            usageDisplay: usageDisplay,
             selected: {provider: selected.provider, idx: selected.idx, metric: selected.metric}
         })
     }
@@ -181,11 +189,29 @@ Column {
             fontFamily: root.fontFamily
             choices: root.choices.map(item => Object.assign({}, item, {objectName: "active-provider-option-" + item.provider + "-" + item.idx + "-" + item.metric}))
             currentIndex: root.choices.indexOf(root.selectedChoice)
-            onPopupOpenChanged: if (popupOpen) iconSelector.dismiss()
+            onPopupOpenChanged: if (popupOpen) { iconSelector.dismiss(); usageDisplaySelector.dismiss() }
             onActivated: index => {
                 const choice = root.choices[index]
                 root.selected = {provider: choice.provider, idx: choice.idx, metric: choice.metric}
             }
+        }
+    }
+    Column {
+        width: parent.width
+        spacing: Style.space(8)
+        Label { text: "Usage display"; font.bold: true }
+        Plugin.PanelSelect {
+            id: usageDisplaySelector
+            objectName: "usage-display"
+            width: parent.width
+            text: root.usageDisplay === "remaining" ? "Remaining" : "Used"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            popupParent: root.popupParent
+            choices: [{value: "used", label: "Used"}, {value: "remaining", label: "Remaining"}]
+            currentIndex: ["used", "remaining"].indexOf(root.usageDisplay)
+            onPopupOpenChanged: if (popupOpen) { providerSelector.dismiss(); iconSelector.dismiss() }
+            onActivated: index => root.usageDisplay = choices[index].value
         }
     }
     Column {
@@ -224,7 +250,7 @@ Column {
             popupParent: root.popupParent
             choices: [{value: "off", label: "None"}, {value: "bot", label: "Bot"}, {value: "logo", label: "Provider logo"}]
             currentIndex: ["off", "bot", "logo"].indexOf(root.iconMode)
-            onPopupOpenChanged: if (popupOpen) providerSelector.dismiss()
+            onPopupOpenChanged: if (popupOpen) { providerSelector.dismiss(); usageDisplaySelector.dismiss() }
             onActivated: index => root.iconMode = choices[index].value
         }
     }

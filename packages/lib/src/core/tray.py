@@ -714,8 +714,16 @@ class ProviderSettings(QWidget):
         self.active.setAccessibleName("Active provider and limit")
         layout.addWidget(self.active)
         layout.addSpacing(14)
-        layout.addWidget(plain_label("Bar display", "#eeeeee"))
         selected = state.load_selected() or {}
+        layout.addWidget(plain_label("Usage display", "#eeeeee"))
+        self.usage_display = QComboBox()
+        self.usage_display.setAccessibleName("Usage display")
+        for value, label in (("used", "Used"), ("remaining", "Remaining")):
+            self.usage_display.addItem(label, value)
+        self.usage_display.setCurrentIndex(self.usage_display.findData(state.get_usage_display(selected)))
+        layout.addWidget(self.usage_display)
+        layout.addSpacing(14)
+        layout.addWidget(plain_label("Bar display", "#eeeeee"))
         self.display = {}
         for key, label, default in (("show_provider", "Provider name", True),
                                     ("show_model", "Model / plan", True),
@@ -783,6 +791,7 @@ class ProviderSettings(QWidget):
         for checkbox in self.display.values():
             checkbox.toggled.connect(self.clear_message)
         self.icon_mode.currentIndexChanged.connect(self.clear_message)
+        self.usage_display.currentIndexChanged.connect(self.update_choices)
         self.active.currentIndexChanged.connect(self.clear_message)
         self.startup.toggled.connect(self.clear_message)
 
@@ -807,7 +816,7 @@ class ProviderSettings(QWidget):
                 metrics = entry.get("metrics") or [{"type": "rolling"}]
                 for metric in metrics:
                     key = render.metric_key(metric)
-                    title = render.metric_title(metric)
+                    title = render.metric_title(metric, {"usage_display": self.usage_display.currentData()})
                     detail = " (" + key.split(":", 1)[1] + ")" if ":" in key and not metric.get("id") and not metric.get("name") else ""
                     self.active.addItem(provider_icon(name), f"{Dashboard.entry_name(name, entry)} · {title}{detail}",
                                         [name, entry.get("_idx", 0), key])
@@ -831,11 +840,16 @@ class ProviderSettings(QWidget):
             self.message.setText("Show at least one text field in the bar.")
             self.message.show()
             return
+        usage_display = self.usage_display.currentData()
+        if usage_display not in state.USAGE_DISPLAY_MODES:
+            self.message.setText("Choose Used or Remaining for usage display.")
+            self.message.show()
+            return
         selected = dict(state.load_selected() or {})
         choice = self.active.currentData()
         if choice:
             selected.update(zip(("provider", "idx", "metric"), choice))
-        selected.update(display, icon_mode=self.icon_mode.currentData())
+        selected.update(display, icon_mode=self.icon_mode.currentData(), usage_display=usage_display)
         try:
             if paths.IS_WINDOWS:
                 set_startup(self.startup.isChecked())
@@ -1516,7 +1530,7 @@ class Dashboard(QWidget):
         for name, entry, metric, value in self.visible_metrics:
             if value == self.selected_value():
                 loading = name in self.pending
-                percentage = render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else render.metric_value(metric)
+                percentage = render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else render.metric_value(metric, self.selected)
                 text = f"{self.entry_name(name, entry)} {percentage}"
                 if entry.get("_cached"):
                     text += " · cached"
@@ -1608,15 +1622,15 @@ class Dashboard(QWidget):
                 heading.cached_label.setContentsMargins(50, 0, 0, 0)
                 group_layout.addWidget(heading.cached_label)
                 for metric in metrics:
-                    title = render.metric_title(metric)
+                    title = render.metric_title(metric, self.selected)
                     value = (name, entry.get("_idx", 0), render.metric_key(metric))
                     active = value == self.selected_value()
                     color = "#eeeeee" if active else "#888888"
-                    pct = render.metric_percentage(metric)
+                    pct = render.metric_percentage(metric, self.selected)
                     button = UsageButton()
                     button.value = value
                     button.is_amount = render.metric_is_amount(metric)
-                    button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {render.metric_value(metric)}")
+                    button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {render.metric_value(metric, self.selected)}")
                     button.clicked.connect(lambda checked=False, value=value: self.choose_metric(value))
                     self.metric_buttons.append(button)
                     metric_layout = QVBoxLayout(button)
@@ -1631,7 +1645,7 @@ class Dashboard(QWidget):
                     button.title = plain_label(title, color)
                     button.title.setWordWrap(True)
                     title_row.addWidget(button.title, 0 if button.is_amount else 1)
-                    button.percentage = plain_label(render.metric_value(metric), color)
+                    button.percentage = plain_label(render.metric_value(metric, self.selected), color)
                     button.percentage.setAlignment((Qt.AlignmentFlag.AlignLeft if button.is_amount else Qt.AlignmentFlag.AlignRight) | Qt.AlignmentFlag.AlignVCenter)
                     title_row.addWidget(button.percentage)
                     if button.is_amount:
@@ -1711,27 +1725,27 @@ class Dashboard(QWidget):
             active = value == self.selected_value()
             loading = name in self.pending
             color = "#eeeeee" if active else "#888888"
-            pct = render.metric_percentage(metric)
-            title = render.metric_title(metric)
+            pct = render.metric_percentage(metric, self.selected)
+            title = render.metric_title(metric, self.selected)
             button.bullet.setText("•" if active else "")
             button.title.setText(title + ":" if button.is_amount else title)
             button.bar.set_usage(pct or 0, active, loading, group_indices[value[:2]])
             button.bar_container.setVisible(pct is not None)
             for item in (button.bar, button.open_bracket, button.close_bracket):
                 item.setVisible(pct is not None)
-            value_width = max(38, self.fontMetrics().horizontalAdvance(render.metric_value(metric)) + 4)
+            value_width = max(38, self.fontMetrics().horizontalAdvance(render.metric_value(metric, self.selected)) + 4)
             button.percentage.setFixedWidth(value_width)
             if button.is_amount:
                 available = self.width() - 2 - 32 - 8 - 46 - 8 - value_width
                 title_width = self.fontMetrics().horizontalAdvance(title + ":") + 1
                 button.title.setFixedWidth(max(24, min(title_width, available)))
-            button.percentage.setText(render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else render.metric_value(metric))
+            button.percentage.setText(render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else render.metric_value(metric, self.selected))
             for label in (button.bullet, button.title, button.open_bracket, button.close_bracket, button.percentage):
                 label.setStyleSheet(f"color: {color};")
             detail = render.metric_detail(metric)
             button.description.setText(detail)
             button.description.setVisible(bool(detail))
-            button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {render.metric_value(metric)}")
+            button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {render.metric_value(metric, self.selected)}")
         if not self.metric_values:
             self.empty_message.setText("Checking your connected providers…" if self.busy else
                 "No usage available. Connect a provider and refresh." if config.enabled_connection_order() else

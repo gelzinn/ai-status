@@ -424,9 +424,17 @@ Item {
             compare(scroller.contentY, position)
             keyClick(Qt.Key_Tab)
             tryCompare(selector, "popupOpen", false)
-            const next = findChild(settings, "display-show_provider")
+            const next = findChild(settings, "usage-display")
             tryVerify(() => next.activeFocus)
             verifyControlInViewport(next, scroller)
+            keyClick(Qt.Key_Space)
+            tryVerify(() => next.popupItem.activeFocus)
+            verify(next.popupOpen)
+            keyClick(Qt.Key_Tab)
+            tryCompare(next, "popupOpen", false)
+            const checkbox = findChild(settings, "display-show_provider")
+            tryVerify(() => checkbox.activeFocus)
+            verifyControlInViewport(checkbox, scroller)
         }
         function test_reset_navigation_uses_clicked_provider_and_back_restores_focus() {
             const selected = JSON.stringify(Plugin.Model.snapshot.selected)
