@@ -76,13 +76,18 @@ The macOS CI job verifies the signed production build and measures it before
 backend tests or preview generation. `packages/lib/macos/size_report.py` reports
 the executable, `.app` bundle, and current installed payload separately; the
 bundle and executable are included in the installed total. Initial limits are
-15 MiB, 16 MiB and 20 MiB respectively. CI compares the production executable
+2 MiB, 3 MiB and 5 MiB respectively. CI compares the production executable
 with the same source/compiler built using the previous `-O` settings and
 embedded developer fixtures, signed without stripping. This comparison isolates
 the build changes; it does not reproduce an older release's source or measure a
 compressed download. The report includes architecture, Swift compiler version
 and the largest installed files in the job summary and `macos-size-report`
 artifact. The fixture app is a separate copy and never affects these totals.
+
+The initial arm64 measurement with Apple Swift 5.10 was 0.83 MiB for the
+executable, 1.23 MiB for the bundle and 2.53 MiB for the installed payload.
+The comparison executable was 2.30 MiB, a 63.8% executable reduction.
+Compiler versions and architectures can change these figures.
 
 Measurements sum regular-file logical bytes without following symlinks. They
 exclude system frameworks, the external Python runtime, user settings and

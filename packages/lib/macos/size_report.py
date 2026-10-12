@@ -9,7 +9,7 @@ import stat
 
 
 MIB = 1024 * 1024
-DEFAULT_BUDGETS = {"executable": 15 * MIB, "bundle": 16 * MIB, "installed": 20 * MIB}
+DEFAULT_BUDGETS = {"executable": 2 * MIB, "bundle": 3 * MIB, "installed": 5 * MIB}
 
 
 def regular_file_size(path):
