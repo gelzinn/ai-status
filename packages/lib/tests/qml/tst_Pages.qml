@@ -7,9 +7,11 @@ Item {
     width: 380
     height: 800
     property var openedReset: null
+    property var openedCredit: null
     Connections {
         target: usage
         function onResetRequested(provider, idx) { openedReset = {provider: provider, idx: idx} }
+        function onCreditRequested(provider, idx, creditId) { openedCredit = {provider: provider, idx: idx, creditId: creditId} }
     }
     Plugin.ResetCreditsPage {
         id: credits
@@ -42,6 +44,7 @@ Item {
             settings.visible = true
             credits.visible = false
             openedReset = null
+            openedCredit = null
             initialBar.visible = false
             staggeredBar.visible = false
         }
@@ -106,6 +109,95 @@ Item {
             settings.save()
             compare(Plugin.Model.saved.notifications.rules[0].thresholds.join(","), "95,100")
         }
+        function test_alert_switches_and_sliders_support_keyboard_without_losing_focus() {
+            settings.selectSection("alerts")
+            wait(20)
+            compare(findChild(settings, "alerts-change-selection"), null)
+            const enabled = findChild(settings, "alerts-enabled")
+            enabled.forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Space)
+            compare(settings.alertSettings.enabled, false)
+            keyClick(Qt.Key_Space)
+            compare(settings.alertSettings.enabled, true)
+            const pause = findChild(settings, "alerts-mute")
+            pause.forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Space)
+            verify(settings.alertSettings.muted_until > Date.now() / 1000 + 3590)
+            keyClick(Qt.Key_Space)
+            compare(settings.alertSettings.muted_until, 0)
+            const slider = findChild(settings, "alert-threshold-slider-0")
+            slider.forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Right)
+            compare(settings.alertThresholds, "81,95,100")
+            verify(slider.activeFocus)
+            keyClick(Qt.Key_Left)
+            compare(settings.alertThresholds, "80,95,100")
+            settings.updateThreshold(0, 99)
+            compare(settings.alertThresholds, "94,95,100")
+            verify(slider.activeFocus)
+            settings.save()
+            compare(Plugin.Model.saved.notifications.thresholds.join(","), "94,95,100")
+        }
+        function test_alert_levels_add_remove_and_advanced_keep_draft() {
+            settings.selectSection("alerts")
+            wait(20)
+            const advanced = findChild(settings, "alerts-advanced")
+            verify(!advanced.visible)
+            mouseClick(findChild(settings, "alert-threshold-add"))
+            compare(settings.thresholdValues.length, 4)
+            verify(settings.valid)
+            settings.removeThreshold(1)
+            compare(settings.thresholdValues.length, 3)
+            wait(20)
+            verify(findChild(settings, "alert-threshold-add").activeFocus)
+            mouseClick(findChild(settings, "alerts-advanced-toggle"))
+            verify(advanced.visible)
+            settings.setHours("quiet_hours", "22:00-08:00")
+            settings.setRule("thresholds", [75,95])
+            settings.setRuleText("80,95")
+            settings.selectSection("guide")
+            settings.selectSection("alerts")
+            verify(advanced.visible)
+            compare(settings.alertQuietHours, "22:00-08:00")
+            compare(settings.selectedAlertThresholds, "80,95")
+            settings.alertsAdvanced = false
+            settings.setHours("work_hours", "99:00-18:00")
+            verify(!settings.valid)
+            settings.selectSection("general")
+            settings.selectSection("alerts")
+            verify(settings.alertsAdvanced)
+            settings.setHours("work_hours", "09:00-18:00")
+            settings.alertThresholds = "80,80"
+            verify(!settings.valid)
+            settings.alertThresholds = "80"
+            settings.removeThreshold(0)
+            compare(settings.thresholdValues.length, 0)
+            verify(settings.valid)
+            settings.save()
+            compare(Plugin.Model.saved.notifications.thresholds.length, 0)
+            settings.addThreshold()
+            compare(settings.alertThresholds, "80")
+        }
+        function test_invalid_rule_for_another_account_is_editable_without_changing_bar_selection() {
+            settings.selected = {provider: "codex", idx: 0, metric: "weekly"}
+            settings.setRule("thresholds", [90,100])
+            settings.setRuleText("bad")
+            settings.selected = {provider: "claude", idx: 0, metric: "rolling"}
+            const selected = JSON.stringify(settings.selected)
+            settings.selectSection("alerts")
+            wait(20)
+            verify(settings.alertsAdvanced)
+            compare(settings.ruleSelection.provider, "codex")
+            compare(settings.ruleSelection.metric, "weekly")
+            compare(settings.selectedAlertThresholds, "bad")
+            verify(settings.ruleSelectionLabel.indexOf("Codex") !== -1)
+            settings.setRuleText("90,100")
+            verify(settings.valid)
+            compare(JSON.stringify(settings.selected), selected)
+            settings.save()
+            compare(Plugin.Model.saved.selected.provider, "claude")
+            compare(Plugin.Model.saved.notifications.rules[0].thresholds.join(","), "90,100")
+        }
         function test_amount_only_account_keeps_identity_and_hides_progress() {
             settings.visible = false
             const snapshot = Plugin.Model.snapshot
@@ -146,6 +238,54 @@ Item {
             compare(title.width, titleWidth)
             compare(value.text, Plugin.Model.spinner)
             compare(title.parent.parent.implicitHeight, title.parent.height)
+        }
+        function test_cloud_credit_states_keep_account_selection_without_quota_progress() {
+            settings.visible = false
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            const identity = "account:cloud-work"
+            const states = [
+                {status: "available", value: "$75.25", detail: "Available · Expires Nov 5, 2099", isAmount: true},
+                {status: "exhausted", value: "$0.00", detail: "Exhausted · Expires Nov 5, 2099", isAmount: true},
+                {status: "expired", value: "Expired", detail: "Expired Nov 5, 2000", isAmount: false},
+                {status: "unavailable", value: "Unavailable", detail: "Balance could not be confirmed", isAmount: false}
+            ]
+            snapshot.selected = {provider: identity, idx: 0, metric: "credits:claude-cloud"}
+            snapshot.providers = [{id: identity, providerId: "claude", idx: 0,
+                name: "Claude (Max) · Work", logoPath: "", loading: false, cached: false, error: "",
+                resetCredits: {available: 1, rows: []}, metrics: []}]
+            usage.visible = true
+            for (const state of states) {
+                snapshot.providers[0].monetaryCredits = [Object.assign({id: "claude-cloud", title: "Cloud credits"}, state)]
+                snapshot.providers[0].metrics = [
+                    {key: "rolling", name: "Rolling Usage", percentage: 9, hasPercentage: true, value: "9%", detail: "Resets in 34m"},
+                    {key: "credits:claude-cloud", name: "Cloud credits", percentage: null, hasPercentage: false,
+                        isAmount: state.isAmount, value: state.value, detail: state.detail}
+                ]
+                Plugin.Model.snapshot = JSON.parse(JSON.stringify(snapshot))
+                wait(20)
+                const suffix = identity + "-0-credits:claude-cloud"
+                const value = findChild(usage, "usage-value-" + suffix)
+                compare(value.text, state.value)
+                verify(value.visible)
+                const progress = findChild(usage, "usage-bar-" + suffix)
+                verify(!progress.visible)
+                verify(!progress.parent.visible)
+                verify(!findChild(usage, "usage-detail-" + suffix).visible)
+                verify(findChild(usage, "usage-credit-arrow-" + suffix).visible)
+                verify(findChild(usage, "usage-bar-" + identity + "-0-rolling").visible)
+                const reset = findChild(usage, "reset-credits-" + identity + "-0")
+                verify(reset.visible)
+                mouseClick(value)
+                compare(openedCredit.provider, identity)
+                compare(openedCredit.idx, 0)
+                compare(openedCredit.creditId, "claude-cloud")
+                compare(Plugin.Model.chosen, null)
+                compare(Plugin.Model.snapshot.selected.metric, "credits:claude-cloud")
+                mouseClick(reset)
+                compare(openedReset.provider, identity)
+                compare(Plugin.Model.chosen, null)
+                verifyMetricAlignment(snapshot.providers[0])
+            }
         }
         function test_reorder_and_save() {
             settings.moveProvider(1, -1)
@@ -223,14 +363,20 @@ Item {
             verify(settings.selectedLabel.indexOf("Fable") !== -1)
         }
         function test_controls_respond_to_click_and_keyboard() {
+            settings.selectSection("appearance")
+            wait(20)
             const checkbox = findChild(settings, "display-show_pct")
             verify(checkbox !== null)
             mouseClick(checkbox)
             verify(!settings.display.show_pct)
             keyClick(Qt.Key_Space)
             verify(settings.display.show_pct)
+            settings.selectSection("providers")
+            wait(20)
             mouseClick(findChild(settings, "provider-claude"))
             compare(settings.selected.provider, "codex")
+            settings.selectSection("general")
+            wait(20)
             mouseClick(findChild(settings, "active-provider"))
             verify(settings.selectionOpen)
         }
@@ -310,8 +456,10 @@ Item {
             const icon = findChild(settings, "icon-mode")
             const usageDisplay = findChild(settings, "usage-display")
             wait(20)
-            const height = settings.implicitHeight
             for (const trigger of [provider, icon, usageDisplay]) {
+                settings.selectSection(trigger === provider ? "general" : "appearance")
+                wait(20)
+                const height = settings.implicitHeight
                 compare(trigger.trailingIconName, "chevron-down")
                 const chevron = findChild(trigger, "trailing-icon")
                 compare(chevron.x + chevron.width, trigger.width - 8)
@@ -331,21 +479,75 @@ Item {
             compare(settings.selected.metric, "weekly")
             compare(settings.iconMode, "logo")
             compare(settings.usageDisplay, "remaining")
+            settings.selectSection("appearance")
+            wait(20)
             mouseClick(icon)
             wait(20)
             keyClick(Qt.Key_Home)
             keyClick(Qt.Key_Return)
             compare(settings.iconMode, "off")
+            settings.selectSection("general")
+            wait(20)
             mouseClick(provider)
             wait(20)
             keyClick(Qt.Key_Escape)
             verify(!provider.popupOpen)
             verify(settings.visible)
+            settings.selectSection("appearance")
+            wait(20)
+            const height = settings.implicitHeight
             mouseClick(icon)
             wait(20)
             mouseClick(icon.popupItem, 370, 780)
             verify(!icon.popupOpen)
             compare(settings.implicitHeight, height)
+        }
+        function test_submenus_keep_one_draft_and_cancel_reloads_every_section() {
+            const provider = findChild(settings, "active-provider")
+            mouseClick(provider)
+            verify(settings.selectionOpen)
+            settings.selectSection("appearance")
+            verify(!settings.selectionOpen)
+            settings.usageDisplay = "remaining"
+            settings.iconMode = "logo"
+            settings.selectSection("alerts")
+            settings.alertThresholds = "90,100"
+            settings.selectSection("providers")
+            settings.toggleProvider("kiro")
+            settings.selectSection("general")
+            settings.selected = {provider: "codex", idx: 0, metric: "weekly"}
+            settings.selectSection("about")
+            verify(findChild(settings, "settings-section-about").visible)
+            settings.save()
+            compare(Plugin.Model.saved.usageDisplay, "remaining")
+            compare(Plugin.Model.saved.iconMode, "logo")
+            compare(Plugin.Model.saved.notifications.thresholds.join(","), "90,100")
+            verify(Plugin.Model.saved.enabled.indexOf("kiro") !== -1)
+            compare(Plugin.Model.saved.selected.provider, "codex")
+            settings.selectSection("providers")
+            settings.begin()
+            compare(settings.section, "general")
+            compare(settings.usageDisplay, "used")
+            compare(settings.alertThresholds, "80,95,100")
+            verify(settings.enabledProviders.indexOf("kiro") === -1)
+        }
+        function test_invalid_hidden_section_has_a_visible_review_action() {
+            settings.alertThresholds = "101"
+            settings.selectSection("appearance")
+            wait(20)
+            verify(!settings.valid)
+            compare(settings.validationSection, "alerts")
+            const review = findChild(settings, "settings-review-validation")
+            verify(review.visible)
+            mouseClick(review)
+            compare(settings.section, "alerts")
+            verify(!review.visible)
+            settings.selectSection("unknown")
+            compare(settings.section, "alerts")
+            Plugin.Model.settingsSaving = true
+            settings.selectSection("general")
+            compare(settings.section, "alerts")
+            Plugin.Model.settingsSaving = false
         }
         function test_usage_display_draft_save_reopen_and_validation() {
             compare(settings.usageDisplay, "used")

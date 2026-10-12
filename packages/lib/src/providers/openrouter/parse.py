@@ -58,22 +58,23 @@ def parse(raw_output):
                                            "Free requests · daily"))
     credits = raw.get("credits")
     credits = credits.get("data") if isinstance(credits, dict) else None
+    valid_credits = False
     if isinstance(credits, dict):
         total, spent = number(credits.get("total_credits")), number(credits.get("total_usage"))
         if total is not None and spent is not None and total >= 0 and spent >= 0:
+            valid_credits = True
             # Both values are account totals. Key usage has a different scope.
             account = _display_metric(_ratio_metric(spent, "Account spend / total credits", "credits", total),
-                                      "Account credits", order=-2)
-            balance = total - spent
+                                      "Credit balance", order=-2)
+            account.update(balance=total - spent, limit=total, value_format="credit_balance")
+            account["detail"] = f"${spent:.2f} of ${total:.2f} used"
             if account["percentage"] is not None:
-                account["detail"] = f"Available balance: ${balance:.2f}"
+                account["detail"] += f" ({account['percentage']:.0f}%)"
             metrics.append(account)
-            if account["percentage"] is None:
-                metrics.append(_display_metric(amount_metric(balance, "USD", "Account credit balance", "credits"),
-                                               "Available balance", order=-1))
     metadata = raw.get("_ai_status")
-    if metrics and isinstance(metadata, dict) and metadata.get("credits_hint") and not isinstance(credits, dict):
+    hint = metadata.get("credits_hint") if isinstance(metadata, dict) else None
+    if metrics and isinstance(hint, str) and hint.strip() and not valid_credits:
         metric = metrics[0]
-        hint = "Set OPENROUTER_MANAGEMENT_KEY to track account credits."
+        hint = "Account balance unavailable for this key."
         metric["detail"] = f"{metric['detail']} · {hint}" if metric["detail"] else hint
     return {"provider": "OpenRouter", "metrics": metrics}

@@ -9,15 +9,15 @@ import time
 import uuid
 
 from PySide6.QtCore import QEasingCurve, QEvent, QModelIndex, QObject, QPoint, QPointF, QRectF, QLockFile, QThread, QTimer, Qt, QUrl, Signal, QSize, QVariantAnimation
-from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen
+from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractButton, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout,
-    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
-    QPushButton, QScrollArea, QSizePolicy, QSpacerItem, QStackedWidget, QStyledItemDelegate, QStyle,
-    QSystemTrayIcon, QVBoxLayout, QWidget,
+    QAbstractButton, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QGraphicsEffect, QHBoxLayout,
+    QLabel, QLayout, QLineEdit, QListWidget, QListWidgetItem, QMenu,
+    QPushButton, QScrollArea, QSlider, QSizePolicy, QSpacerItem, QStackedWidget, QStyledItemDelegate, QStyle,
+    QStyleOptionButton, QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
-from . import __version__, about, config, fetch, notifications, paths, render, reset_credits, reset_actions, state, updates
+from . import __version__, about, config, fetch, notifications, paths, render, reset_credits, reset_actions, state, updates, usage_credits
 
 RELEASE_URL = "https://github.com/gelzinn/ai-status/releases/latest"
 ASSETS = paths.LIB_DIR / "assets"
@@ -32,11 +32,14 @@ def provider_name(key):
     return name + (" · " + info["label"] if key.startswith("account:") else "")
 
 # Colors, spacing and typography match the landing page's WaybarReplica.
+PANEL_BORDER_COLOR = "#262626"
+SETTINGS_CONTROL_BORDER_COLOR = "#303030"
 PANEL_STYLE = """
 QWidget { color: #888888; background: transparent; font-family: "Geist Mono"; font-size: 13px; }
 QDialog { background: #111111; }
-QWidget#panel { background: #111111; border: 1px solid #262626; border-radius: 12px; }
-QWidget#header { border-bottom: 1px solid #202020; }
+QWidget#panel { background: #111111; border: 1px solid PANEL_BORDER; border-radius: 12px; }
+QWidget#header { border-bottom: 1px solid PANEL_BORDER; }
+QWidget#settingsFooter { border-top: 1px solid PANEL_BORDER; }
 QLabel { background: transparent; border: none; }
 QLabel#brand { color: #eeeeee; font-weight: 500; }
 QAbstractButton { border: none; background: transparent; text-align: left; }
@@ -48,6 +51,13 @@ QWidget#creditTableHeader {
     border-top-left-radius: 7px; border-top-right-radius: 7px;
 }
 QWidget#creditRow { border-top: 1px solid #262626; }
+QWidget#usageCreditRow { border-top: 1px solid #262626; }
+QWidget#usageCreditRow[firstRow="true"] { border-top: none; }
+QWidget#usageCreditLabel {
+    background: rgba(255, 255, 255, 10); border-right: 1px solid #262626;
+}
+QWidget#usageCreditLabel[firstRow="true"] { border-top-left-radius: 7px; }
+QWidget#usageCreditLabel[lastRow="true"] { border-bottom-left-radius: 7px; }
 QWidget#creditTableFooter {
     background: rgba(255, 255, 255, 10); border-top: 1px solid #262626;
     border-bottom-left-radius: 7px; border-bottom-right-radius: 7px;
@@ -66,7 +76,7 @@ QMenu::item { color: #888888; padding: 8px 12px; margin: 1px 0; border-radius: 6
 QMenu::item:selected { background: #1c1c1c; color: #eeeeee; }
 QMenu::item:disabled { color: #555555; background: transparent; }
 QMenu::separator { height: 1px; background: #262626; margin: 6px; }
-"""
+""".replace("PANEL_BORDER", PANEL_BORDER_COLOR)
 
 
 def panel_font():
@@ -540,6 +550,121 @@ class ResetCreditsView(QWidget):
         self.layout().activate()
 
 
+class MonetaryCreditsView(QWidget):
+    """Account-specific balances and validity, separate from quota selection."""
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 18, 16, 18)
+        layout.setSpacing(18)
+        self.heading = QWidget()
+        heading_layout = QHBoxLayout(self.heading)
+        heading_layout.setContentsMargins(0, 0, 0, 0)
+        heading_layout.setSpacing(8)
+        self.logo = plain_label("")
+        self.logo.setFixedSize(16, 16)
+        heading_layout.addWidget(self.logo)
+        self.provider_label = plain_label("", "#eeeeee")
+        self.provider_label.setWordWrap(True)
+        heading_layout.addWidget(self.provider_label, 1)
+        layout.addWidget(self.heading)
+        self.balance_summary = QWidget()
+        balance_layout = QVBoxLayout(self.balance_summary)
+        balance_layout.setContentsMargins(0, 0, 0, 0)
+        balance_layout.setSpacing(4)
+        self.balance_label = plain_label("Available balance", "#888888")
+        balance_layout.addWidget(self.balance_label)
+        self.balance = plain_label("", "#eeeeee")
+        self.balance.setStyleSheet(self.balance.styleSheet() + "font-size: 24px; font-weight: 500;")
+        balance_layout.addWidget(self.balance)
+        layout.addWidget(self.balance_summary)
+        self.explanation = plain_label("Credit for Claude cloud sessions. The balance expires on the date below.")
+        self.explanation.setWordWrap(True)
+        layout.addWidget(self.explanation)
+        self.notice = ResetCreditsView.secondary_label("")
+        self.notice.setWordWrap(True)
+        layout.addWidget(self.notice)
+        self.table = QWidget()
+        self.table.setObjectName("creditTable")
+        table_layout = QVBoxLayout(self.table)
+        table_layout.setContentsMargins(1, 1, 1, 1)
+        table_layout.setSpacing(0)
+        self.fields = {}
+        self.field_rows = {}
+        self.label_cells = {}
+        for key, title in (("status", "Status"), ("limit_value", "Allowance"), ("used_value", "Used"),
+                           ("expires", "Expires"), ("remaining", "Time remaining"),
+                           ("observed_value", "Last observed balance"), ("observed", "Last observed")):
+            row = QWidget()
+            row.setObjectName("usageCreditRow")
+            first = not self.fields
+            row.setProperty("firstRow", first)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(0)
+            label_cell = QWidget()
+            label_cell.setObjectName("usageCreditLabel")
+            label_cell.setProperty("firstRow", first)
+            label_cell.setProperty("lastRow", False)
+            label_layout = QVBoxLayout(label_cell)
+            label_layout.setContentsMargins(12, 12, 12, 12)
+            label = ResetCreditsView.secondary_label(title)
+            label.setWordWrap(True)
+            label_layout.addWidget(label)
+            row_layout.addWidget(label_cell, 1)
+            value_cell = QWidget()
+            value_layout = QVBoxLayout(value_cell)
+            value_layout.setContentsMargins(12, 12, 12, 12)
+            value = plain_label("", "#dddddd")
+            value.setWordWrap(True)
+            value_layout.addWidget(value)
+            row_layout.addWidget(value_cell, 1)
+            self.fields[key] = value
+            self.field_rows[key] = row
+            self.label_cells[key] = label_cell
+            table_layout.addWidget(row)
+        layout.addWidget(self.table)
+        self.timezone_note = ResetCreditsView.secondary_label("")
+        self.timezone_note.setWordWrap(True)
+        layout.addWidget(self.timezone_note)
+        layout.addStretch()
+
+    def update_credit(self, name, entry, label, credit):
+        heading = credit.get("heading") or label + " · " + credit["title"]
+        self.provider_label.setText(heading)
+        self.logo.setPixmap(provider_icon(name).pixmap(16, 16))
+        self.heading.setAccessibleName(heading)
+        self.balance_label.setText("Available balance" if credit["balance"] is not None else "Current balance")
+        self.balance.setText(credit["value"])
+        for key, field in self.fields.items():
+            field.setText(credit["status"].capitalize() if key == "status" else credit[key])
+        self.field_rows["remaining"].setVisible(bool(credit["remaining"]))
+        historical = credit["balance"] is None
+        for key in ("observed_value", "observed"):
+            self.field_rows[key].setVisible(historical)
+        visible_rows = [key for key, row in self.field_rows.items() if not row.isHidden()]
+        for key, cell in self.label_cells.items():
+            last = key == visible_rows[-1]
+            if cell.property("lastRow") != last:
+                cell.setProperty("lastRow", last)
+                cell.style().unpolish(cell)
+                cell.style().polish(cell)
+                cell.update()
+        self.timezone_note.setText("Local time · " + credit["timezone"] if credit["timezone"] else "")
+        self.timezone_note.setVisible(bool(credit["timezone"]))
+        notice = ("These credits have expired. The last observed balance is shown for reference."
+                  if credit["status"] == "expired" else
+                  credit["status_note"] + ". Amounts below reflect the last observation."
+                  if credit["stale"] else
+                  "These credits are unavailable. The last observed balance is shown for reference."
+                  if historical else "")
+        self.notice.setText(notice)
+        self.notice.setVisible(bool(notice))
+        self.table.layout().activate()
+        self.layout().invalidate()
+        self.layout().activate()
+
+
 class ProviderDelegate(QStyledItemDelegate):
     def initStyleOption(self, option, index):
         super().initStyleOption(option, index)
@@ -751,10 +876,341 @@ class UsageWorker(QObject):
             self.finished.emit(data)
 
 
+class SettingsTabButton(QPushButton):
+    """Native checkable tab with a shared vector icon beside its text."""
+    def __init__(self, text, icon_name, parent=None):
+        super().__init__(text, parent)
+        self.icon_name = icon_name
+        self.icon_gap = 8
+
+    def sizeHint(self):
+        size = super().sizeHint()
+        return QSize(size.width() + panel_icons()["size"] + self.icon_gap, size.height())
+
+    def paintEvent(self, event):
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        option.text = ""
+        painter = QPainter(self)
+        self.style().drawControl(QStyle.ControlElement.CE_PushButton, option, painter, self)
+        icon_size = panel_icons()["size"]
+        text_width = self.fontMetrics().horizontalAdvance(self.text())
+        left = (self.width() - icon_size - self.icon_gap - text_width) / 2
+        color = QColor("#eeeeee" if self.isChecked() else "#888888")
+        if not self.isEnabled():
+            painter.setOpacity(0.35)
+        draw_control_icon(painter, QRectF(left, (self.height() - icon_size) / 2, icon_size, icon_size), self.icon_name, color.name())
+        painter.setPen(color)
+        painter.drawText(QRectF(left + icon_size + self.icon_gap, 0, text_width, self.height()),
+                         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self.text())
+
+
+class SettingsLinkButton(QPushButton):
+    """A native push button with the same trailing arrow as About links."""
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setAccessibleName(text)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(8, 0, 8, 0)
+        row.addStretch()
+        row.addWidget(ArrowIcon())
+
+
+class ToggleSwitch(QCheckBox):
+    """A native accessible checkbox painted as a compact track and thumb."""
+    def __init__(self, label, parent=None):
+        super().__init__(parent)
+        self.setAccessibleName(label)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFixedSize(40, 22)
+        self.keyboard_focus_visible = False
+
+    def hitButton(self, position):
+        return self.rect().contains(position)
+
+    def focusInEvent(self, event):
+        self.keyboard_focus_visible = event.reason() in (
+            Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason)
+        super().focusInEvent(event)
+        self.update()
+
+    def focusOutEvent(self, event):
+        self.keyboard_focus_visible = False
+        super().focusOutEvent(event)
+        self.update()
+
+    def mousePressEvent(self, event):
+        self.keyboard_focus_visible = False
+        super().mousePressEvent(event)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        border = "#888888" if self.hasFocus() and self.keyboard_focus_visible else SETTINGS_CONTROL_BORDER_COLOR
+        painter.setPen(QPen(QColor(border), 1))
+        painter.setBrush(QColor("#eeeeee" if self.isChecked() else "#161616"))
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 11, 11)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#111111" if self.isChecked() else "#aaaaaa"))
+        painter.drawEllipse(QRectF(21 if self.isChecked() else 3, 3, 16, 16))
+
+
+def settings_switch_row(label):
+    row = QWidget()
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(12)
+    text = plain_label(label)
+    text.setWordWrap(True)
+    layout.addWidget(text, 1)
+    switch = ToggleSwitch(label)
+    layout.addWidget(switch)
+    return row, switch
+
+
+class NotificationLevels(QWidget):
+    """One native, keyboard-accessible slider for each notification level."""
+    changed = Signal()
+
+    def __init__(self, values, parent=None):
+        super().__init__(parent)
+        self.sliders = []
+        self.level_rows = []
+        self.rows_layout = QVBoxLayout()
+        self.rows_layout.setSpacing(8)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addLayout(self.rows_layout)
+        self.add_button = QPushButton("Add level")
+        self.add_button.clicked.connect(self.add_level)
+        layout.addWidget(self.add_button)
+        self.set_values(values)
+
+    def values(self):
+        return [slider.value() for slider in self.sliders]
+
+    def set_values(self, values):
+        for row in self.level_rows:
+            self.rows_layout.removeWidget(row)
+            row.hide()
+            row.deleteLater()
+        self.sliders = []
+        self.level_rows = []
+        for value in values:
+            self.append_level(value)
+        self.changed.emit()
+
+    def append_level(self, value):
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(1, 100)
+        slider.setSingleStep(1)
+        slider.setPageStep(5)
+        slider.setValue(value)
+        value_label = plain_label(f"{slider.value()}%", "#dddddd")
+        value_label.setFixedWidth(38)
+        remove = QPushButton("×")
+        remove.setFixedSize(28, 28)
+        remove.clicked.connect(lambda checked=False, item=slider: self.remove_level(item))
+        slider.valueChanged.connect(lambda value, label=value_label: label.setText(f"{value}%"))
+        slider.valueChanged.connect(self.changed)
+        layout.addWidget(slider, 1)
+        layout.addWidget(value_label)
+        layout.addWidget(remove)
+        self.sliders.append(slider)
+        self.level_rows.append(row)
+        self.rows_layout.addWidget(row)
+        self.update_names()
+        return slider
+
+    def update_names(self):
+        for index, (item, item_row) in enumerate(zip(self.sliders, self.level_rows), 1):
+            item.setAccessibleName(f"Notification level {index}")
+            item_row.findChild(QPushButton).setAccessibleName(f"Remove notification level {index}")
+
+    def add_level(self):
+        used = self.values()
+        value = next((level for level in (90, 70, 60, 50, 80, 95, 100, *range(1, 101)) if level not in used), None)
+        if value is not None:
+            self.append_level(value).setFocus(Qt.FocusReason.TabFocusReason)
+            self.changed.emit()
+
+    def remove_level(self, slider):
+        index = self.sliders.index(slider)
+        row = self.level_rows.pop(index)
+        self.sliders.pop(index)
+        self.rows_layout.removeWidget(row)
+        row.hide()
+        row.deleteLater()
+        self.update_names()
+        (self.sliders[min(index, len(self.sliders) - 1)] if self.sliders else self.add_button).setFocus(Qt.FocusReason.TabFocusReason)
+        self.changed.emit()
+
+
+class SettingsHeading(QWidget):
+    """A compact title and optional description shared by Settings sections."""
+    def __init__(self, title, description=None, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        self.title = plain_label(title, "#eeeeee")
+        self.title.setWordWrap(True)
+        layout.addWidget(self.title)
+        self.description = None
+        if description is not None:
+            self.description = plain_label(description, "#666666")
+            self.description.setWordWrap(True)
+            layout.addWidget(self.description)
+
+
+class SettingsNavigation(QScrollArea):
+    """A single row of tabs that scrolls independently from Settings content."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.FocusIn:
+            self.ensure_tab_visible(watched)
+        return super().eventFilter(watched, event)
+
+    def ensure_tab_visible(self, button):
+        self.ensureWidgetVisible(button, 16, 0)
+        def reveal():
+            if button.isChecked() or button.hasFocus():
+                self.ensureWidgetVisible(button, 16, 0)
+        QTimer.singleShot(0, self, reveal)
+
+    def wheelEvent(self, event):
+        pixels = event.pixelDelta()
+        angle = event.angleDelta()
+        delta = pixels.x() or pixels.y() or (angle.x() or angle.y()) / 120 * 48
+        if delta:
+            bar = self.horizontalScrollBar()
+            bar.setValue(bar.value() - round(delta))
+            event.accept()
+        else:
+            super().wheelEvent(event)
+
+
+class SettingsFadeEffect(QGraphicsEffect):
+    """Multiply content alpha near the tabs without drawing a tinted overlay."""
+    def __init__(self, scroll, parent=None):
+        super().__init__(parent)
+        self.scroll = scroll
+
+    def draw(self, painter):
+        position = self.scroll.verticalScrollBar().value()
+        if not position:
+            self.drawSource(painter)
+            return
+        offset = QPoint()
+        pixmap = self.sourcePixmap(Qt.CoordinateSystem.LogicalCoordinates, offset,
+                                   QGraphicsEffect.PixmapPadMode.NoPad)
+        if pixmap.isNull():
+            return
+        masked = self.masked_source(pixmap, position, self.scroll.covered_height, offset)
+        painter.drawPixmap(offset, masked)
+
+    @staticmethod
+    def masked_source(pixmap, position, covered_height, offset=QPoint()):
+        masked = QPixmap(pixmap.size())
+        masked.setDevicePixelRatio(pixmap.devicePixelRatio())
+        masked.fill(Qt.GlobalColor.transparent)
+        mask_painter = QPainter(masked)
+        mask_painter.drawPixmap(0, 0, pixmap)
+        mask_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+        gradient = QLinearGradient(0, position + max(0, covered_height - 12) - offset.y(),
+                                   0, position + covered_height + 12 - offset.y())
+        gradient.setColorAt(0, QColor(255, 255, 255, 0))
+        gradient.setColorAt(1, QColor(255, 255, 255, 255))
+        mask_painter.fillRect(QRectF(QPointF(), masked.deviceIndependentSize()), QBrush(gradient))
+        mask_painter.end()
+        return masked
+
+
+class SettingsScrollArea(QScrollArea):
+    """Content extends behind tabs while focused fields stay below their fade."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.overlay = None
+        self.covered_height = 0
+        self.fade = None
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.verticalScrollBar().valueChanged.connect(self.update_fade)
+        QApplication.instance().focusChanged.connect(self.reveal_focus)
+
+    def setWidget(self, widget):
+        super().setWidget(widget)
+        self.fade = SettingsFadeEffect(self, widget)
+        widget.setGraphicsEffect(self.fade)
+
+    def set_overlay(self, overlay):
+        self.overlay = overlay
+        overlay.setParent(self)
+        self.covered_height = overlay.sizeHint().height()
+        self.update_overlay()
+        margins = self.widget().layout().contentsMargins()
+        self.widget().layout().setContentsMargins(margins.left(), self.covered_height + 18,
+                                                  margins.right(), margins.bottom())
+
+    def update_overlay(self):
+        if self.overlay:
+            self.overlay.setGeometry(0, 0, self.width(), self.covered_height)
+            self.overlay.raise_()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_overlay()
+
+    def update_fade(self):
+        if self.fade:
+            self.fade.update()
+
+    def reveal_focus(self, old, widget):
+        if widget and self.widget() and self.widget().isAncestorOf(widget):
+            self.ensureWidgetVisible(widget, 0, 18)
+            def reveal():
+                if QApplication.focusWidget() is widget:
+                    self.ensureWidgetVisible(widget, 0, 18)
+            QTimer.singleShot(0, reveal)
+
+    def ensureWidgetVisible(self, widget, xmargin=0, ymargin=18):
+        if not self.widget() or not self.widget().isAncestorOf(widget):
+            return
+        bar = self.verticalScrollBar()
+        if isinstance(widget, QListWidget) and widget.count():
+            item = widget.currentItem() or widget.item(0)
+            rect = widget.visualItemRect(item)
+            top = widget.viewport().mapTo(self.viewport(), rect.topLeft()).y()
+            bottom = top + rect.height()
+        else:
+            top = widget.mapTo(self.viewport(), QPoint()).y()
+            bottom = top + widget.height()
+        minimum = self.covered_height + ymargin
+        maximum = self.viewport().height() - ymargin
+        if top < minimum:
+            bar.setValue(bar.value() + top - minimum)
+        elif bottom > maximum:
+            bar.setValue(bar.value() + bottom - maximum)
+
+
 class ProviderSettings(QWidget):
     saved = Signal()
     cancelled = Signal()
-    about_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -769,38 +1225,105 @@ class ProviderSettings(QWidget):
             QListWidget::item { padding: 8px 4px; }
             QListWidget::item:selected { background: #252525; color: #eeeeee; }
             QCheckBox { padding: 5px 0; }
-            QPushButton { border: 1px solid #303030; border-radius: 6px; }
-            QComboBox { border: 1px solid #303030; border-radius: 6px; padding: 6px 8px; }
-            QLineEdit { border: 1px solid #303030; border-radius: 6px; padding: 6px 8px; }
+            QPushButton { border: 1px solid SETTINGS_CONTROL_BORDER; border-radius: 6px; }
+            QComboBox { border: 1px solid SETTINGS_CONTROL_BORDER; border-radius: 6px; padding: 6px 8px; }
+            QLineEdit { border: 1px solid SETTINGS_CONTROL_BORDER; border-radius: 6px; padding: 6px 8px; }
+            QSlider::groove:horizontal { background: #303030; height: 4px; border-radius: 2px; }
+            QSlider::sub-page:horizontal { background: #888888; border-radius: 2px; }
+            QSlider::handle:horizontal { background: #dddddd; border: 1px solid SETTINGS_CONTROL_BORDER; width: 14px; margin: -6px 0; border-radius: 7px; }
+            QSlider::handle:horizontal:focus { border-color: #888888; }
             QComboBox QAbstractItemView { background: #111111; selection-background-color: #252525; }
             QListWidget::indicator, QCheckBox::indicator {
-                width: 16px; height: 16px; border: 1px solid #888888;
+                width: 16px; height: 16px; border: 1px solid SETTINGS_CONTROL_BORDER;
                 border-radius: 4px; background: #161616;
             }
+            QCheckBox:focus::indicator { border-color: #888888; }
             QListWidget::indicator:checked, QCheckBox::indicator:checked {
-                background: #eeeeee; border-color: #eeeeee;
+                background: #eeeeee;
                 image: url(CHECKMARK);
             }
-        """.replace("CHECKMARK", '"' + (ASSETS / "checkmark.png").as_posix() + '"'))
+        """.replace("SETTINGS_CONTROL_BORDER", SETTINGS_CONTROL_BORDER_COLOR)
+            .replace("CHECKMARK", '"' + (ASSETS / "checkmark.png").as_posix() + '"'))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 18, 16, 18)
-        layout.setSpacing(8)
-        layout.addWidget(plain_label("Active provider & limit", "#eeeeee"))
+        layout.setSpacing(0)
+        self.current_section = "general"
+        self.section_positions = {}
+        self.sections = {}
+        self.navigation = SettingsNavigation(self)
+        self.navigation.hide()
+        self.navigation.setStyleSheet("""
+            QScrollArea { border: none; }
+            QPushButton { padding: 7px 16px; font-size: 12px; background: #111111; border: 1px solid SETTINGS_CONTROL_BORDER; border-radius: 6px; }
+            QPushButton:hover { background: #1c1c1c; }
+            QPushButton:checked { color: #eeeeee; background: #252525; border-color: SETTINGS_CONTROL_BORDER; }
+            QPushButton:focus { border-color: #888888; }
+        """.replace("SETTINGS_CONTROL_BORDER", SETTINGS_CONTROL_BORDER_COLOR))
+        navigation_content = QWidget()
+        navigation_layout = QHBoxLayout(navigation_content)
+        navigation_layout.setContentsMargins(16, 12, 16, 0)
+        navigation_layout.setSpacing(12)
+        navigation_layout.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
+        self.navigation.setWidget(navigation_content)
+        self.section_group = QButtonGroup(self)
+        self.section_buttons = {}
+        section_icons = {"general": "settings", "appearance": "paintbrush", "alerts": "bell",
+                         "providers": "server", "guide": "book-open", "about": "info"}
+        for key, label in (("general", "General"), ("appearance", "Appearance"),
+                           ("alerts", "Alerts"), ("providers", "Providers"), ("guide", "Guide"), ("about", "About")):
+            button = SettingsTabButton(label, section_icons[key])
+            button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            button.setCheckable(True)
+            button.setChecked(key == self.current_section)
+            button.setAccessibleName(label + " settings")
+            button.clicked.connect(lambda checked=False, section=key: self.select_section(section))
+            self.section_group.addButton(button)
+            self.section_buttons[key] = button
+            navigation_layout.addWidget(button)
+            button.installEventFilter(self.navigation)
+            section = AboutView() if key == "about" else GuideView() if key == "guide" else QWidget()
+            section.setVisible(key == self.current_section)
+            section_layout = section.layout() if key in ("guide", "about") else QVBoxLayout(section)
+            section_layout.setContentsMargins(0, 0, 0, 0)
+            section_layout.setSpacing(16 if key == "guide" else 12 if key == "about" else 8)
+            self.sections[key] = section
+            layout.addWidget(section)
+        self.sections["about"].guide_requested.connect(self.show_guide)
+        navigation_content.ensurePolished()
+        navigation_layout.activate()
+        self.navigation.setFixedHeight(navigation_content.sizeHint().height())
+        layout.addStretch()
+        general = self.sections["general"].layout()
+        general.addWidget(SettingsHeading("Active provider & limit", "Choose the account and limit shown in the bar."))
         self.active = QComboBox()
         self.active.setIconSize(QSize(16, 16))
         self.active.setAccessibleName("Active provider and limit")
-        layout.addWidget(self.active)
-        layout.addSpacing(14)
+        general.addWidget(self.active)
+        self.startup_row = QWidget()
+        startup_layout = QHBoxLayout(self.startup_row)
+        startup_layout.setContentsMargins(0, 0, 0, 0)
+        startup_layout.setSpacing(12)
+        startup_label = plain_label("Start when I sign in to Windows")
+        startup_label.setWordWrap(True)
+        startup_layout.addWidget(startup_label, 1)
+        self.startup = ToggleSwitch(startup_label.text())
+        self.startup.setChecked(startup_enabled())
+        startup_layout.addWidget(self.startup)
+        self.startup_row.setVisible(paths.IS_WINDOWS)
+        if paths.IS_WINDOWS:
+            general.addSpacing(8)
+        general.addWidget(self.startup_row)
+        appearance = self.sections["appearance"].layout()
         selected = state.load_selected() or {}
-        layout.addWidget(plain_label("Usage display", "#eeeeee"))
+        appearance.addWidget(SettingsHeading("Usage display"))
         self.usage_display = QComboBox()
         self.usage_display.setAccessibleName("Usage display")
         for value, label in (("used", "Used"), ("remaining", "Remaining")):
             self.usage_display.addItem(label, value)
         self.usage_display.setCurrentIndex(self.usage_display.findData(state.get_usage_display(selected)))
-        layout.addWidget(self.usage_display)
-        layout.addSpacing(14)
-        layout.addWidget(plain_label("Bar display", "#eeeeee"))
+        appearance.addWidget(self.usage_display)
+        appearance.addSpacing(8)
+        appearance.addWidget(SettingsHeading("Bar display"))
         self.display = {}
         for key, label, default in (("show_provider", "Provider name", True),
                                     ("show_model", "Model / plan", True),
@@ -809,18 +1332,15 @@ class ProviderSettings(QWidget):
             checkbox = QCheckBox(label)
             checkbox.setChecked(selected.get(key, default))
             self.display[key] = checkbox
-            layout.addWidget(checkbox)
+            appearance.addWidget(checkbox)
         self.icon_mode = QComboBox()
         self.icon_mode.setAccessibleName("Bar icon")
         for value, label in (("off", "None"), ("bot", "Bot"), ("logo", "Provider logo")):
             self.icon_mode.addItem("Icon: " + label, value)
         self.icon_mode.setCurrentIndex(self.icon_mode.findData(state.get_icon_mode(selected)))
-        layout.addWidget(self.icon_mode)
-        layout.addSpacing(14)
-        layout.addWidget(plain_label("Providers", "#eeeeee"))
-        hint = plain_label("Enable providers and set their order.", "#666666")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
+        appearance.addWidget(self.icon_mode)
+        providers = self.sections["providers"].layout()
+        providers.addWidget(SettingsHeading("Providers", "Enable providers and set their order."))
         self.providers = ProviderList()
         enabled = config.enabled_connection_order()
         available = config.available_connections()
@@ -834,17 +1354,8 @@ class ProviderSettings(QWidget):
             item.setSizeHint(QSize(0, 36))
             self.providers.addItem(item)
         self.providers.setFixedHeight(self.providers.count() * 36 + 4)
-        layout.addWidget(self.providers)
-        self.startup = QCheckBox("Start when I sign in to Windows")
-        self.startup.setVisible(paths.IS_WINDOWS)
-        self.startup.setChecked(startup_enabled())
-        layout.addWidget(self.startup)
-        layout.addSpacing(14)
-        self.add_notification_controls(layout)
-        layout.addSpacing(14)
-        self.about_button = QPushButton("About AI Status")
-        self.about_button.clicked.connect(self.about_requested)
-        layout.addWidget(self.about_button)
+        providers.addWidget(self.providers)
+        self.add_notification_controls(self.sections["alerts"].layout())
         self.message = plain_label("")
         self.message.setWordWrap(True)
         self.message.hide()
@@ -859,13 +1370,14 @@ class ProviderSettings(QWidget):
         self.cancel_button.clicked.connect(self.cancelled)
         footer.addWidget(self.cancel_button)
         self.save_button = QPushButton("Save")
-        self.save_button.setStyleSheet("border: 1px solid #303030; border-radius: 6px; padding: 6px 8px;")
+        self.save_button.setStyleSheet(f"border: 1px solid {SETTINGS_CONTROL_BORDER_COLOR}; border-radius: 6px; padding: 6px 8px;")
         self.save_button.clicked.connect(self.save)
         footer.addWidget(self.save_button)
         self.providers.itemChanged.connect(self.update_choices)
         self.providers.model().rowsMoved.connect(self.update_choices)
         self.providers.model().rowsInserted.connect(self.update_choices)
         self.providers.model().rowsRemoved.connect(self.update_choices)
+        self.providers.currentRowChanged.connect(self.reveal_provider_row)
         self.update_choices()
         for checkbox in self.display.values():
             checkbox.toggled.connect(self.clear_message)
@@ -875,9 +1387,74 @@ class ProviderSettings(QWidget):
         self.active.currentIndexChanged.connect(self.notification_choice_changed)
         self.startup.toggled.connect(self.clear_message)
 
+    def reveal_provider_row(self):
+        if self.dashboard and self.dashboard.configuring() and self.current_section == "providers":
+            self.dashboard.settings_scroll.ensureWidgetVisible(self.providers)
+
+    def update_tab_order(self):
+        if not self.dashboard or not self.dashboard.configuring():
+            return
+        fields = {
+            "general": [self.active, self.startup],
+            "appearance": [self.usage_display, *self.display.values(), self.icon_mode],
+            "providers": [self.providers],
+            "guide": [],
+            "about": self.sections["about"].findChildren(SettingsLinkButton),
+        }
+        levels = []
+        for slider, row in zip(self.notification_levels.sliders, self.notification_levels.level_rows):
+            levels.extend((slider, row.findChild(QPushButton)))
+        fields["alerts"] = [self.notifications_enabled, self.notifications_recovery,
+                            *levels, self.notification_levels.add_button, self.notification_mute,
+                            self.notification_advanced_button, self.notifications_recent_only,
+                            self.notification_quiet_start, self.notification_quiet_end,
+                            self.notification_work_start, self.notification_work_end,
+                            self.notification_rule_selector,
+                            *[button for button in self.notification_rule_reviews.findChildren(SettingsLinkButton)
+                              if not button.isHidden()],
+                            self.notification_rule_custom, self.notification_rule_enabled,
+                            self.notification_rule_thresholds]
+        controls = [self.dashboard.back_button, *self.section_buttons.values(),
+                    *fields[self.current_section], self.cancel_button, self.save_button]
+        for before, after in zip(controls, controls[1:]):
+            QWidget.setTabOrder(before, after)
+
+    def select_section(self, key):
+        if key not in self.sections:
+            return
+        self.navigation.ensure_tab_visible(self.section_buttons[key])
+        if key == self.current_section:
+            return
+        scroll = getattr(self.dashboard, "settings_scroll", None)
+        if scroll and self.dashboard.configuring():
+            self.section_positions[self.current_section] = scroll.verticalScrollBar().value()
+        focus = QApplication.focusWidget() or (self.dashboard.focusWidget() if self.dashboard else self.focusWidget())
+        leaving_section = self.sections[self.current_section]
+        self.current_section = key
+        for section_key, section in self.sections.items():
+            section.setVisible(section_key == key)
+        self.section_buttons[key].setChecked(True)
+        if key == "alerts":
+            invalid = self.invalid_notification_rules()
+            if invalid:
+                self.review_notification_rule(invalid[0], focus=False)
+        self.layout().activate()
+        if focus and (leaving_section.isAncestorOf(focus) or focus in self.section_buttons.values()):
+            self.section_buttons[key].setFocus()
+        if scroll and self.dashboard.configuring():
+            self.dashboard.fit_content()
+            scroll.verticalScrollBar().setValue(self.section_positions.get(key, 0))
+            self.update_tab_order()
+
+    def show_guide(self):
+        self.select_section("guide")
+        self.section_buttons["guide"].setFocus()
+
     def add_notification_controls(self, layout):
         self.notification_settings = notifications.load_settings()
         self.notification_rule_choice = None
+        self.notification_rule_local_target = False
+        self.loading_notification_rule = False
         self.notification_rule_drafts = {
             (rule["connection_id"], rule["metric"]): {
                 "custom": True, "enabled": rule.get("enabled", True),
@@ -885,28 +1462,40 @@ class ProviderSettings(QWidget):
             }
             for rule in self.notification_settings.get("rules", [])
         }
-        layout.addWidget(plain_label("Quota notifications", "#eeeeee"))
-        self.notifications_enabled = QCheckBox("Notify before quota limits")
+        layout.addWidget(SettingsHeading("Quota notifications"))
+        row, self.notifications_enabled = settings_switch_row("Enable notifications")
         self.notifications_enabled.setChecked(self.notification_settings["enabled"])
-        layout.addWidget(self.notifications_enabled)
+        layout.addWidget(row)
         self.notifications_recovery = QCheckBox("Notify when quota is available again")
         self.notifications_recovery.setChecked(self.notification_settings["recovery"])
         layout.addWidget(self.notifications_recovery)
+        layout.addSpacing(8)
+        layout.addWidget(SettingsHeading("Notification levels", "Notify when quota used reaches each level."))
+        self.notification_levels = NotificationLevels(self.notification_settings["thresholds"])
+        layout.addWidget(self.notification_levels)
+        layout.addSpacing(8)
+        row, self.notification_mute = settings_switch_row("Pause notifications for one hour")
+        self.notification_mute.setChecked(self.notification_settings.get("muted_until", 0) > time.time())
+        layout.addWidget(row)
+        hint = plain_label("Turn off to resume notifications.", "#666666")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        layout.addSpacing(8)
+        self.notification_advanced_button = QPushButton("Advanced ▾")
+        self.notification_advanced_button.setCheckable(True)
+        self.notification_advanced_button.setAccessibleName("Advanced notification settings")
+        layout.addWidget(self.notification_advanced_button)
+        self.notification_advanced = QWidget()
+        self.notification_advanced.hide()
+        layout.addWidget(self.notification_advanced)
+        layout = QVBoxLayout(self.notification_advanced)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
         self.notifications_recent_only = QCheckBox("Recovery for recent accounts only")
         self.notifications_recent_only.setToolTip("Only notify recovery for accounts used in the last 24 hours.")
         self.notifications_recent_only.setChecked(self.notification_settings.get("recent_only", False))
         layout.addWidget(self.notifications_recent_only)
-        layout.addWidget(plain_label("Default thresholds (% used)", "#666666"))
-        self.notification_thresholds = QLineEdit(", ".join(str(value) for value in self.notification_settings["thresholds"]))
-        self.notification_thresholds.setAccessibleName("Default notification thresholds")
-        self.notification_thresholds.setPlaceholderText("80, 95, 100")
-        layout.addWidget(self.notification_thresholds)
-        self.notification_mute = QCheckBox("Mute notifications for one hour")
-        self.notification_mute.setChecked(self.notification_settings.get("muted_until", 0) > time.time())
-        layout.addWidget(self.notification_mute)
-        hint = plain_label("Uncheck to resume. Quiet hours use your local time; leave both times empty to disable.", "#666666")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
+        layout.addWidget(SettingsHeading("Quiet hours", "Use local time. Leave both times empty to disable."))
         quiet = self.notification_settings.get("quiet_hours", {})
         times = QHBoxLayout()
         self.notification_quiet_start = QLineEdit(quiet.get("start", ""))
@@ -930,9 +1519,21 @@ class ProviderSettings(QWidget):
         work_times.addWidget(self.notification_work_start)
         work_times.addWidget(self.notification_work_end)
         layout.addLayout(work_times)
+        layout.addSpacing(8)
+        layout.addWidget(SettingsHeading("Account & limit override"))
+        self.notification_rule_selector = QComboBox()
+        self.notification_rule_selector.setAccessibleName("Notification account and limit")
+        self.notification_rule_selector.currentIndexChanged.connect(self.notification_rule_target_changed)
+        layout.addWidget(self.notification_rule_selector)
         self.notification_rule_label = plain_label("", "#666666")
         self.notification_rule_label.setWordWrap(True)
         layout.addWidget(self.notification_rule_label)
+        self.notification_rule_reviews = QWidget()
+        self.notification_rule_reviews.hide()
+        reviews_layout = QVBoxLayout(self.notification_rule_reviews)
+        reviews_layout.setContentsMargins(0, 0, 0, 0)
+        reviews_layout.setSpacing(8)
+        layout.addWidget(self.notification_rule_reviews)
         self.notification_rule_custom = QCheckBox("Customize this account and limit")
         layout.addWidget(self.notification_rule_custom)
         self.notification_rule_enabled = QCheckBox("Notify for this account and limit")
@@ -942,13 +1543,30 @@ class ProviderSettings(QWidget):
         self.notification_rule_thresholds.setPlaceholderText("80, 95, 100")
         layout.addWidget(self.notification_rule_thresholds)
         self.notification_rule_custom.toggled.connect(self.update_notification_rule_controls)
+        self.notification_rule_custom.toggled.connect(self.notification_rule_edited)
+        self.notification_rule_enabled.toggled.connect(self.notification_rule_edited)
+        self.notification_rule_thresholds.textChanged.connect(self.notification_rule_edited)
+        self.notification_advanced_button.toggled.connect(self.set_notification_advanced)
+        self.notification_levels.changed.connect(self.clear_message)
+        self.notification_levels.changed.connect(self.update_settings_layout)
         for widget in (self.notifications_enabled, self.notifications_recovery, self.notifications_recent_only, self.notification_mute,
                        self.notification_rule_custom, self.notification_rule_enabled):
             widget.toggled.connect(self.clear_message)
-        for widget in (self.notification_thresholds, self.notification_quiet_start,
+        for widget in (self.notification_quiet_start,
                        self.notification_quiet_end, self.notification_work_start,
                        self.notification_work_end, self.notification_rule_thresholds):
             widget.textChanged.connect(self.clear_message)
+
+    def update_settings_layout(self):
+        self.layout().activate()
+        if self.dashboard and self.dashboard.configuring():
+            self.dashboard.fit_content()
+            self.update_tab_order()
+
+    def set_notification_advanced(self, expanded):
+        self.notification_advanced.setVisible(expanded)
+        self.notification_advanced_button.setText("Advanced ▴" if expanded else "Advanced ▾")
+        self.update_settings_layout()
 
     def store_notification_rule(self):
         if self.notification_rule_choice is not None:
@@ -961,16 +1579,100 @@ class ProviderSettings(QWidget):
     def notification_choice_changed(self):
         self.store_notification_rule()
         choice = self.active.currentData()
-        self.notification_rule_choice = (choice[0], choice[2]) if choice else None
-        self.notification_rule_label.setText("Alerts for " + self.active.currentText() if choice else "Select an active account and limit above.")
-        draft = self.notification_rule_drafts.get(self.notification_rule_choice, {})
+        selected = (choice[0], choice[2]) if choice else None
+        choices = [(self.active.itemData(index)[0], self.active.itemData(index)[2])
+                   for index in range(self.active.count())]
+        choices = list(dict.fromkeys([*choices, *self.notification_rule_drafts]))
+        self.notification_rule_selector.blockSignals(True)
+        self.notification_rule_selector.clear()
+        for item in choices:
+            self.notification_rule_selector.addItem(self.notification_rule_name(item), list(item))
+        self.notification_rule_selector.blockSignals(False)
+        target = self.notification_rule_choice if self.notification_rule_local_target else selected
+        self.load_notification_rule(target if target in choices else choices[0] if choices else None)
+
+    def notification_rule_name(self, choice):
+        for index in range(self.active.count()):
+            value = self.active.itemData(index)
+            if (value[0], value[2]) == choice:
+                return self.active.itemText(index)
+        return provider_name(choice[0]) + " · " + choice[1].replace("_", " ").replace(":", " · ").title()
+
+    def load_notification_rule(self, choice):
+        self.loading_notification_rule = True
+        self.notification_rule_choice = choice
+        index = self.notification_rule_selector.findData(list(choice)) if choice else -1
+        self.notification_rule_selector.blockSignals(True)
+        self.notification_rule_selector.setCurrentIndex(index)
+        self.notification_rule_selector.blockSignals(False)
+        draft = self.notification_rule_drafts.get(choice, {})
         self.notification_rule_custom.setChecked(draft.get("custom", False))
         self.notification_rule_enabled.setChecked(draft.get("enabled", True))
-        self.notification_rule_thresholds.setText(draft.get("text", self.notification_thresholds.text()))
+        default_levels = ", ".join(str(value) for value in self.notification_levels.values())
+        self.notification_rule_thresholds.setText(draft.get("text", default_levels))
+        self.loading_notification_rule = False
         self.update_notification_rule_controls()
+        self.update_notification_rule_reviews()
+
+    def notification_rule_target_changed(self):
+        if self.loading_notification_rule:
+            return
+        self.store_notification_rule()
+        value = self.notification_rule_selector.currentData()
+        self.notification_rule_local_target = True
+        self.load_notification_rule(tuple(value) if value else None)
+
+    def notification_rule_edited(self):
+        if self.loading_notification_rule:
+            return
+        self.store_notification_rule()
+        self.update_notification_rule_reviews()
+
+    def invalid_notification_rules(self):
+        invalid = []
+        for choice, draft in self.notification_rule_drafts.items():
+            if draft["custom"]:
+                try:
+                    levels = self.parse_notification_thresholds(draft["text"])
+                    notifications.validate_settings({"thresholds": levels})
+                except ValueError:
+                    invalid.append(choice)
+        return invalid
+
+    def review_notification_rule(self, choice, focus=True):
+        self.store_notification_rule()
+        self.notification_rule_local_target = True
+        self.load_notification_rule(choice)
+        self.notification_advanced_button.setChecked(True)
+        if focus:
+            self.notification_rule_thresholds.setFocus(Qt.FocusReason.TabFocusReason)
+
+    def update_notification_rule_reviews(self):
+        invalid = self.invalid_notification_rules()
+        choice = self.notification_rule_choice
+        self.notification_rule_label.setText(
+            ("Review levels for " if choice in invalid else "Alerts for ") + self.notification_rule_name(choice)
+            if choice else "Choose an account and limit to customize.")
+        self.notification_rule_label.setStyleSheet("color: " + ("#f5a3a3" if choice in invalid else "#666666") + ";")
+        layout = self.notification_rule_reviews.layout()
+        while layout.count():
+            button = layout.takeAt(0).widget()
+            button.hide()
+            button.deleteLater()
+        others = [item for item in invalid if item != choice]
+        for item in others:
+            text = "Review " + self.notification_rule_name(item)
+            button = SettingsLinkButton(self.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, 270))
+            button.setAccessibleName(text)
+            button.setToolTip(text)
+            button.clicked.connect(lambda checked=False, target=item: self.review_notification_rule(target))
+            layout.addWidget(button)
+        self.notification_rule_reviews.setVisible(bool(others))
+        self.update_settings_layout()
 
     def update_notification_rule_controls(self):
         available = self.notification_rule_choice is not None
+        self.notification_rule_selector.setEnabled(self.notification_rule_selector.count() > 0)
         self.notification_rule_custom.setEnabled(available)
         custom = available and self.notification_rule_custom.isChecked()
         self.notification_rule_enabled.setEnabled(custom)
@@ -986,12 +1688,14 @@ class ProviderSettings(QWidget):
 
     def collect_notification_settings(self):
         self.store_notification_rule()
+        self.notification_advanced_error = False
+        notifications.validate_settings({"thresholds": self.notification_levels.values()})
         settings = dict(self.notification_settings)
         settings.update(
             enabled=self.notifications_enabled.isChecked(),
             recovery=self.notifications_recovery.isChecked(),
             recent_only=self.notifications_recent_only.isChecked(),
-            thresholds=self.parse_notification_thresholds(self.notification_thresholds.text()),
+            thresholds=self.notification_levels.values(),
             muted_until=((self.notification_settings["muted_until"]
                           if self.notification_settings.get("muted_until", 0) > time.time() else time.time() + 3600)
                          if self.notification_mute.isChecked() else 0),
@@ -999,11 +1703,19 @@ class ProviderSettings(QWidget):
                          "end": self.notification_quiet_end.text().strip()},
             work_hours={"start": self.notification_work_start.text().strip(),
                         "end": self.notification_work_end.text().strip()},
-            rules=[{"connection_id": connection_id, "metric": metric,
-                    "enabled": draft["enabled"], "thresholds": self.parse_notification_thresholds(draft["text"])}
-                   for (connection_id, metric), draft in self.notification_rule_drafts.items() if draft["custom"]],
         )
-        return notifications.validate_settings(settings)
+        try:
+            invalid = self.invalid_notification_rules()
+            if invalid:
+                self.review_notification_rule(invalid[0], focus=False)
+                raise ValueError("Review notification levels for " + self.notification_rule_name(invalid[0]) + ".")
+            settings["rules"] = [{"connection_id": connection_id, "metric": metric,
+                                 "enabled": draft["enabled"], "thresholds": self.parse_notification_thresholds(draft["text"])}
+                                for (connection_id, metric), draft in self.notification_rule_drafts.items() if draft["custom"]]
+            return notifications.validate_settings(settings)
+        except ValueError:
+            self.notification_advanced_error = True
+            raise
 
     def clear_message(self):
         self.message.hide()
@@ -1024,7 +1736,7 @@ class ProviderSettings(QWidget):
             name = item.data(Qt.ItemDataRole.UserRole)
             entries = data.get(name) or [{"provider": provider_name(name), "metrics": []}]
             for entry in entries:
-                metrics = entry.get("metrics") or [{"type": "rolling"}]
+                metrics = render.entry_metrics(entry) or [{"type": "rolling"}]
                 for metric in metrics:
                     key = render.metric_key(metric)
                     title = render.metric_title(metric, {"usage_display": self.usage_display.currentData()})
@@ -1049,17 +1761,24 @@ class ProviderSettings(QWidget):
                  if self.providers.item(i).checkState() == Qt.CheckState.Checked]
         display = {key: checkbox.isChecked() for key, checkbox in self.display.items()}
         if not any(display.values()):
+            self.select_section("appearance")
             self.message.setText("Show at least one text field in the bar.")
             self.message.show()
             return
         usage_display = self.usage_display.currentData()
         if usage_display not in state.USAGE_DISPLAY_MODES:
+            self.select_section("appearance")
             self.message.setText("Choose Used or Remaining for usage display.")
             self.message.show()
             return
         try:
             notification_settings = self.collect_notification_settings()
         except ValueError as error:
+            self.select_section("alerts")
+            if self.notification_advanced_error:
+                self.notification_advanced_button.setChecked(True)
+                if self.invalid_notification_rules():
+                    self.notification_rule_thresholds.setFocus(Qt.FocusReason.TabFocusReason)
             self.message.setText(str(error))
             self.message.show()
             return
@@ -1084,7 +1803,170 @@ class ProviderSettings(QWidget):
         self.saved.emit()
 
 
+class KeycapLabel(QLabel):
+    """Read-only keyboard or control token used by the Settings guide."""
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setObjectName("settingsKeycap")
+        self.setAccessibleName(text)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setStyleSheet("color: #eeeeee; background: #202020; border: 1px solid #303030; "
+                          "border-radius: 4px; padding: 2px 5px; font-size: 12px;")
+
+
+class GuideFlowLayout(QLayout):
+    """Wrap words and native keycap widgets without overflowing table cells."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.items = []
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setSpacing(4)
+
+    def addItem(self, item):
+        self.items.append(item)
+
+    def count(self):
+        return len(self.items)
+
+    def itemAt(self, index):
+        return self.items[index] if 0 <= index < len(self.items) else None
+
+    def takeAt(self, index):
+        return self.items.pop(index) if 0 <= index < len(self.items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self.arrange(QRectF(0, 0, width, 0), False)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self.arrange(QRectF(rect), True)
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self.items:
+            size = size.expandedTo(item.minimumSize())
+        return size
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def arrange(self, rect, apply):
+        x, y, line_height = rect.x(), rect.y(), 0
+        for item in self.items:
+            size = item.sizeHint()
+            if x > rect.x() and x + size.width() > rect.x() + rect.width():
+                x = rect.x()
+                y += line_height + self.spacing()
+                line_height = 0
+            if apply:
+                item.setGeometry(QRectF(x, y, size.width(), size.height()).toRect())
+            x += size.width() + self.spacing()
+            line_height = max(line_height, size.height())
+        return int(y - rect.y() + line_height)
+
+
+class GuideActionCell(QWidget):
+    KEYCAPS = ("Shift+Tab", "Alt+Down", "Alt+Up", "Left", "Right", "Space",
+               "Enter", "Tab", "Esc", "Up", "Down", "Home", "End", "C", "R")
+
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        import re
+        self.action_text = text
+        self.setAccessibleName(text)
+        policy = self.sizePolicy()
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+        self.flow = GuideFlowLayout(self)
+        self.keycaps = []
+        pattern = r"(?<!\w)(?:" + "|".join(re.escape(key) for key in self.KEYCAPS) + r")(?![\w-])"
+        for fragment in re.split("(" + pattern + ")", text):
+            if fragment in self.KEYCAPS:
+                label = KeycapLabel(fragment)
+                self.keycaps.append(label)
+                self.flow.addWidget(label)
+            else:
+                for word in fragment.split():
+                    self.flow.addWidget(plain_label(word, "#dddddd"))
+
+    def text(self):
+        return self.action_text
+
+    def wordWrap(self):
+        return True
+
+
+class GuideView(QWidget):
+    """The native panel's supported actions in the shared credit table style."""
+    ROWS = (
+        ("Open usage", "Click the tray icon."),
+        ("Open settings", "Right-click tray, then Settings; or C / gear on Usage."),
+        ("Refresh", "R / refresh icon on Usage."),
+        ("Select a limit", "Click its usage value."),
+        ("Switch limits", "Scroll on Usage."),
+        ("Switch tabs", "Click a tab or use Left / Right on tabs. Scroll the tab strip."),
+        ("Move focus", "Tab / Shift+Tab."),
+        ("Activate", "Space on buttons; Enter on usage / header controls."),
+        ("Choose an option", "Up / Down in an open select; Enter confirms and Esc closes."),
+        ("Adjust alert levels", "Drag a slider or Left / Right / Home / End when focused."),
+        ("Reorder providers", "Row arrows or Alt+Up / Alt+Down in Providers."),
+        ("Save changes", "Save applies every Settings tab."),
+        ("Discard changes", "Cancel / Back / Esc."),
+        ("Credit details", "Click a reset-credit or cloud-credit row."),
+        ("Windows startup", "General switch, then Save."),
+    )
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 18, 16, 18)
+        layout.setSpacing(16)
+        layout.addWidget(SettingsHeading("Guide", "Everyday actions and keyboard shortcuts."))
+        self.table = QWidget()
+        self.table.setObjectName("creditTable")
+        table_layout = QVBoxLayout(self.table)
+        table_layout.setContentsMargins(1, 1, 1, 1)
+        table_layout.setSpacing(0)
+        self.cells = []
+        for index, (feature, action) in enumerate((("Feature", "Action / shortcut"), *self.ROWS)):
+            first = index == 0
+            row = QWidget()
+            row.setObjectName("creditTableHeader" if first else "usageCreditRow")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(0)
+            label_cell = QWidget()
+            label_cell.setObjectName("usageCreditLabel")
+            label_cell.setProperty("firstRow", first)
+            label_cell.setProperty("lastRow", index == len(self.ROWS))
+            label_layout = QVBoxLayout(label_cell)
+            label_layout.setContentsMargins(12, 12, 12, 12)
+            label = plain_label(feature, "#eeeeee" if first else "#888888")
+            label.setWordWrap(True)
+            label_layout.addWidget(label)
+            row_layout.addWidget(label_cell, 1)
+            value_cell = QWidget()
+            value_layout = QVBoxLayout(value_cell)
+            value_layout.setContentsMargins(12, 12, 12, 12)
+            value = plain_label(action, "#eeeeee") if first else GuideActionCell(action)
+            if first:
+                value.setWordWrap(True)
+            value_layout.addWidget(value)
+            row_layout.addWidget(value_cell, 2)
+            self.cells.append((label, value))
+            table_layout.addWidget(row)
+        layout.addWidget(self.table)
+
+
 class AboutView(QWidget):
+    guide_requested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         info = about.project_info()
@@ -1102,27 +1984,16 @@ class AboutView(QWidget):
             label = plain_label(text)
             label.setWordWrap(True)
             layout.addWidget(label)
-        for text, key in (("GitHub", "github"), ("Documentation", "documentation"), ("Report a bug", "issues")):
-            button = QPushButton(text)
-            row = QHBoxLayout(button)
-            row.setContentsMargins(8, 0, 8, 0)
-            row.addStretch()
-            row.addWidget(ArrowIcon())
+        for text, key in (("Guide", "guide"), ("Report a bug", "issues"),
+                          ("Documentation", "documentation"), ("GitHub", "github")):
+            button = SettingsLinkButton(text)
             button.setObjectName("about-" + key)
-            button.setStyleSheet("border: 1px solid #303030; border-radius: 6px; padding: 6px 8px;")
-            button.clicked.connect(lambda checked=False, url=info[key]: QDesktopServices.openUrl(QUrl(url)))
+            button.setStyleSheet(f"border: 1px solid {SETTINGS_CONTROL_BORDER_COLOR}; border-radius: 6px; padding: 6px 8px;")
+            if key == "guide":
+                button.clicked.connect(self.guide_requested)
+            else:
+                button.clicked.connect(lambda checked=False, url=info[key]: QDesktopServices.openUrl(QUrl(url)))
             layout.addWidget(button)
-        layout.addSpacing(6)
-        layout.addWidget(plain_label("Quick guide", "#eeeeee"))
-        for text in (
-            "Tray: click to show usage; right-click for settings and other actions.",
-            "Usage: click a limit to show it in the tray. Refresh checks now; Reset credits shows the available resets.",
-            "Settings: pick a limit, text and icon. Enable providers and reorder them with arrows or drag and drop. Save applies changes and keeps settings open.",
-            "Keyboard: R refreshes, C opens settings, Esc goes back. Tab moves between controls; Alt+Up/Down reorders providers.",
-        ):
-            label = plain_label(text)
-            label.setWordWrap(True)
-            layout.addWidget(label)
 
 
 class ResetWorker(QObject):
@@ -1303,8 +2174,8 @@ class Dashboard(QWidget):
         self.reset_provider = None
         self.reset_applying = False
         self.reset_thread = None
+        self.monetary_credit = None
         self.settings_view = None
-        self.settings_scroll_position = 0
         self.usage_scroll_position = 0
         self.updating = False
         self.update_thread = None
@@ -1360,20 +2231,22 @@ class Dashboard(QWidget):
         self.credits_scroll.setWidgetResizable(True)
         self.credits_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.credits_scroll.setWidget(self.credits_view)
+        self.monetary_view = MonetaryCreditsView()
+        self.monetary_scroll = QScrollArea()
+        self.monetary_scroll.setWidgetResizable(True)
+        self.monetary_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.monetary_scroll.setWidget(self.monetary_view)
         self.pages = QStackedWidget()
         self.pages.addWidget(self.scroll)
         self.pages.addWidget(self.credits_scroll)
+        self.pages.addWidget(self.monetary_scroll)
         self.panel_layout.addWidget(self.pages)
-        self.settings_scroll = QScrollArea()
-        self.settings_scroll.setWidgetResizable(True)
-        self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.settings_scroll = SettingsScrollArea()
         self.pages.addWidget(self.settings_scroll)
-        self.about_scroll = QScrollArea()
-        self.about_scroll.setWidgetResizable(True)
-        self.about_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.about_view = AboutView(self)
-        self.about_scroll.setWidget(self.about_view)
-        self.pages.addWidget(self.about_scroll)
+        self.settings_navigation = QWidget()
+        self.settings_navigation_layout = QVBoxLayout(self.settings_navigation)
+        self.settings_navigation_layout.setContentsMargins(0, 0, 0, 0)
+        self.settings_navigation.hide()
         self.update_scroll = QScrollArea()
         self.update_scroll.setWidgetResizable(True)
         self.update_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -1382,8 +2255,10 @@ class Dashboard(QWidget):
         self.update_scroll.setWidget(self.update_view)
         self.pages.addWidget(self.update_scroll)
         self.settings_footer = QWidget()
+        self.settings_footer.setObjectName("settingsFooter")
         self.settings_footer_layout = QHBoxLayout(self.settings_footer)
-        self.settings_footer_layout.setContentsMargins(16, 8, 16, 12)
+        self.settings_footer_layout.setContentsMargins(16, 8, 16, 8)
+        self.settings_footer.setMinimumHeight(49)
         self.settings_footer.hide()
         self.panel_layout.addWidget(self.settings_footer)
         self.tray = QSystemTrayIcon(status_icon(), self)
@@ -1457,20 +2332,20 @@ class Dashboard(QWidget):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
-            self.go_back() if self.reset_provider is not None or self.configuring() or self.viewing_about() or self.viewing_updates() else self.hide()
-        elif self.configuring() or self.viewing_about() or self.viewing_updates():
+            self.go_back() if self.viewing_credit_details() or self.configuring() or self.viewing_updates() else self.hide()
+        elif self.configuring() or self.viewing_updates():
             super().keyPressEvent(event)
         elif event.key() == Qt.Key.Key_R:
             self.refresh()
         elif event.key() == Qt.Key.Key_C:
             self.configure()
-        elif self.reset_provider is None and event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
+        elif not self.viewing_credit_details() and event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
             self.cycle_metric(1 if event.key() == Qt.Key.Key_Down else -1)
         else:
             super().keyPressEvent(event)
 
     def wheelEvent(self, event):
-        if self.reset_provider is not None or self.configuring() or self.viewing_about() or self.viewing_updates():
+        if self.viewing_credit_details() or self.configuring() or self.viewing_updates():
             super().wheelEvent(event)
             return
         self.cycle_metric(1 if event.angleDelta().y() < 0 else -1)
@@ -1479,11 +2354,35 @@ class Dashboard(QWidget):
     def reset_entry(self, key):
         return next((entry for _, entry, _, value in self.visible_metrics if value[:2] == key), None)
 
+    def viewing_credit_details(self):
+        return self.reset_provider is not None or self.monetary_credit is not None
+
+    def monetary_entry(self, key):
+        entry = self.reset_entry(key[:2])
+        credit = next((row for row in usage_credits.presentation(entry) if row["id"] == key[2]), None)
+        return entry, credit
+
+    def show_monetary_credit(self, key):
+        entry, credit = self.monetary_entry(key)
+        if entry is None or credit is None:
+            return
+        self.credits_view.cancel_confirmation()
+        self.usage_scroll_position = self.scroll.verticalScrollBar().value()
+        self.reset_provider = None
+        self.monetary_credit = key
+        self.monetary_view.update_credit(key[0], entry, self.entry_name(key[0], entry), credit)
+        self.pages.setCurrentWidget(self.monetary_scroll)
+        self.monetary_scroll.verticalScrollBar().setValue(0)
+        self.update_header()
+        self.fit_content()
+        self.back_button.setFocus()
+
     def show_reset_credits(self, key):
         entry = self.reset_entry(key)
         if entry is None or not reset_credits.available_credits(entry.get("reset_credits"))["available"]:
             return
         self.reset_provider = key
+        self.monetary_credit = None
         self.credits_view.cancel_confirmation()
         self.credits_view.update_provider(key[0], dict(entry, _loading=self.busy), self.entry_name(key[0], entry))
         self.pages.setCurrentWidget(self.credits_scroll)
@@ -1497,14 +2396,27 @@ class Dashboard(QWidget):
         was_configuring = self.configuring()
         was_updating = self.viewing_updates()
         key = self.reset_provider
+        monetary_key = self.monetary_credit
         self.reset_provider = None
+        self.monetary_credit = None
         self.pages.setCurrentWidget(self.scroll)
         self.update_header()
         self.fit_content()
-        if was_updating:
+        if was_updating or monetary_key is not None:
             self.scroll.verticalScrollBar().setValue(self.usage_scroll_position)
+        credit_button = next((button for button in self.metric_buttons
+                              if monetary_key and button.value == (*monetary_key[:2], "credits:" + monetary_key[2])), None)
         heading = self.provider_buttons.get(key)
-        if heading:
+        if credit_button:
+            credit_button.setFocus()
+        elif monetary_key is not None:
+            def restore_credit_focus():
+                if self.pages.currentWidget() is self.scroll:
+                    (self.provider_buttons.get(monetary_key[:2]) or self.refresh_button).setFocus()
+            # Removing a credit can rebuild usage while this page is closing.
+            # Wait until the replacement provider rows belong to the scroller.
+            QTimer.singleShot(0, restore_credit_focus)
+        elif heading:
             (heading.credits if not heading.credits.isHidden() else heading).setFocus()
         elif was_configuring:
             self.settings_button.setFocus()
@@ -1551,16 +2463,15 @@ class Dashboard(QWidget):
     def configuring(self):
         return self.pages.currentWidget() is self.settings_scroll
 
-    def viewing_about(self):
-        return self.pages.currentWidget() is self.about_scroll
-
     def viewing_updates(self):
         return self.pages.currentWidget() is self.update_scroll
 
     def show_updates(self):
+        self.credits_view.cancel_confirmation()
         if not self.viewing_updates():
             self.usage_scroll_position = self.scroll.verticalScrollBar().value()
         self.reset_provider = None
+        self.monetary_credit = None
         self.update_view.set_guide(updates.update_guide(), fetch.get_version_info())
         self.pages.setCurrentWidget(self.update_scroll)
         self.update_scroll.verticalScrollBar().setValue(0)
@@ -1613,42 +2524,32 @@ class Dashboard(QWidget):
             self.app.quit()
 
     def show_about(self):
-        self.settings_scroll_position = self.settings_scroll.verticalScrollBar().value()
-        self.pages.setCurrentWidget(self.about_scroll)
-        self.about_scroll.verticalScrollBar().setValue(0)
-        self.update_header()
-        self.fit_content()
-        self.back_button.setFocus()
+        self.configure()
+        self.settings_view.select_section("about")
+        self.settings_view.section_buttons["about"].setFocus()
 
     def go_back(self):
         if self.reset_provider is not None and self.credits_view.target:
             self.credits_view.cancel_confirmation()
             self.fit_content()
             return
-        if self.viewing_about():
-            self.pages.setCurrentWidget(self.settings_scroll)
-            self.update_header()
-            self.fit_content()
-            self.settings_scroll.verticalScrollBar().setValue(self.settings_scroll_position)
-            self.settings_view.about_button.setFocus()
-        else:
-            self.show_usage()
+        self.show_usage()
 
     def update_header(self):
         configuring = self.configuring()
-        about_page = self.viewing_about()
         update_page = self.viewing_updates()
-        self.brand.setText("Updates" if update_page else "About" if about_page else "Settings" if configuring else "AI Status")
-        show_back = configuring or about_page or update_page or self.reset_provider is not None
+        self.brand.setText("Updates" if update_page else "Settings" if configuring else "AI Status")
+        show_back = configuring or update_page or self.viewing_credit_details()
         self.back_button.setVisible(show_back)
         self.back_title_gap.changeSize(8 if show_back else 0, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
         self.back_button.parentWidget().layout().invalidate()
-        back_label = "Back to settings (Esc)" if about_page else "Back to usage (Esc)"
+        back_label = "Back to usage (Esc)"
         self.back_button.setToolTip(back_label)
         self.back_button.setAccessibleName(back_label)
-        self.refresh_button.setVisible(not configuring and not about_page and not update_page)
-        self.settings_button.setVisible(not configuring and not about_page and not update_page and self.reset_provider is None)
+        self.refresh_button.setVisible(not configuring and not update_page)
+        self.settings_button.setVisible(not configuring and not update_page and not self.viewing_credit_details())
         self.settings_footer.setVisible(configuring)
+        self.settings_navigation.setVisible(configuring)
 
     def animate(self):
         self.animation_frame += 1
@@ -1670,29 +2571,33 @@ class Dashboard(QWidget):
 
     def configure(self):
         self.credits_view.cancel_confirmation()
-        if self.viewing_about():
-            self.go_back()
         if not self.configuring():
             previous = self.settings_scroll.takeWidget()
             if previous:
                 previous.deleteLater()
             while self.settings_footer_layout.count():
                 self.settings_footer_layout.takeAt(0).widget().deleteLater()
+            while self.settings_navigation_layout.count():
+                self.settings_navigation_layout.takeAt(0).widget().deleteLater()
             self.settings_view = ProviderSettings(self)
             self.settings_view.saved.connect(self.settings_saved)
             self.settings_view.cancelled.connect(self.show_usage)
-            self.settings_view.about_requested.connect(self.show_about)
             self.settings_scroll.setWidget(self.settings_view)
+            self.settings_navigation_layout.addWidget(self.settings_view.navigation)
+            self.settings_view.navigation.show()
+            self.settings_scroll.set_overlay(self.settings_navigation)
             self.settings_footer_layout.addWidget(self.settings_view.buttons)
             self.settings_view.buttons.show()
             self.reset_provider = None
+            self.monetary_credit = None
             self.pages.setCurrentWidget(self.settings_scroll)
             self.settings_scroll.verticalScrollBar().setValue(0)
             self.update_header()
             self.fit_content()
         if not self.isVisible():
             self.show_dashboard()
-        self.settings_view.active.setFocus()
+        self.settings_view.section_buttons[self.settings_view.current_section].setFocus()
+        self.settings_view.update_tab_order()
 
     def settings_saved(self):
         self.last_config = config.load_config()
@@ -1730,6 +2635,14 @@ class Dashboard(QWidget):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(paths.LOG_FILE.parent)))
 
     def poll_state(self):
+        # Credits can expire or become stale while collection is offline. Only
+        # redraw when their display state changes, retaining the selected row.
+        credit_states = tuple((name, entry.get("_idx", 0), row["id"], row["status"], row["balance"], row["detail"], row["remaining"])
+                              for name, entries in self.data.items() for entry in entries
+                              for row in usage_credits.presentation(entry))
+        if credit_states != getattr(self, "credit_states", ()):
+            self.credit_states = credit_states
+            self.draw()
         activation = paths.read_json(paths.RUNTIME_DIR / "desktop-request.json")
         if activation != self.last_activation:
             self.last_activation = activation
@@ -1876,16 +2789,18 @@ class Dashboard(QWidget):
         self.visible_metrics = []
         for name in config.enabled_connection_order():
             for entry in self.data.get(name) or []:
-                for metric in sorted(entry.get("metrics", []), key=render.metric_sort_key):
+                for metric in sorted(render.entry_metrics(entry), key=render.metric_sort_key):
                     value = (name, entry.get("_idx", 0), render.metric_key(metric))
                     self.visible_metrics.append((name, entry, metric, value))
         self.metric_values = [value for _, _, _, value in self.visible_metrics]
         if self.metric_values and self.selected_value() not in self.metric_values:
-            value = self.metric_values[0]
+            value = next((value for value in self.metric_values if value[:2] == self.selected_value()[:2]),
+                         self.metric_values[0])
             self.selected.update(provider=value[0], idx=value[1], metric=value[2])
             state.save_selected(self.selected)
-        structure = tuple((value, render.metric_is_amount(metric))
-                          for _, _, metric, value in self.visible_metrics)
+        structure = tuple((value, render.metric_is_amount(metric),
+                           metric.get("id") in {row["id"] for row in usage_credits.presentation(entry)})
+                          for _, entry, metric, value in self.visible_metrics)
         focused_value = next((button.value for button in self.metric_buttons if button.hasFocus()), None)
         focused_update = getattr(self, "update_link", None) is not None and self.update_link.hasFocus()
         if structure == self.structure:
@@ -1912,7 +2827,8 @@ class Dashboard(QWidget):
         layout.addWidget(self.update_link)
         for name in config.enabled_connection_order():
             for entry in self.data.get(name) or []:
-                metrics = sorted(entry.get("metrics", []), key=render.metric_sort_key)
+                metrics = sorted(render.entry_metrics(entry), key=render.metric_sort_key)
+                monetary_ids = {row["id"] for row in usage_credits.presentation(entry)}
                 if not metrics:
                     continue
                 group = QWidget()
@@ -1953,8 +2869,13 @@ class Dashboard(QWidget):
                     button = UsageButton()
                     button.value = value
                     button.is_amount = render.metric_is_amount(metric)
+                    button.credit_id = metric.get("id") if metric.get("id") in monetary_ids else None
                     button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {render.metric_value(metric, self.selected)}")
-                    button.clicked.connect(lambda checked=False, value=value: self.choose_metric(value))
+                    if button.credit_id:
+                        key = (*value[:2], button.credit_id)
+                        button.clicked.connect(lambda checked=False, key=key: self.show_monetary_credit(key))
+                    else:
+                        button.clicked.connect(lambda checked=False, value=value: self.choose_metric(value))
                     self.metric_buttons.append(button)
                     metric_layout = QVBoxLayout(button)
                     metric_layout.setContentsMargins(4, 4, 4, 4)
@@ -1973,6 +2894,8 @@ class Dashboard(QWidget):
                     title_row.addWidget(button.percentage)
                     if button.is_amount:
                         title_row.addStretch()
+                    if button.credit_id:
+                        title_row.addWidget(ArrowIcon())
                     metric_layout.addLayout(title_row)
                     button.bar_container = QWidget()
                     bar_row = QHBoxLayout(button.bar_container)
@@ -2059,7 +2982,7 @@ class Dashboard(QWidget):
             value_width = max(38, self.fontMetrics().horizontalAdvance(render.metric_value(metric, self.selected)) + 4)
             button.percentage.setFixedWidth(value_width)
             if button.is_amount:
-                available = self.width() - 2 - 32 - 8 - 46 - 8 - value_width
+                available = self.width() - 2 - 32 - 8 - 46 - 8 - value_width - (24 if button.credit_id else 0)
                 title_width = self.fontMetrics().horizontalAdvance(title + ":") + 1
                 button.title.setFixedWidth(max(24, min(title_width, available)))
             button.percentage.setText(render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else render.metric_value(metric, self.selected))
@@ -2067,8 +2990,9 @@ class Dashboard(QWidget):
                 label.setStyleSheet(f"color: {color};")
             detail = render.metric_detail(metric)
             button.description.setText(detail)
-            button.description.setVisible(bool(detail))
-            button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {render.metric_value(metric, self.selected)}")
+            button.description.setVisible(bool(detail) and not button.credit_id)
+            button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {render.metric_value(metric, self.selected)}"
+                                     + (". Open credit details" if button.credit_id else ""))
         if not self.metric_values:
             self.empty_message.setText("Checking your connected providers…" if self.busy else
                 "No usage available. Connect a provider and refresh." if config.enabled_connection_order() else
@@ -2083,6 +3007,13 @@ class Dashboard(QWidget):
             else:
                 name = self.reset_provider[0]
                 self.credits_view.update_provider(name, dict(entry, _loading=self.busy), self.entry_name(name, entry))
+        if self.monetary_credit is not None:
+            entry, credit = self.monetary_entry(self.monetary_credit)
+            if entry is None or credit is None:
+                self.show_usage()
+            else:
+                name = self.monetary_credit[0]
+                self.monetary_view.update_credit(name, entry, self.entry_name(name, entry), credit)
 
     def fit_content(self):
         content = self.pages.currentWidget().widget()
@@ -2090,7 +3021,8 @@ class Dashboard(QWidget):
         content.layout().activate()
         height = content.heightForWidth(self.width() - 2) if content.hasHeightForWidth() else content.sizeHint().height()
         height = max(height, content.minimumSizeHint().height())
-        natural_height = height + 57 + (self.settings_footer.sizeHint().height() if self.configuring() else 0)
+        settings_height = max(49, self.settings_footer.sizeHint().height()) if self.configuring() else 0
+        natural_height = height + 57 + settings_height
         screen = self.screen().availableGeometry()
         bottom = self.geometry().bottom()
         self.resize(self.width(), min(max(180, natural_height), 720, max(180, screen.height() - 32)))

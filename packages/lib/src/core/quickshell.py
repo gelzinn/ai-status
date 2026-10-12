@@ -9,7 +9,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import about, config, fetch, logos, paths, render, state, reset_credits, reset_actions, updates, notifications
+from . import about, config, fetch, logos, paths, render, state, reset_credits, reset_actions, updates, notifications, usage_credits
 
 
 class _PlainText(HTMLParser):
@@ -144,7 +144,7 @@ def usable_metrics(entry):
     if fetch._is_error_result(entry):
         return []
     metrics = []
-    for metric in entry.get("metrics", []):
+    for metric in render.entry_metrics(entry):
         if metric.get("percentage") is not None:
             usable = render.metric_percentage(metric) is not None
         else:
@@ -211,6 +211,7 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
                 "metrics": metrics,
                 "resetCredits": reset_credits.presentation(entry.get("reset_credits")),
                 "resetAction": reset_actions.presentation(entry) if name not in pending else None,
+                "monetaryCredits": usage_credits.presentation(entry),
             })
     current = next((p for p in providers if p["id"] == selected.get("provider") and p["idx"] == selected.get("idx", 0)), None)
     if current is None and providers:

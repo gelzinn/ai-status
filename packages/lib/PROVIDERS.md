@@ -9,7 +9,7 @@ For Windows credential locations and native CLI compatibility, see the
 
 | Provider ID | Provider | Usage | Authentication |
 | --- | --- | --- | --- |
-| `claude` | Claude | Session (5h) and weekly usage, including per-model weekly limits | Claude Code OAuth (OpenCode fallback) |
+| `claude` | Claude | Session (5h) and weekly usage, per-model limits and reported Cloud credit balance | Claude Code OAuth (OpenCode fallback) |
 | `codex` | Codex | 5-hour and weekly limits (a single monthly window on free plans), usage-credit balance and banked resets | ~/.codex/auth.json |
 | `opencode` | OpenCode | Rolling, weekly, and monthly usage | OPENCODE_GO_API_KEY or OpenCode auth |
 | `antigravity` | Antigravity | Weekly and 5-hour limits per model (Gemini and Claude/GPT) | agy CLI session |
@@ -20,7 +20,7 @@ For Windows credential locations and native CLI compatibility, see the
 | `anthropic-api` | Anthropic API | Monthly organization API spend | ANTHROPIC_ADMIN_KEY (organization Admin key) |
 | `openai-api` | OpenAI API | Monthly organization API spend | OPENAI_ADMIN_KEY (organization Admin key) |
 | `google-cloud` | Google Cloud | Project quotas; optional billing-export monthly cost | gcloud or GOOGLE_CLOUD_ACCESS_TOKEN; project_id option |
-| `openrouter` | OpenRouter | Key usage and limits; account spend / total credits and remaining balance | OPENROUTER_API_KEY; OPENROUTER_MANAGEMENT_KEY for account credits |
+| `openrouter` | OpenRouter | Key usage and limits; account spend / total credits and remaining balance | OPENROUTER_API_KEY; optional OPENROUTER_MANAGEMENT_KEY |
 | `deepseek` | DeepSeek | Available prepaid balance | DEEPSEEK_API_KEY |
 | `deepinfra` | DeepInfra | Prepaid balance and current-month spend | DEEPINFRA_API_KEY |
 | `kimi` | Kimi | Coding subscription quota and rolling limits | KIMI_API_KEY or Kimi CLI login |
@@ -59,7 +59,25 @@ Reads the Claude Code OAuth credential store to query Anthropic's usage endpoint
 |---|---|
 | **Auth** | Claude Code login (`~/.claude/.credentials.json`), or OpenCode authenticated with Claude as fallback |
 | **Endpoint** | `https://api.anthropic.com/api/oauth/usage?cedar_ember=1` |
-| **Metrics** | Session (5-hour rolling) and weekly usage with reset timers, including per-model weekly limits; shows the subscription plan (Pro/Max/Team) when available |
+| **Metrics** | Session (5-hour rolling) and weekly usage with reset timers, including per-model weekly limits; reported Cloud credit balance and expiration; shows the subscription plan (Pro/Max/Team) when available |
+
+**Cloud credits** shows the remaining USD amount and expiration reported in the
+same usage response's `iguana_necktie` block. The dollar fields are already USD,
+including fractional amounts and a zero balance. The source determines
+availability; AI Status does not assume a grant from the plan name. Missing or
+malformed credit data leaves ordinary quota windows available. Cloud credits use
+the existing amount row, scoped to each configured account. Click the row in
+Quickshell, Windows or native macOS to open a detail page with local expiration,
+time remaining and timezone; Waybar and SwiftBar retain tooltip/menu details.
+Exhausted, expired and unavailable states are distinct;
+known expiration is checked while displaying cached data, including offline.
+These monetary credits are separate from subscription **Extra usage**, Console
+API credits and saved **Reset credits**. `resets_at` in the Cloud block means
+expiration, not the next quota reset. See the
+[source validation and API-credit investigation](../../docs/development/claude-credits.md)
+for upstream evidence and the [manual PR check](../../docs/development/claude-credits.md#manual-check-for-the-pr-tester).
+Automated fixtures cover the response contract; an eligible-account tester will
+confirm the live balance and expiration through the PR.
 
 Eligible Claude accounts also show **Reset credits** in the desktop panels and Waybar tooltip: available campaign resets, their labels, and expiration dates. Only unspent grants marked usable and not paused by the API are counted. The opt-in inventory requires a recognized Claude CLI user agent; the query uses published version `2.1.281`. If the service changes that requirement or reports no eligible grants, the credit section is hidden while usage remains available.
 
@@ -203,14 +221,16 @@ Caches are private to the user and bound to both connection identity and credent
 Spend, available credit and subscription quota are separate metrics. A balance has no invented percentage. An amount only gains a percentage if the API reports its applicable limit or you set a positive `monthly_budget`; a configured budget is a local monitoring preference, not a provider-enforced limit. Multiple currencies remain separate.
 
 - **OpenAI API:** `OPENAI_ADMIN_KEY`, optionally `organization_id`/`OPENAI_ORG_ID`, `project_ids`, `monthly_budget`, `budget_currency`. Queries the paginated [organization costs API](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs) for the current UTC month; a project inference key or Codex OAuth login cannot query it.
-- **Anthropic API:** `ANTHROPIC_ADMIN_KEY` for a Console Admin key or an unscoped personal/service account key with admin access; alternatively `ANTHROPIC_ADMIN_TOKEN` for `org:admin` OAuth. Workspace inference keys cannot read costs. Optional `workspace_id` scopes the paginated report, `monthly_budget`/`budget_currency` supplies a monitoring budget. [Cost report](https://platform.claude.com/docs/en/api/http/beta/organization/cost_report/retrieve) amounts are decimal cents and are converted to currency units. Claude subscriptions, Bedrock and Vertex invoices are separate.
-- **OpenRouter:** `OPENROUTER_API_KEY` reports this key's usage and any applicable limit. Set `OPENROUTER_MANAGEMENT_KEY` to retrieve account-wide purchased credits and total spend from the [credits API](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits). For example, `$25.00 / $100.00` means $25 spent from $100 total account credits; the remaining account balance appears separately as `$75.00`. Key spending limits and account credits have separate scopes. A management key alone is sufficient for account metrics and makes one request; providing both keys also collects key usage. Regular keys never call the management endpoint and display setup guidance for account credits, including when the legacy `include_credits` option is enabled. Authentication and rate-limit errors from configured management credentials follow the normal cached-data and cooldown behavior.
+- **Anthropic API:** `ANTHROPIC_ADMIN_KEY` for a Console Admin key or an unscoped personal/service account key with admin access; alternatively `ANTHROPIC_ADMIN_TOKEN` for `org:admin` OAuth. Workspace inference keys cannot read costs. Optional `workspace_id` scopes the paginated report, `monthly_budget`/`budget_currency` supplies a monitoring budget. [Cost report](https://platform.claude.com/docs/en/api/http/beta/organization/cost_report/retrieve) amounts are decimal cents and are converted to currency units. This collector reports costs only: it does not expose a Console API balance, attribute monthly promotional grants or report their expiry. A configured budget minus spend is not a remaining credit balance. Claude subscriptions, Cloud credits, Bedrock and Vertex invoices are separate. See the [monthly API-credit investigation](../../docs/development/claude-credits.md#monthly-api-credits-investigation-result).
+- **OpenRouter:** `OPENROUTER_API_KEY` reads key usage and also attempts the [account credits API](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits) with that same credential. **Credit balance** shows the remaining account balance in the top bar and panel. For example, $36.10 spent from $40.00 total credits leaves **$3.90** as the main value; the consumption bar and `$36.10 of $40.00 used (90%)` detail retain the spending context. Switching usage display to remaining changes the progress bar while keeping the actual balance as the main value. Monthly key spend and key caps remain separate from account totals; they are never subtracted from account credits to invent a balance. No additional credential is required by AI Status to try this lookup, and the legacy `include_credits` option does not gate it.
 
-  Each account can reference its own management key through the existing credential-source options:
+  OpenRouter's documented permissions still require a management key for this endpoint. If the same-key lookup returns 401/403, valid key usage stays visible with **Account balance unavailable for this key**. An already configured `OPENROUTER_MANAGEMENT_KEY` remains an optional override; a management key alone reads credits directly. Failures of an explicit management credential, rate limits and network errors follow the existing cache and cooldown handling.
+
+  Each account can reuse its own API key through the existing credential-source options:
 
   ```bash
-  ai-status accounts add openrouter --id personal-credits --label Personal --env OPENROUTER_MANAGEMENT_KEY=OPENROUTER_PERSONAL_MANAGEMENT_KEY
-  ai-status accounts add openrouter --id work-credits --label Work --env OPENROUTER_MANAGEMENT_KEY=OPENROUTER_WORK_MANAGEMENT_KEY
+  ai-status accounts add openrouter --id personal-credits --label Personal --env OPENROUTER_API_KEY=OPENROUTER_PERSONAL_KEY
+  ai-status accounts add openrouter --id work-credits --label Work --env OPENROUTER_API_KEY=OPENROUTER_WORK_KEY
   ```
 - **Google Cloud:** `GOOGLE_CLOUD_ACCESS_TOKEN`, or `gcloud auth print-access-token` with optional `gcloud_account`. Set `project_id` (or `GOOGLE_CLOUD_PROJECT`). Cloud Monitoring quota series require Monitoring read permissions. `service` and `quota_metric` filter series; allocation usage is paired with the matching limit, and rate-window quotas only use compatible labels/windows.
 

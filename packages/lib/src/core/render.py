@@ -3,6 +3,7 @@ import math
 from html import escape
 from . import fetch
 from . import state
+from . import usage_credits
 from .reset_credits import display_lines as reset_credit_lines
 
 TYPE_NAMES = {
@@ -36,6 +37,17 @@ def entry_name(entry):
     return f"{name} · {label}" if label else name
 
 
+def entry_metrics(entry):
+    """Project live monetary-credit states into the existing selectable rows."""
+    source = entry.get("metrics")
+    metrics = [metric for metric in source if isinstance(metric, dict)] if isinstance(source, list) else []
+    credits = usage_credits.metrics(entry)
+    keys = {metric_key(metric) for metric in credits}
+    # Snapshot adapters may already have projected these rows. Recompute their
+    # states from the original observation instead of duplicating stale rows.
+    return [metric for metric in metrics if metric_key(metric) not in keys] + credits
+
+
 def metric_percentage(metric, selected=None):
     if isinstance(metric.get("percentage"), bool):
         return None
@@ -65,6 +77,10 @@ def _metric_ratio(metric):
 
 
 def _shows_remaining(metric, selected):
+    # Wallet values already represent the real balance. The preference still
+    # changes their progress bar, but must not invert or relabel the dollars.
+    if metric.get("value_format") == "credit_balance":
+        return False
     # Provider percentages are normalized to consumption, including credit
     # ratios. Balances and uncapped spend have no percentage to complement.
     return state.get_usage_display(selected) == "remaining" and (
@@ -74,6 +90,16 @@ def _shows_remaining(metric, selected):
 
 def metric_value(metric, selected=None):
     unit = metric.get("unit", "")
+    if metric.get("value_format") == "credit_balance":
+        if isinstance(metric.get("balance"), bool):
+            return "Unavailable"
+        try:
+            balance = float(metric.get("balance"))
+            if not math.isfinite(balance):
+                return "Unavailable"
+        except (TypeError, ValueError, OverflowError):
+            return "Unavailable"
+        return f"${balance:.2f}" if unit == "USD" else f"{balance:,.2f} {unit}".strip()
     ratio = _metric_ratio(metric)
     if ratio is not None:
         amount, limit = ratio
@@ -97,7 +123,7 @@ def metric_value(metric, selected=None):
 def metric_title(metric, selected=None):
     title = metric.get("title") or metric.get("name") or TYPE_NAMES.get(metric.get("type", "generic"), "Usage")
     unit = metric.get("unit")
-    if unit and (metric_percentage(metric) is None or metric.get("value_format") == "amount_ratio"):
+    if unit and (metric_percentage(metric) is None or metric.get("value_format") in ("amount_ratio", "credit_balance")):
         title = title.removesuffix(f" ({unit})")
     if _shows_remaining(metric, selected):
         # Some providers embed the used amount in their label. Keep that
@@ -190,7 +216,7 @@ def get_selected_metric_text(latest_data, selected, spinner=None):
 
     provider_full_name = entry_name(p)
     selected_key = selected.get("metric", "rolling")
-    metrics = p.get("metrics", [])
+    metrics = entry_metrics(p)
 
     show_provider = selected.get("show_provider", True)
     show_model = selected.get("show_model", True)
@@ -316,7 +342,7 @@ def format_provider_block(
     provider_data, selected_dir=None, selected_idx=None, selected_metric=None, selected=None
 ):
     provider = escape(entry_name(provider_data))
-    metrics = provider_data.get("metrics", [])
+    metrics = entry_metrics(provider_data)
     if not metrics:
         return ""
 
@@ -349,7 +375,7 @@ def format_provider_block(
         percentage = metric_percentage(metric, selected)
         if percentage is not None:
             bar_str = make_progress_bar(percentage)
-            if metric.get("value_format") == "amount_ratio":
+            if metric.get("value_format") in ("amount_ratio", "credit_balance"):
                 bar_str = bar_str.rsplit(" ", 1)[0] + " " + escape(metric_value(metric, selected))
         else:
             bar_str = escape(metric_value(metric, selected))
@@ -369,7 +395,7 @@ def format_loading_provider_block(
     provider_data, frame_index, selected_dir=None, selected_idx=None, selected_metric=None, selected=None
 ):
     provider = escape(entry_name(provider_data))
-    metrics = provider_data.get("metrics", [])
+    metrics = entry_metrics(provider_data)
     if not metrics:
         return ""
 

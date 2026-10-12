@@ -107,6 +107,45 @@ struct ResetCredits: Decodable {
     let timezone: String?
 }
 
+struct MonetaryCredit: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let heading: String?
+    let status: String
+    let value: String
+    let expires: String
+    let remaining: String
+    let timezone: String
+    let observed: String
+    let observedValue: String
+    let limitValue: String
+    let usedValue: String
+    let statusNote: String
+    let stale: Bool
+    enum CodingKeys: String, CodingKey {
+        case id, title, heading, status, value, expires, remaining, timezone, observed, stale
+        case observedValue = "observed_value", limitValue = "limit_value", usedValue = "used_value"
+        case statusNote = "status_note"
+    }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        title = try values.decode(String.self, forKey: .title)
+        heading = try values.decodeIfPresent(String.self, forKey: .heading)
+        status = try values.decode(String.self, forKey: .status)
+        value = try values.decode(String.self, forKey: .value)
+        expires = try values.decodeIfPresent(String.self, forKey: .expires) ?? "Not reported"
+        remaining = try values.decodeIfPresent(String.self, forKey: .remaining) ?? "Not reported"
+        timezone = try values.decodeIfPresent(String.self, forKey: .timezone) ?? ""
+        observed = try values.decodeIfPresent(String.self, forKey: .observed) ?? "Not reported"
+        observedValue = try values.decodeIfPresent(String.self, forKey: .observedValue) ?? "Not reported"
+        limitValue = try values.decodeIfPresent(String.self, forKey: .limitValue) ?? "Not reported"
+        usedValue = try values.decodeIfPresent(String.self, forKey: .usedValue) ?? "Not reported"
+        statusNote = try values.decodeIfPresent(String.self, forKey: .statusNote) ?? ""
+        stale = try values.decodeIfPresent(Bool.self, forKey: .stale) ?? false
+    }
+}
+
 struct Provider: Decodable, Identifiable {
     let connectionID: String
     let providerID: String
@@ -119,11 +158,12 @@ struct Provider: Decodable, Identifiable {
     let metrics: [Metric]
     let resetCredits: ResetCredits?
     let resetAction: ResetAction?
+    let monetaryCredits: [MonetaryCredit]
     var id: String { "\(connectionID):\(idx)" }
     enum CodingKeys: String, CodingKey {
         case connectionID = "id"
         case providerID = "providerId"
-        case idx, name, logoPath, loading, cached, error, metrics, resetCredits, resetAction
+        case idx, name, logoPath, loading, cached, error, metrics, resetCredits, resetAction, monetaryCredits
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -138,9 +178,13 @@ struct Provider: Decodable, Identifiable {
         metrics = try values.decode([Metric].self, forKey: .metrics)
         resetCredits = try values.decodeIfPresent(ResetCredits.self, forKey: .resetCredits)
         resetAction = try values.decodeIfPresent(ResetAction.self, forKey: .resetAction)
+        monetaryCredits = try values.decodeIfPresent([MonetaryCredit].self, forKey: .monetaryCredits) ?? []
     }
     func selection(_ metric: Metric) -> Selection {
         Selection(provider: connectionID, idx: idx, metric: metric.key)
+    }
+    func monetaryCredit(_ metric: Metric) -> MonetaryCredit? {
+        monetaryCredits.first { metric.key == "credits:" + $0.id }
     }
 }
 
@@ -281,7 +325,57 @@ struct Snapshot: Decodable {
 }
 
 enum Page: Equatable {
-    case usage, settings, about, update, credits(String)
+    case usage, settings, update, credits(String), cloudCredits(String, String)
+}
+
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case general, appearance, alerts, providers, guide, about
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    var icon: String {
+        switch self {
+        case .general: return "settings"
+        case .appearance: return "paintbrush"
+        case .alerts: return "bell"
+        case .providers: return "server"
+        case .guide: return "book-open"
+        case .about: return "info"
+        }
+    }
+    var detail: String {
+        switch self {
+        case .general: return "Choose the account and limit shown in your menu bar."
+        case .appearance: return "Customize the menu bar icon and usage text."
+        case .alerts: return "Set quota notifications and account-specific rules."
+        case .providers: return "Enable providers and arrange their order in Usage."
+        case .guide: return "macOS actions and keyboard shortcuts."
+        case .about: return "Version and project links."
+        }
+    }
+}
+
+enum AboutLink: String, CaseIterable, Identifiable {
+    case guide, issues, documentation, github
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .guide: return "Guide"
+        case .issues: return "Report a bug"
+        case .documentation: return "Documentation"
+        case .github: return "GitHub"
+        }
+    }
+    func url(_ info: ProjectInfo) -> URL? {
+        let value: String
+        switch self {
+        case .guide: return nil
+        case .issues: value = info.issues
+        case .documentation: value = info.documentation
+        case .github: value = info.github
+        }
+        guard let url = URL(string: value), url.scheme == "https" else { return nil }
+        return url
+    }
 }
 
 struct Choice: Identifiable {
@@ -382,7 +476,8 @@ struct PanelIcons: Decodable {
               icons.controls.size.isFinite, icons.controls.size >= icons.size,
               icons.controls.radius.isFinite, icons.controls.radius >= 0,
               (0...1).contains(icons.controls.hoverOpacity), (0...1).contains(icons.controls.focusOpacity),
-              ["refresh-cw", "settings", "arrow-left", "arrow-right", "arrow-up", "arrow-down", "chevron-down", "copy", "check"]
+              ["refresh-cw", "settings", "paintbrush", "bell", "server", "book-open", "info",
+               "arrow-left", "arrow-right", "arrow-up", "arrow-down", "chevron-down", "copy", "check"]
                 .allSatisfy({ icons.paths[$0]?.isEmpty == false }) else {
             throw AppError.message("Bundled panel icon geometry or controls are invalid.")
         }
@@ -396,6 +491,10 @@ final class Model: ObservableObject {
         didSet { if page != oldValue { keyboardFocusVisible = false } }
     }
     @Published var draft = SettingsDraft()
+    @Published var settingsSection: SettingsSection = .general
+    @Published var notificationAdvancedExpanded = false
+    @Published var notificationEditingSelection: Selection?
+    @Published var notificationRuleFocusRequest = 0
     @Published var error = ""
     @Published var settingsError = ""
     @Published var settingsSaving = false
@@ -445,7 +544,10 @@ final class Model: ObservableObject {
             }
             return providers.flatMap { provider in
                 provider.metrics.map { metric in
-                    let suffix = metric.key.split(separator: ":", maxSplits: 1).dropFirst().first.map { " (\($0))" } ?? ""
+                    let parts = metric.key.split(separator: ":", maxSplits: 1)
+                    let periodName = ["rolling": "Rolling Usage", "daily": "Daily Usage", "weekly": "Weekly Usage", "monthly": "Monthly Usage"][String(parts.first ?? "")]
+                    let remainingName = periodName?.replacingOccurrences(of: "Usage", with: "Remaining")
+                    let suffix = parts.count == 2 && (periodName == metric.name || remainingName == metric.name) && String(parts[1]) != metric.name ? " (\(parts[1]))" : ""
                     return Choice(selection: provider.selection(metric), label: provider.name + " · " + metric.name + suffix,
                                   provider: provider.providerID, logoPath: provider.logoPath)
                 }
@@ -453,11 +555,79 @@ final class Model: ObservableObject {
         }
     }
 
-    var settingsValid: Bool {
-        !draft.enabled.isEmpty && draft.display.values.contains(true) && ["used", "remaining"].contains(draft.usageDisplay)
-            && choices.contains { $0.selection == draft.selected }
-            && Self.parseThresholds(draft.notificationThresholds) != nil
-            && draft.notificationRuleThresholds.values.allSatisfy { Self.parseThresholds($0) != nil }
+    var settingsValid: Bool { settingsValidation == nil }
+    var settingsValidation: (section: SettingsSection, message: String)? {
+        if draft.enabled.isEmpty { return (.providers, "Enable at least one provider.") }
+        if !choices.contains(where: { $0.selection == draft.selected }) {
+            return (.general, "Choose an active provider and limit.")
+        }
+        if !draft.display.values.contains(true) { return (.appearance, "Choose at least one bar text field.") }
+        if !["used", "remaining"].contains(draft.usageDisplay) { return (.appearance, "Choose a usage display mode.") }
+        if Self.parseThresholds(draft.notificationThresholds) == nil ||
+            !draft.notificationRuleThresholds.values.allSatisfy({ Self.parseThresholds($0) != nil }) {
+            return (.alerts, "Alert thresholds must be whole percentages from 1 to 100, separated by commas.")
+        }
+        return nil
+    }
+    var settingsSelectionLabel: String {
+        choices.first { $0.selection == draft.selected }?.label ?? "Choose a provider and limit in General."
+    }
+    var invalidAdvancedNotifications: Bool {
+        draft.notificationRuleThresholds.values.contains { Self.parseThresholds($0) == nil }
+    }
+    var invalidNotificationRules: [NotificationRule] {
+        draft.notifications.rules.filter { rule in
+            let key = rule.connectionID + "\u{001f}" + rule.metric
+            return Self.parseThresholds(draft.notificationRuleThresholds[key] ?? rule.thresholds.map(String.init).joined(separator: ", ")) == nil
+        }
+    }
+    var notificationSelection: Selection { notificationEditingSelection ?? draft.selected }
+    func notificationRuleLabel(_ rule: NotificationRule) -> String {
+        if let choice = choices.first(where: { $0.selection.provider == rule.connectionID && $0.selection.metric == rule.metric }) {
+            return choice.label
+        }
+        let provider = snapshot?.providers.first { $0.connectionID == rule.connectionID }
+        let metric = provider?.metrics.first { $0.key == rule.metric }
+        return (provider?.name ?? providerName(rule.connectionID)) + " · " + (metric?.name ?? rule.metric)
+    }
+    var notificationEditingLabel: String {
+        let selection = notificationSelection
+        if let choice = choices.first(where: { $0.selection == selection }) { return choice.label }
+        return notificationRuleLabel(NotificationRule(connectionID: selection.provider, metric: selection.metric, thresholds: [], enabled: true))
+    }
+    func reviewNotificationRule(_ rule: NotificationRule) {
+        guard page == .settings, !settingsSaving else { return }
+        notificationEditingSelection = choices.first { $0.selection.provider == rule.connectionID && $0.selection.metric == rule.metric }?.selection
+            ?? Selection(provider: rule.connectionID, metric: rule.metric)
+        notificationAdvancedExpanded = true
+        showSettingsSection(.alerts)
+        keyboardFocusVisible = true
+        notificationRuleFocusRequest += 1
+    }
+    var notificationLevels: [Int] {
+        guard Self.parseThresholds(draft.notificationThresholds) != nil else { return [] }
+        return draft.notificationThresholds.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+    }
+    func setNotificationLevel(_ index: Int, _ value: Int) {
+        var levels = notificationLevels
+        guard !settingsSaving, levels.indices.contains(index), (1...100).contains(value) else { return }
+        levels[index] = value
+        draft.notificationThresholds = levels.map(String.init).joined(separator: ", ")
+        draft.saved = false
+    }
+    func addNotificationLevel() {
+        guard !settingsSaving, Self.parseThresholds(draft.notificationThresholds) != nil else { return }
+        let levels = notificationLevels
+        guard let value = ([80, 95, 100] + Array(1...100)).first(where: { !levels.contains($0) }) else { return }
+        draft.notificationThresholds = (levels + [value]).map(String.init).joined(separator: ", ")
+        draft.saved = false
+    }
+    func removeNotificationLevel(_ index: Int) {
+        var levels = notificationLevels
+        guard !settingsSaving, levels.indices.contains(index) else { return }
+        levels.remove(at: index)
+        draft.notificationThresholds = levels.map(String.init).joined(separator: ", ")
+        draft.saved = false
     }
     static func parseThresholds(_ text: String) -> [Int]? {
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }
@@ -466,26 +636,26 @@ final class Model: ObservableObject {
         guard parsed.count == parts.count, parsed.allSatisfy({ (1...100).contains($0) }) else { return nil }
         return Array(Set(parsed)).sorted()
     }
-    var notificationRuleKey: String { draft.selected.provider + "\u{001f}" + draft.selected.metric }
+    var notificationRuleKey: String { notificationSelection.provider + "\u{001f}" + notificationSelection.metric }
     var notificationRule: NotificationRule? {
-        draft.notifications.rules.first { $0.connectionID == draft.selected.provider && $0.metric == draft.selected.metric }
+        draft.notifications.rules.first { $0.connectionID == notificationSelection.provider && $0.metric == notificationSelection.metric }
     }
     func setNotificationOverride(_ enabled: Bool) {
         if enabled && notificationRule == nil {
             let thresholds = Self.parseThresholds(draft.notificationThresholds) ?? [80, 95, 100]
-            draft.notifications.rules.append(NotificationRule(connectionID: draft.selected.provider,
-                                                               metric: draft.selected.metric,
+            draft.notifications.rules.append(NotificationRule(connectionID: notificationSelection.provider,
+                                                               metric: notificationSelection.metric,
                                                                thresholds: thresholds, enabled: true))
             draft.notificationRuleThresholds[notificationRuleKey] = thresholds.map(String.init).joined(separator: ", ")
         } else if !enabled {
-            draft.notifications.rules.removeAll { $0.connectionID == draft.selected.provider && $0.metric == draft.selected.metric }
+            draft.notifications.rules.removeAll { $0.connectionID == notificationSelection.provider && $0.metric == notificationSelection.metric }
             draft.notificationRuleThresholds.removeValue(forKey: notificationRuleKey)
         }
         draft.saved = false
     }
     func setNotificationRuleEnabled(_ enabled: Bool) {
         if let index = draft.notifications.rules.firstIndex(where: {
-            $0.connectionID == draft.selected.provider && $0.metric == draft.selected.metric
+            $0.connectionID == notificationSelection.provider && $0.metric == notificationSelection.metric
         }) { draft.notifications.rules[index].enabled = enabled }
         draft.saved = false
     }
@@ -508,17 +678,31 @@ final class Model: ObservableObject {
         guard case .credits(let id) = page else { return nil }
         return snapshot?.providers.first { $0.id == id }
     }
+    var cloudCreditProvider: Provider? {
+        guard case .cloudCredits(let id, _) = page else { return nil }
+        return snapshot?.providers.first { $0.id == id }
+    }
+    var cloudCredit: MonetaryCredit? {
+        guard case .cloudCredits(_, let id) = page else { return nil }
+        return cloudCreditProvider?.monetaryCredits.first { $0.id == id }
+    }
     var updateGuide: UpdateGuide { snapshot?.update ?? .manualMacOS }
     var panelHeight: CGFloat {
         switch page {
-        case .settings: return 680
-        case .about: return 640
+        case .settings:
+            switch settingsSection {
+            case .general: return 320
+            case .appearance: return 480
+            case .about: return 600
+            case .alerts, .providers, .guide: return 680
+            }
         case .update: return 600
         case .credits: return min(680, CGFloat(350 + (creditProvider?.resetCredits?.rows.count ?? 0) * 112))
+        case .cloudCredits: return 660
         case .usage:
             guard let providers = snapshot?.providers, !providers.isEmpty else { return 210 }
             let height = providers.reduce(85) { total, provider in
-                total + 62 + provider.metrics.count * 78 + (provider.cached ? 18 : 0)
+                total + 62 + provider.metrics.reduce(0) { $0 + (provider.monetaryCredit($1) == nil ? 78 : 36) } + (provider.cached ? 18 : 0)
                     + ((provider.resetCredits?.available ?? 0) > 0 ? 36 : 0)
             }
             return min(680, max(180, CGFloat(height)))
@@ -533,6 +717,7 @@ final class Model: ObservableObject {
         error = ""
         retryDelay = 1
         if case .credits(let id) = page, !next.providers.contains(where: { $0.id == id }) { page = .usage }
+        if case .cloudCredits = page, cloudCredit == nil { page = .usage }
         changed?()
     }
 
@@ -613,7 +798,17 @@ final class Model: ObservableObject {
             ($0.connectionID + "\u{001f}" + $0.metric, $0.thresholds.map(String.init).joined(separator: ", "))
         })
         settingsError = ""
+        settingsSection = .general
+        notificationAdvancedExpanded = false
+        notificationEditingSelection = nil
+        notificationRuleFocusRequest = 0
         page = .settings
+        changed?()
+    }
+    func showSettingsSection(_ section: SettingsSection) {
+        guard page == .settings, !settingsSaving else { return }
+        if section == .alerts && invalidAdvancedNotifications { notificationAdvancedExpanded = true }
+        settingsSection = section
         changed?()
     }
     func toggleProvider(_ provider: String) {
@@ -653,6 +848,10 @@ final class Model: ObservableObject {
             self.settingsSaving = false
             self.settingsError = error ?? ""
             self.draft.saved = error == nil
+            if let error = error, error.contains("quiet_hours") || error.contains("work_hours") {
+                self.notificationAdvancedExpanded = true
+                self.showSettingsSection(.alerts)
+            }
         }
     }
     func showCredits(_ provider: Provider) {
@@ -701,7 +900,26 @@ final class Model: ObservableObject {
         }
         changed?()
     }
-    func showAbout() { page = .about; changed?() }
+    func showCloudCredits(_ provider: Provider, _ credit: MonetaryCredit) {
+        guard snapshot?.providers.contains(where: {
+            $0.id == provider.id && $0.monetaryCredits.contains(where: { $0.id == credit.id })
+        }) == true else { return }
+        page = .cloudCredits(provider.id, credit.id)
+        changed?()
+    }
+    func showAbout() {
+        guard !settingsSaving else { return }
+        if page != .settings { showSettings() }
+        showSettingsSection(.about)
+    }
+    func openAboutLink(_ link: AboutLink) {
+        guard page == .settings, !settingsSaving else { return }
+        if link == .guide {
+            showSettingsSection(.guide)
+        } else if let info = snapshot?.about, let url = link.url(info) {
+            NSWorkspace.shared.open(url)
+        }
+    }
     func showUpdate() {
         updateError = ""
         updateMessage = ""
@@ -723,7 +941,7 @@ final class Model: ObservableObject {
     }
     func back() {
         guard !settingsSaving else { return }
-        page = page == .about ? .settings : .usage
+        page = .usage
         changed?()
     }
 
@@ -799,6 +1017,7 @@ final class Model: ObservableObject {
 private enum Palette {
     static let surface = Color(red: 17 / 255, green: 17 / 255, blue: 17 / 255)
     static let border = Color.white.opacity(0.10)
+    static let controlBorder = Color(red: 48 / 255, green: 48 / 255, blue: 48 / 255)
     static let bright = Color(red: 238 / 255, green: 238 / 255, blue: 238 / 255)
     static let dim = Color(red: 136 / 255, green: 136 / 255, blue: 136 / 255)
     static let update = Color(red: 137 / 255, green: 180 / 255, blue: 250 / 255)
@@ -817,6 +1036,163 @@ struct ProviderLogo: View {
     }
 }
 
+struct PanelSelectOption<Value: Hashable>: Identifiable {
+    let value: Value
+    let title: String
+    var provider: String? = nil
+    var logoPath = ""
+    var id: Value { value }
+}
+
+final class PanelSelectMenuActions: NSObject {
+    private let actions: [() -> Void]
+    init(actions: [() -> Void]) { self.actions = actions }
+    @objc func select(_ item: NSMenuItem) {
+        guard actions.indices.contains(item.tag) else { return }
+        actions[item.tag]()
+    }
+}
+
+final class PanelSelectMenuPresenter: ObservableObject {
+    weak var anchor: NSView?
+
+    static func makeMenu<Value: Hashable>(title: String, options: [PanelSelectOption<Value>],
+                                         selection: Binding<Value>, placeholder: String) -> (NSMenu, PanelSelectMenuActions) {
+        let menu = NSMenu(title: title)
+        menu.autoenablesItems = false
+        menu.font = NSFont(name: "GeistMono-Regular", size: 13) ?? .monospacedSystemFont(ofSize: 13, weight: .regular)
+        let target = PanelSelectMenuActions(actions: options.map { option in { selection.wrappedValue = option.value } })
+        for (index, option) in options.enumerated() {
+            let item = NSMenuItem(title: option.title, action: #selector(PanelSelectMenuActions.select(_:)), keyEquivalent: "")
+            item.tag = index
+            item.target = target
+            item.state = option.value == selection.wrappedValue ? .on : .off
+            if let provider = option.provider, let image = Assets.image(provider: provider, path: option.logoPath)?.copy() as? NSImage {
+                image.size = NSSize(width: 16, height: 16)
+                image.isTemplate = false
+                item.image = image
+            }
+            menu.addItem(item)
+        }
+        if options.isEmpty {
+            let item = NSMenuItem(title: placeholder, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+        return (menu, target)
+    }
+
+    func present<Value: Hashable>(title: String, options: [PanelSelectOption<Value>],
+                                 selection: Binding<Value>, placeholder: String) {
+        guard let anchor = anchor, anchor.window != nil else { return }
+        let (menu, target) = Self.makeMenu(title: title, options: options, selection: selection, placeholder: placeholder)
+        menu.minimumWidth = anchor.bounds.width
+        // popUp tracks synchronously; retain the action target until it ends.
+        withExtendedLifetime(target) {
+            _ = menu.popUp(positioning: nil, at: NSPoint(x: anchor.bounds.minX, y: anchor.bounds.maxY + 4), in: anchor)
+        }
+    }
+}
+
+final class PanelSelectAnchorView: NSView {
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+struct PanelSelectMenuAnchor: NSViewRepresentable {
+    let presenter: PanelSelectMenuPresenter
+    func makeNSView(context: Context) -> PanelSelectAnchorView {
+        let view = PanelSelectAnchorView()
+        view.setAccessibilityElement(false)
+        presenter.anchor = view
+        return view
+    }
+    func updateNSView(_ view: PanelSelectAnchorView, context: Context) { presenter.anchor = view }
+}
+
+struct PanelSelect<Value: Hashable>: View {
+    let title: String
+    let options: [PanelSelectOption<Value>]
+    @Binding var selection: Value
+    var placeholder = "Choose an option"
+    @StateObject private var presenter = PanelSelectMenuPresenter()
+    @State private var hovering = false
+    @State private var focusID = UUID().uuidString
+    @FocusState private var focused: Bool
+    @Environment(\.controlKeyboardFocusVisible) private var keyboardFocusVisible
+    @Environment(\.isEnabled) private var enabled
+
+    private var selected: PanelSelectOption<Value>? { options.first { $0.value == selection } }
+
+    private func openMenu() {
+        guard enabled else { return }
+        presenter.present(title: title, options: options, selection: $selection, placeholder: placeholder)
+    }
+
+    var body: some View {
+        Button(action: openMenu) {
+            HStack(spacing: 8) {
+                if let provider = selected?.provider {
+                    ProviderLogo(provider: provider, path: selected?.logoPath ?? "")
+                }
+                Text(selected?.title ?? placeholder).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 8)
+                PanelIcon(name: "chevron-down")
+            }
+            .font(Assets.font).foregroundColor(Palette.dim)
+            .padding(.horizontal, 8).frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).frame(maxWidth: .infinity).frame(height: 32)
+        .id(focusID).focused($focused)
+        .onMoveCommand { direction in
+            if focused && (direction == .up || direction == .down) { openMenu() }
+        }
+        .onCommand(#selector(NSResponder.insertNewline(_:))) { if focused { openMenu() } }
+        .background(PanelSelectMenuAnchor(presenter: presenter).allowsHitTesting(false))
+        .background(PanelFocusGeometry(id: focusID, focused: focused))
+        .background(RoundedRectangle(cornerRadius: 6)
+            .fill(hovering && enabled ? Palette.bright.opacity(0.045) : Palette.surface))
+        .overlay(RoundedRectangle(cornerRadius: 6)
+            .stroke(focused && keyboardFocusVisible ? Palette.bright.opacity(0.5) : Palette.controlBorder))
+        .opacity(enabled ? 1 : 0.4)
+        .onHover { hovering = $0 }
+        .accessibilityLabel(title).accessibilityValue(selected?.title ?? placeholder)
+    }
+}
+
+struct PanelFocusPosition: Equatable {
+    let id: String
+    let frame: CGRect
+}
+
+struct PanelFocusPreference: PreferenceKey {
+    static var defaultValue: [PanelFocusPosition] = []
+    static func reduce(value: inout [PanelFocusPosition], nextValue: () -> [PanelFocusPosition]) { value += nextValue() }
+}
+
+struct PanelFocusGeometry: View {
+    let id: String
+    let focused: Bool
+    @Environment(\.panelScrollFocusTracking) private var tracking
+    var body: some View {
+        if tracking {
+            GeometryReader { geometry in
+                Color.clear.preference(key: PanelFocusPreference.self,
+                                       value: focused ? [PanelFocusPosition(id: id, frame: geometry.frame(in: .named("panel-scroll")))] : [])
+            }
+        } else { Color.clear }
+    }
+}
+
+struct PanelFocusTarget: ViewModifier {
+    @State private var id = UUID().uuidString
+    @FocusState private var focused: Bool
+    func body(content: Content) -> some View {
+        content.id(id).focused($focused).background(PanelFocusGeometry(id: id, focused: focused))
+    }
+}
+
 struct HoverButton<Label: View>: View {
     var bordered = false
     var padding: CGFloat = 6
@@ -830,6 +1206,7 @@ struct HoverButton<Label: View>: View {
             label().frame(maxWidth: .infinity, alignment: .leading).padding(padding).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .modifier(PanelFocusTarget())
         .background(RoundedRectangle(cornerRadius: 6).fill(hovering && enabled ? hoverColor : .clear))
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(bordered ? Palette.border : .clear))
         .opacity(enabled ? 1 : 0.4)
@@ -876,7 +1253,15 @@ private struct ControlKeyboardFocusVisibleKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct PanelScrollFocusTrackingKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 private extension EnvironmentValues {
+    var panelScrollFocusTracking: Bool {
+        get { self[PanelScrollFocusTrackingKey.self] }
+        set { self[PanelScrollFocusTrackingKey.self] = newValue }
+    }
     var controlKeyboardFocusVisible: Bool {
         get { self[ControlKeyboardFocusVisibleKey.self] }
         set { self[ControlKeyboardFocusVisibleKey.self] = newValue }
@@ -889,6 +1274,7 @@ struct ControlButton: View {
     var spinning = false
     let action: () -> Void
     @State private var hovering = false
+    @State private var focusID = UUID().uuidString
     @FocusState private var focused: Bool
     @Environment(\.controlKeyboardFocusVisible) private var keyboardFocusVisible
     @Environment(\.isEnabled) private var enabled
@@ -901,7 +1287,9 @@ struct ControlButton: View {
                 .frame(width: controls.size, height: controls.size).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .id(focusID)
         .focused($focused)
+        .background(PanelFocusGeometry(id: focusID, focused: focused))
         .foregroundColor(focused && keyboardFocusVisible && enabled ? Palette.bright : Palette.control)
         .background(RoundedRectangle(cornerRadius: controls.radius)
             .fill(hovering && enabled ? Color.white.opacity(controls.hoverOpacity) : .clear))
@@ -969,32 +1357,43 @@ struct UsagePage: View {
                             .padding(.leading, 24).help(provider.error)
                     }
                     ForEach(provider.metrics) { metric in
-                        let active = selected && metric.key == model.snapshot?.selected.metric
-                        HoverButton(padding: 4, action: { model.select(provider.selection(metric)) }) {
-                            HStack(alignment: .top, spacing: 8) {
-                                Text(active ? "•" : " ").frame(width: 16)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                        Text(metric.name + (metric.isAmount ? ":" : ""))
-                                        if !metric.isAmount { Spacer(minLength: 0) }
-                                        Text(provider.loading && model.isPresented ? "…" : metric.displayValue)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                    if let percentage = metric.percentage {
-                                        HStack(spacing: 5) {
-                                            Text("[")
-                                            UsageBar(percentage: percentage, selected: active,
-                                                     loading: provider.loading && model.isPresented, index: groupIndex)
-                                            Text("]")
+                        if let credit = provider.monetaryCredit(metric) {
+                            HoverButton(action: { model.showCloudCredits(provider, credit) }) {
+                                HStack {
+                                    Text(credit.title + ": " + credit.value)
+                                    Spacer()
+                                    PanelIcon(name: "arrow-right")
+                                }
+                            }.padding(.leading, 18)
+                                .accessibilityLabel("\(provider.name), \(credit.title), \(credit.value), show details")
+                        } else {
+                            let active = selected && metric.key == model.snapshot?.selected.metric
+                            HoverButton(padding: 4, action: { model.select(provider.selection(metric)) }) {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text(active ? "•" : " ").frame(width: 16)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                            Text(metric.name + (metric.isAmount ? ":" : ""))
+                                            if !metric.isAmount { Spacer(minLength: 0) }
+                                            Text(provider.loading && model.isPresented ? "…" : metric.displayValue)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                        if let percentage = metric.percentage {
+                                            HStack(spacing: 5) {
+                                                Text("[")
+                                                UsageBar(percentage: percentage, selected: active,
+                                                         loading: provider.loading && model.isPresented, index: groupIndex)
+                                                Text("]")
+                                            }
+                                        }
+                                        if !metric.detail.isEmpty {
+                                            Text(metric.detail).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(Palette.dim.opacity(0.7))
+                                                .fixedSize(horizontal: false, vertical: true).padding(.leading, 10)
                                         }
                                     }
-                                    if !metric.detail.isEmpty {
-                                        Text(metric.detail).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(Palette.dim.opacity(0.7))
-                                            .fixedSize(horizontal: false, vertical: true).padding(.leading, 10)
-                                    }
-                                }
-                            }.foregroundColor(active ? Palette.bright : Palette.dim)
-                        }.accessibilityLabel("\(provider.name), \(metric.name), \(metric.displayValue)")
+                                }.foregroundColor(active ? Palette.bright : Palette.dim)
+                            }.accessibilityLabel("\(provider.name), \(metric.name), \(metric.displayValue)")
+                        }
                     }
                     if let credits = provider.resetCredits, credits.available > 0 {
                         HoverButton(action: { model.showCredits(provider) }) {
@@ -1011,162 +1410,340 @@ struct UsagePage: View {
     }
 }
 
+struct SettingsNavigationButton: View {
+    let section: SettingsSection
+    let selected: Bool
+    let action: () -> Void
+    let focusChanged: () -> Void
+    @State private var hovering = false
+    @FocusState private var focused: Bool
+    @Environment(\.controlKeyboardFocusVisible) private var keyboardFocusVisible
+    @Environment(\.isEnabled) private var enabled
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                PanelIcon(name: section.icon)
+                Text(section.title).fixedSize(horizontal: true, vertical: false)
+            }
+                .padding(.horizontal, 16).padding(.vertical, 9).contentShape(Rectangle())
+        }.buttonStyle(.plain).focused($focused)
+            .foregroundColor(selected || (focused && keyboardFocusVisible) ? Palette.bright : Palette.dim)
+            .background(RoundedRectangle(cornerRadius: 6)
+                .fill(selected ? Palette.bright.opacity(0.09) : hovering && enabled ? Palette.bright.opacity(0.045) : .clear))
+            .overlay(RoundedRectangle(cornerRadius: 6)
+                .stroke(focused && keyboardFocusVisible ? Palette.bright.opacity(0.5) : Palette.border))
+            .opacity(enabled ? 1 : 0.4)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Palette.surface))
+            .onHover { hovering = $0 }
+            .onChange(of: focused) { if $0 { focusChanged() } }
+            .accessibilityLabel(section.title)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .help(section.detail)
+    }
+}
+
+struct SettingsNavigation: View {
+    @ObservedObject var model: Model
+    private let tabGap: CGFloat = 12
+    static let height: CGFloat = 58
+    var body: some View {
+        ScrollViewReader { scroll in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: tabGap) {
+                    ForEach(SettingsSection.allCases) { section in
+                        SettingsNavigationButton(section: section, selected: model.settingsSection == section,
+                                                 action: { model.showSettingsSection(section) },
+                                                 focusChanged: { scroll.scrollTo(section.id, anchor: .center) })
+                            .id(section.id)
+                    }
+                }.padding(.horizontal, 16).padding(.vertical, tabGap)
+            }.frame(height: Self.height)
+                .onAppear { scroll.scrollTo(model.settingsSection.id, anchor: .center) }
+                .onChange(of: model.settingsSection) { scroll.scrollTo($0.id, anchor: .center) }
+        }.disabled(model.settingsSaving)
+    }
+}
+
+struct SettingsHeading: View {
+    let title: String
+    var detail: String? = nil
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).foregroundColor(Palette.bright)
+            if let detail = detail {
+                Text(detail).font(.custom("GeistMono-Regular", size: 11))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
 struct SettingsPage: View {
     @ObservedObject var model: Model
     private let fields = [("show_provider", "Provider name"), ("show_model", "Model / plan"),
                           ("show_metric", "Limit name"), ("show_pct", "Usage value")]
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 16) {
+            if model.settingsSection != .alerts && model.settingsSection != .general {
+                SettingsHeading(title: model.settingsSection.title, detail: model.settingsSection.detail)
+            }
+            switch model.settingsSection {
+            case .general:
+                general
+            case .appearance:
+                appearance
+            case .alerts:
+                NotificationSettingsView(model: model)
+            case .providers:
+                providers
+            case .guide:
+                GuidePage()
+            case .about:
+                if let info = model.snapshot?.about { AboutPage(info: info, model: model) }
+            }
+        }.disabled(model.settingsSaving)
+    }
+
+    private var general: some View {
+        VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Active provider & limit").foregroundColor(Palette.bright)
-                Picker("Active provider & limit", selection: Binding(get: { model.draft.selected }, set: {
+                SettingsHeading(title: "Active provider & limit", detail: SettingsSection.general.detail)
+                PanelSelect(title: "Active provider & limit", options: model.choices.map {
+                    PanelSelectOption(value: $0.selection, title: $0.label, provider: $0.provider, logoPath: $0.logoPath)
+                }, selection: Binding(get: { model.draft.selected }, set: {
                     model.draft.selected = $0; model.draft.saved = false
-                })) {
-                    if model.choices.isEmpty { Text("Choose a provider and limit").tag(Selection()) }
-                    ForEach(model.choices) { choice in
-                        Label { Text(choice.label) } icon: { ProviderLogo(provider: choice.provider, path: choice.logoPath) }
-                            .tag(choice.selection)
-                    }
-                }.labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
+                }), placeholder: "Choose a provider and limit")
             }
+        }
+    }
+
+    private var appearance: some View {
+        VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Usage display").foregroundColor(Palette.bright)
-                Picker("Usage display", selection: Binding(get: { model.draft.usageDisplay }, set: {
+                SettingsHeading(title: "Usage display")
+                PanelSelect(title: "Usage display", options: [PanelSelectOption(value: "used", title: "Used"),
+                                                             PanelSelectOption(value: "remaining", title: "Remaining")],
+                            selection: Binding(get: { model.draft.usageDisplay }, set: {
                     model.draft.usageDisplay = $0; model.draft.saved = false
-                })) {
-                    Text("Used").tag("used")
-                    Text("Remaining").tag("remaining")
-                }.labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
+                }))
             }
-            NotificationSettingsView(model: model)
             VStack(alignment: .leading, spacing: 8) {
-                Text("Bar display").foregroundColor(Palette.bright)
+                SettingsHeading(title: "Bar display")
                 ForEach(fields, id: \.0) { key, label in
                     Toggle(label, isOn: Binding(get: { model.draft.display[key] ?? false }, set: {
                         model.draft.display[key] = $0; model.draft.saved = false
-                    })).toggleStyle(.checkbox)
+                    })).toggleStyle(.checkbox).modifier(PanelFocusTarget())
                 }
-                Picker("Icon", selection: Binding(get: { model.draft.iconMode }, set: {
+                PanelSelect(title: "Icon", options: [PanelSelectOption(value: "off", title: "None"),
+                                                    PanelSelectOption(value: "bot", title: "Bot"),
+                                                    PanelSelectOption(value: "logo", title: "Provider logo")],
+                            selection: Binding(get: { model.draft.iconMode }, set: {
                     model.draft.iconMode = $0; model.draft.saved = false
-                })) {
-                    Text("None").tag("off")
-                    Text("Bot").tag("bot")
-                    Text("Provider logo").tag("logo")
-                }.pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
+                }))
             }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Providers").foregroundColor(Palette.bright)
-                Text("Enable providers and set their order in the usage page.").font(.custom("GeistMono-Regular", size: 11))
-                ForEach(model.draft.order, id: \.self) { provider in
-                    HStack(spacing: 4) {
-                        Toggle(isOn: Binding(get: { model.draft.enabled.contains(provider) }, set: { _ in model.toggleProvider(provider) })) {
-                            HStack(spacing: 6) {
-                                ProviderLogo(provider: model.logoProviderID(provider))
-                                Text(model.providerName(provider))
-                            }
-                        }.toggleStyle(.checkbox)
-                        Spacer(minLength: 0)
-                        ControlButton(icon: "arrow-up", help: "Move \(model.providerName(provider)) up",
-                                      action: { model.moveProvider(provider, -1) }).disabled(model.draft.order.first == provider)
-                        ControlButton(icon: "arrow-down", help: "Move \(model.providerName(provider)) down",
-                                      action: { model.moveProvider(provider, 1) }).disabled(model.draft.order.last == provider)
-                    }.padding(.vertical, 3)
+        }
+    }
+
+    private var providers: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(model.draft.order, id: \.self) { provider in
+                HStack(spacing: 4) {
+                    Toggle(isOn: Binding(get: { model.draft.enabled.contains(provider) }, set: { _ in model.toggleProvider(provider) })) {
+                        HStack(spacing: 6) {
+                            ProviderLogo(provider: model.logoProviderID(provider))
+                            Text(model.providerName(provider))
+                        }
+                    }.toggleStyle(.checkbox).modifier(PanelFocusTarget())
+                    Spacer(minLength: 0)
+                    ControlButton(icon: "arrow-up", help: "Move \(model.providerName(provider)) up",
+                                  action: { model.moveProvider(provider, -1) }).disabled(model.draft.order.first == provider)
+                    ControlButton(icon: "arrow-down", help: "Move \(model.providerName(provider)) down",
+                                  action: { model.moveProvider(provider, 1) }).disabled(model.draft.order.last == provider)
+                }.padding(.vertical, 3)
+            }
+        }
+    }
+}
+
+struct NotificationLevelsView: View {
+    @ObservedObject var model: Model
+    @FocusState private var addLevelFocused: Bool
+    @State private var addLevelFocusID = UUID().uuidString
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsHeading(title: "Alert levels", detail: "Notify when quota consumed reaches each percentage.")
+            ForEach(Array(model.notificationLevels.enumerated()), id: \.offset) { index, value in
+                HStack(spacing: 8) {
+                    Text("\(value)%").frame(width: 42, alignment: .trailing).foregroundColor(Palette.bright)
+                    Slider(value: Binding(get: {
+                        Double(model.notificationLevels.indices.contains(index) ? model.notificationLevels[index] : value)
+                    }, set: { model.setNotificationLevel(index, Int($0.rounded())) }), in: 1...100) {
+                        Text("Alert level \(index + 1)")
+                    }.labelsHidden().modifier(PanelFocusTarget()).accessibilityValue("\(value)%")
+                    Button("Remove") {
+                        model.removeNotificationLevel(index)
+                        DispatchQueue.main.async { addLevelFocused = true }
+                    }.buttonStyle(.borderless).modifier(PanelFocusTarget())
+                        .font(.custom("GeistMono-Regular", size: 11))
+                        .accessibilityLabel("Remove \(value)% alert level")
                 }
             }
-            if !model.settingsError.isEmpty || !model.settingsValid {
-                Text(model.settingsError.isEmpty ? "Choose a provider, limit and bar text field. Alert thresholds must be whole percentages from 1 to 100, separated by commas." : model.settingsError)
+            if Model.parseThresholds(model.draft.notificationThresholds) == nil {
+                Text("Correct the saved alert levels before using the sliders.")
                     .font(.custom("GeistMono-Regular", size: 11)).foregroundColor(.orange)
+                TextField("80, 95, 100", text: Binding(get: { model.draft.notificationThresholds }, set: {
+                    model.draft.notificationThresholds = $0; model.draft.saved = false
+                })).textFieldStyle(.roundedBorder).modifier(PanelFocusTarget()).accessibilityLabel("Correct alert levels")
             }
-            HoverButton(bordered: true, action: model.showAbout) {
-                HStack { Text("About AI Status"); Spacer(); PanelIcon(name: "arrow-right") }
-            }
-        }.disabled(model.settingsSaving)
+            Button("Add level", action: model.addNotificationLevel).buttonStyle(.borderless)
+                .id(addLevelFocusID).focused($addLevelFocused)
+                .background(PanelFocusGeometry(id: addLevelFocusID, focused: addLevelFocused))
+                .disabled(Model.parseThresholds(model.draft.notificationThresholds) == nil || Set(model.notificationLevels).count == 100)
+        }
+    }
+}
+
+struct SettingsAdvancedDisclosureStyle: DisclosureGroupStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HoverButton(bordered: true, action: { configuration.isExpanded.toggle() }) {
+                HStack(spacing: 8) {
+                    PanelIcon(name: "chevron-down").rotationEffect(.degrees(configuration.isExpanded ? 0 : -90))
+                    configuration.label
+                    Spacer()
+                }
+            }.accessibilityValue(configuration.isExpanded ? "Expanded" : "Collapsed")
+                .accessibilityHint("Press Space to show or hide advanced notification settings.")
+            if configuration.isExpanded { configuration.content }
+        }
     }
 }
 
 struct NotificationSettingsView: View {
     @ObservedObject var model: Model
+    @FocusState private var ruleThresholdsFocused: Bool
+    @State private var ruleFocusID = UUID().uuidString
+    @FocusState private var customizationFocused: Bool
+    @State private var customizationFocusID = UUID().uuidString
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Group {
-                Text("Quota notifications").foregroundColor(Palette.bright)
-                Toggle("Enable quota alerts", isOn: Binding(get: { model.draft.notifications.enabled }, set: {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                SettingsHeading(title: "Quota notifications")
+                Toggle(isOn: Binding(get: { model.draft.notifications.enabled }, set: {
                     model.draft.notifications.enabled = $0; model.draft.saved = false
-                })).toggleStyle(.checkbox)
-                HStack {
-                    Text("Thresholds (%)")
-                    TextField("80, 95, 100", text: Binding(get: { model.draft.notificationThresholds }, set: {
-                        model.draft.notificationThresholds = $0; model.draft.saved = false
-                    })).textFieldStyle(.roundedBorder)
+                })) {
+                    Text("Enable quota alerts").frame(maxWidth: .infinity, alignment: .leading)
+                }.toggleStyle(.switch).modifier(PanelFocusTarget())
+                Toggle(isOn: Binding(get: {
+                    model.draft.notifications.mutedUntil > Date().timeIntervalSince1970
+                }, set: { model.muteNotifications($0 ? 3600 : 0) })) {
+                    Text("Pause for 1 hour").frame(maxWidth: .infinity, alignment: .leading)
+                }.toggleStyle(.switch).modifier(PanelFocusTarget())
+                if model.draft.notifications.mutedUntil > Date().timeIntervalSince1970 {
+                    Text("Paused until " + Date(timeIntervalSince1970: model.draft.notifications.mutedUntil).formatted(date: .abbreviated, time: .shortened))
+                        .font(.custom("GeistMono-Regular", size: 11))
                 }
+                Toggle("Notify when quota recovers", isOn: Binding(get: { model.draft.notifications.recovery }, set: {
+                    model.draft.notifications.recovery = $0; model.draft.saved = false
+                })).toggleStyle(.checkbox).modifier(PanelFocusTarget())
             }
-            Toggle("Notify when quota recovers", isOn: Binding(get: { model.draft.notifications.recovery }, set: {
-                model.draft.notifications.recovery = $0; model.draft.saved = false
-            })).toggleStyle(.checkbox)
-            Toggle("Recovery only for accounts used in the last day", isOn: Binding(get: { model.draft.notifications.recentOnly }, set: {
-                model.draft.notifications.recentOnly = $0; model.draft.saved = false
-            })).toggleStyle(.checkbox)
-            HStack {
-                Text("Silence")
-                Button("1 hour") { model.muteNotifications(3600) }
-                Button("Until tomorrow") {
-                    if let next = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date())) {
-                        model.muteNotifications(next.timeIntervalSinceNow)
-                    }
-                }
-                Button("Resume") { model.muteNotifications(0) }
-            }.buttonStyle(.borderless)
-            if model.draft.notifications.mutedUntil > Date().timeIntervalSince1970 {
-                Text("Silenced until " + Date(timeIntervalSince1970: model.draft.notifications.mutedUntil).formatted(date: .abbreviated, time: .shortened))
-                    .font(.custom("GeistMono-Regular", size: 11))
-            }
-            Group {
-                HStack {
-                    Text("Quiet hours")
-                    TextField("HH:MM", text: Binding(get: { model.draft.notifications.quietHours.start }, set: {
-                        model.draft.notifications.quietHours.start = $0; model.draft.saved = false
-                    })).textFieldStyle(.roundedBorder)
-                    Text("to")
-                    TextField("HH:MM", text: Binding(get: { model.draft.notifications.quietHours.end }, set: {
-                        model.draft.notifications.quietHours.end = $0; model.draft.saved = false
-                    })).textFieldStyle(.roundedBorder)
-                }
-                HStack {
-                    Text("Work hours")
-                    TextField("HH:MM", text: Binding(get: { model.draft.notifications.workHours.start }, set: {
-                        model.draft.notifications.workHours.start = $0; model.draft.saved = false
-                    })).textFieldStyle(.roundedBorder)
-                    Text("to")
-                    TextField("HH:MM", text: Binding(get: { model.draft.notifications.workHours.end }, set: {
-                        model.draft.notifications.workHours.end = $0; model.draft.saved = false
-                    })).textFieldStyle(.roundedBorder)
-                }
-                Text("Times use your local timezone. Leave both fields empty to disable a schedule.")
-                    .font(.custom("GeistMono-Regular", size: 11))
-            }
-            Toggle("Customize alerts for the active account & limit", isOn: Binding(get: {
-                model.notificationRule != nil
-            }, set: model.setNotificationOverride)).toggleStyle(.checkbox)
-            if model.notificationRule != nil {
-                Toggle("Enable this limit's alerts", isOn: Binding(get: {
-                    model.notificationRule?.enabled ?? true
-                }, set: model.setNotificationRuleEnabled)).toggleStyle(.checkbox)
-                HStack {
-                    Text("Thresholds (%)")
-                    TextField("80, 95, 100", text: Binding(get: {
-                        model.draft.notificationRuleThresholds[model.notificationRuleKey] ?? ""
-                    }, set: {
-                        model.draft.notificationRuleThresholds[model.notificationRuleKey] = $0; model.draft.saved = false
-                    })).textFieldStyle(.roundedBorder)
-                }
-            }
+            NotificationLevelsView(model: model)
+            DisclosureGroup("Advanced", isExpanded: $model.notificationAdvancedExpanded) {
+                advanced.padding(.top, 12)
+            }.disclosureGroupStyle(SettingsAdvancedDisclosureStyle())
             if !model.notificationPermission.isEmpty {
                 Text(model.notificationPermission).font(.custom("GeistMono-Regular", size: 11))
                 Button("macOS notification settings") {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
                         NSWorkspace.shared.open(url)
                     }
-                }.buttonStyle(.borderless)
+                }.buttonStyle(.borderless).modifier(PanelFocusTarget())
+            }
+        }.onAppear {
+            if model.invalidAdvancedNotifications { model.notificationAdvancedExpanded = true }
+        }.onChange(of: model.draft.notificationRuleThresholds) { _ in
+            if model.invalidAdvancedNotifications { model.notificationAdvancedExpanded = true }
+        }.onChange(of: model.notificationRuleFocusRequest) { _ in
+            DispatchQueue.main.async { ruleThresholdsFocused = true }
+        }
+    }
+
+    private var advanced: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Toggle("Recovery only for accounts used in the last day", isOn: Binding(get: {
+                model.draft.notifications.recentOnly
+            }, set: {
+                model.draft.notifications.recentOnly = $0; model.draft.saved = false
+            })).toggleStyle(.checkbox).modifier(PanelFocusTarget())
+            schedules
+            VStack(alignment: .leading, spacing: 8) {
+                SettingsHeading(title: "Per-limit alerts", detail: model.notificationEditingLabel)
+                if model.notificationEditingSelection != nil {
+                    Button("Use menu bar limit") {
+                        model.notificationEditingSelection = nil
+                        DispatchQueue.main.async { customizationFocused = true }
+                    }
+                        .buttonStyle(.borderless).modifier(PanelFocusTarget())
+                }
+                Toggle("Customize alerts for this account & limit", isOn: Binding(get: {
+                    model.notificationRule != nil
+                }, set: model.setNotificationOverride)).toggleStyle(.checkbox)
+                    .id(customizationFocusID).focused($customizationFocused)
+                    .background(PanelFocusGeometry(id: customizationFocusID, focused: customizationFocused))
+                if model.notificationRule != nil {
+                    Toggle("Enable this limit's alerts", isOn: Binding(get: {
+                        model.notificationRule?.enabled ?? true
+                    }, set: model.setNotificationRuleEnabled)).toggleStyle(.checkbox).modifier(PanelFocusTarget())
+                    HStack {
+                        Text("Thresholds (%)")
+                        TextField("80, 95, 100", text: Binding(get: {
+                            model.draft.notificationRuleThresholds[model.notificationRuleKey] ?? ""
+                        }, set: {
+                            model.draft.notificationRuleThresholds[model.notificationRuleKey] = $0; model.draft.saved = false
+                        })).textFieldStyle(.roundedBorder).id(ruleFocusID).focused($ruleThresholdsFocused)
+                            .background(PanelFocusGeometry(id: ruleFocusID, focused: ruleThresholdsFocused))
+                            .accessibilityLabel("This limit's alert thresholds")
+                    }
+                }
+                if model.invalidAdvancedNotifications {
+                    Text("Correct the alert levels for these limits:")
+                        .font(.custom("GeistMono-Regular", size: 11)).foregroundColor(.orange)
+                    ForEach(Array(model.invalidNotificationRules.enumerated()), id: \.offset) { _, rule in
+                        HoverButton(bordered: true, action: { model.reviewNotificationRule(rule) }) {
+                            HStack {
+                                Text("Review " + model.notificationRuleLabel(rule)).fixedSize(horizontal: false, vertical: true)
+                                Spacer()
+                                PanelIcon(name: "arrow-right")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var schedules: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsHeading(title: "Schedules", detail: "Local timezone. Leave both fields empty to disable a schedule.")
+            HStack {
+                Text("Quiet hours")
+                TextField("HH:MM", text: Binding(get: { model.draft.notifications.quietHours.start }, set: {
+                    model.draft.notifications.quietHours.start = $0; model.draft.saved = false
+                })).textFieldStyle(.roundedBorder).modifier(PanelFocusTarget()).accessibilityLabel("Quiet hours start")
+                Text("to")
+                TextField("HH:MM", text: Binding(get: { model.draft.notifications.quietHours.end }, set: {
+                    model.draft.notifications.quietHours.end = $0; model.draft.saved = false
+                })).textFieldStyle(.roundedBorder).modifier(PanelFocusTarget()).accessibilityLabel("Quiet hours end")
+            }
+            HStack {
+                Text("Work hours")
+                TextField("HH:MM", text: Binding(get: { model.draft.notifications.workHours.start }, set: {
+                    model.draft.notifications.workHours.start = $0; model.draft.saved = false
+                })).textFieldStyle(.roundedBorder).modifier(PanelFocusTarget()).accessibilityLabel("Work hours start")
+                Text("to")
+                TextField("HH:MM", text: Binding(get: { model.draft.notifications.workHours.end }, set: {
+                    model.draft.notifications.workHours.end = $0; model.draft.saved = false
+                })).textFieldStyle(.roundedBorder).modifier(PanelFocusTarget()).accessibilityLabel("Work hours end")
             }
         }
     }
@@ -1295,6 +1872,79 @@ struct ResetCreditsPage: View {
     }
 }
 
+struct CloudCreditsPage: View {
+    let provider: Provider
+    let credit: MonetaryCredit
+
+    private struct Field: Identifiable {
+        let label: String
+        let value: String
+        var hint = ""
+        var id: String { label }
+    }
+    private var fields: [Field] {
+        var rows = [Field(label: "Status", value: credit.status.capitalized),
+                    Field(label: "Allowance", value: credit.limitValue),
+                    Field(label: "Used", value: credit.usedValue),
+                    Field(label: "Expires", value: credit.expires, hint: credit.remaining),
+                    Field(label: "Last observed", value: credit.observed)]
+        if credit.status == "expired" || credit.status == "unavailable" {
+            rows.append(Field(label: "Last observed balance", value: credit.observedValue))
+        }
+        return rows
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 8) {
+                ProviderLogo(provider: provider.providerID, path: provider.logoPath)
+                Text(credit.heading ?? (provider.name + " · " + credit.title)).foregroundColor(Palette.bright)
+            }
+            if provider.cached { Text("Cached data").font(.custom("GeistMono-Regular", size: 11)).help(provider.error) }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(credit.status == "available" || credit.status == "exhausted" ? "Available balance" : "Current balance")
+                    .font(.custom("GeistMono-Regular", size: 11))
+                Text(credit.value).font(.custom("GeistMono-Regular", size: 24)).fontWeight(.medium)
+                    .foregroundColor(Palette.bright)
+            }
+            Text("Credits for Claude cloud sessions.")
+            if credit.status == "expired" {
+                Text("These credits have expired. The last observed balance is shown for reference.")
+                    .font(.custom("GeistMono-Regular", size: 11))
+            } else if !credit.statusNote.isEmpty {
+                Text(credit.statusNote + ". Amounts below reflect the last observation.")
+                    .font(.custom("GeistMono-Regular", size: 11))
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(fields.enumerated()), id: \.element.id) { index, field in
+                    if index > 0 {
+                        Rectangle().fill(Palette.border).frame(height: 1).accessibilityHidden(true)
+                    }
+                    HStack(alignment: .top, spacing: 0) {
+                        Text(field.label).frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(field.value).foregroundColor(Palette.bright)
+                            if !field.hint.isEmpty {
+                                Text(field.hint).font(.custom("GeistMono-Regular", size: 11))
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                    }
+                }
+            }.background {
+                GeometryReader { geometry in
+                    Palette.bright.opacity(0.04).frame(width: geometry.size.width / 2)
+                        .overlay(alignment: .trailing) {
+                            Rectangle().fill(Palette.border).frame(width: 1).accessibilityHidden(true)
+                        }
+                }
+            }.clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.border, lineWidth: 1))
+            if !credit.timezone.isEmpty {
+                Text("Local time · " + credit.timezone).font(.custom("GeistMono-Regular", size: 11))
+            }
+        }
+    }
+}
+
 struct UpdatePage: View {
     @ObservedObject var model: Model
     @State private var copiedCommand = false
@@ -1368,55 +2018,159 @@ struct UpdatePage: View {
     }
 }
 
+struct GuideFlowLayout: Layout {
+    var spacing: CGFloat = 4
+    private func arrangement(_ width: CGFloat, _ subviews: Subviews) -> (points: [CGPoint], size: CGSize) {
+        var points: [CGPoint] = [], x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0 && x + size.width > width { x = 0; y += rowHeight + spacing; rowHeight = 0 }
+            points.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        return (points, CGSize(width: width, height: y + rowHeight))
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrangement(proposal.width ?? 150, subviews).size
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let points = arrangement(bounds.width, subviews).points
+        for (index, subview) in subviews.enumerated() {
+            subview.place(at: CGPoint(x: bounds.minX + points[index].x, y: bounds.minY + points[index].y),
+                          anchor: .topLeading, proposal: .unspecified)
+        }
+    }
+}
+
+struct GuideActionText: View {
+    let action: String
+    var body: some View {
+        GuideFlowLayout {
+            ForEach(Array(GuidePage.tokens(action).enumerated()), id: \.offset) { _, token in
+                if token.key {
+                    Text(token.text).fixedSize().padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 3).fill(Palette.bright.opacity(0.04)))
+                        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Palette.border))
+                        .accessibilityLabel("Key " + token.text)
+                } else { Text(token.text).fixedSize().padding(.vertical, 2) }
+            }
+        }
+    }
+}
+
+struct GuidePage: View {
+    struct Token {
+        let text: String
+        let key: Bool
+    }
+    static func tokens(_ text: String) -> [Token] {
+        let expression = try! NSRegularExpression(pattern: #"(?<![A-Za-z0-9])(?:Shift\+Tab|Tab|Esc|Space|C|R)(?![A-Za-z0-9])"#)
+        let value = text as NSString
+        var result: [Token] = [], end = 0
+        for match in expression.matches(in: text, range: NSRange(location: 0, length: value.length)) {
+            let plain = value.substring(with: NSRange(location: end, length: match.range.location - end))
+            result += plain.split(whereSeparator: \.isWhitespace).map { Token(text: String($0), key: false) }
+            result.append(Token(text: value.substring(with: match.range), key: true))
+            end = NSMaxRange(match.range)
+        }
+        result += value.substring(from: end).split(whereSeparator: \.isWhitespace).map { Token(text: String($0), key: false) }
+        return result
+    }
+    struct Row: Identifiable {
+        let feature: String
+        let action: String
+        var id: String { feature }
+    }
+    static let rows = [
+        Row(feature: "Open Usage", action: "Click the menu bar icon."),
+        Row(feature: "Settings", action: "Gear icon or C on Usage; or right-click the menu bar icon → Settings."),
+        Row(feature: "Refresh", action: "Refresh icon or R on Usage."),
+        Row(feature: "Choose a limit", action: "Click a limit on Usage."),
+        Row(feature: "Scroll content", action: "Trackpad or mouse wheel."),
+        Row(feature: "Switch tabs", action: "Click a Settings tab. Scroll the strip to reveal more."),
+        Row(feature: "Move focus", action: "Tab / Shift+Tab."),
+        Row(feature: "Activate a button", action: "Space when focused."),
+        Row(feature: "Adjust alert levels", action: "Drag a slider in Alerts."),
+        Row(feature: "Reorder providers", action: "Providers → up/down buttons."),
+        Row(feature: "Save settings", action: "Save applies all tabs and keeps Settings open."),
+        Row(feature: "Cancel settings", action: "Cancel, Back or Esc returns to Usage without saving."),
+        Row(feature: "Reset credits", action: "Click Reset credits when available."),
+        Row(feature: "Cloud credits", action: "Click a Cloud credits row."),
+        Row(feature: "Update AI Status", action: "Click Update available to open the update guide."),
+        Row(feature: "Close the panel", action: "Esc on Usage, or click the menu bar icon again.")
+    ]
+
+    private func row(_ feature: String, _ action: String, heading: Bool = false) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            Text(feature).frame(maxWidth: .infinity, alignment: .leading).padding(12)
+            GuideActionText(action: action).foregroundColor(Palette.bright)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+        }.font(.custom("GeistMono-Regular", size: 11))
+            .fontWeight(heading ? .medium : .regular)
+            .foregroundColor(heading ? Palette.bright : Palette.dim)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            row("Feature", "Action / shortcut", heading: true)
+            ForEach(Self.rows) { item in
+                Rectangle().fill(Palette.border).frame(height: 1).accessibilityHidden(true)
+                row(item.feature, item.action)
+            }
+        }.background {
+            GeometryReader { geometry in
+                Palette.bright.opacity(0.04).frame(width: geometry.size.width / 2)
+                    .overlay(alignment: .trailing) {
+                        Rectangle().fill(Palette.border).frame(width: 1).accessibilityHidden(true)
+                    }
+            }
+        }.clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.border, lineWidth: 1))
+    }
+}
+
 struct AboutPage: View {
     let info: ProjectInfo
+    @ObservedObject var model: Model
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 16) {
             if let image = Assets.image() { Image(nsImage: image).resizable().scaledToFit().frame(width: 40, height: 40) }
             Text(info.name).font(.custom("GeistMono-Medium", size: 16)).foregroundColor(Palette.bright)
             Text(info.description)
             Text("Version: v\(info.version)\nCommit: \(info.commit)\nLicense: \(info.license)\nAuthor: \(info.author)")
                 .font(.custom("GeistMono-Regular", size: 11))
             VStack(spacing: 6) {
-                ForEach([(name: "GitHub", url: info.github), (name: "Documentation", url: info.documentation),
-                         (name: "Report a bug", url: info.issues)], id: \.name) { link in
-                    HoverButton(bordered: true, action: { if let url = URL(string: link.url), url.scheme == "https" { NSWorkspace.shared.open(url) } }) {
-                        HStack { Text(link.name); Spacer(); PanelIcon(name: "arrow-right") }
+                ForEach(AboutLink.allCases) { link in
+                    HoverButton(bordered: true, action: { model.openAboutLink(link) }) {
+                        HStack { Text(link.title); Spacer(); PanelIcon(name: "arrow-right") }
                     }
                 }
             }
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Quick guide").foregroundColor(Palette.bright)
-                Text("Menu bar: click to show usage; right-click for settings and other actions.")
-                Text("Usage: click a limit to show it in the bar. Refresh checks now; Reset credits shows the available resets. Update available opens the update guide.")
-                Text("Settings: pick a limit, text and icon. Enable providers and reorder them with the arrows. Save applies changes and keeps settings open.")
-                Text("Keyboard: R refreshes, C opens settings, Esc goes back. Tab moves between controls.")
-            }.font(.custom("GeistMono-Regular", size: 11))
         }
     }
 }
 
-struct PanelView: View {
-    @ObservedObject var model: Model
+struct PanelScrollMask: View {
+    let fading: Bool
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                if model.page != .usage {
-                    ControlButton(icon: "arrow-left", help: model.page == .about ? "Back to settings (Esc)" : "Back to usage (Esc)", action: model.back)
-                        .disabled(model.settingsSaving)
-                        .padding(.trailing, 4)
-                }
-                Text(model.page == .about ? "About" : model.page == .settings ? "Settings" : model.page == .update ? "Update AI Status" : "AI Status").foregroundColor(Palette.bright)
-                Spacer(minLength: 0)
-                Text(model.snapshot.map { "v" + $0.version.current } ?? "").font(.custom("GeistMono-Regular", size: 11))
-                if model.page != .settings && model.page != .about && model.page != .update {
-                    ControlButton(icon: "refresh-cw", help: "Refresh usage (R)",
-                                  spinning: model.snapshot?.loading == true && model.isPresented, action: model.refresh)
-                        .disabled(model.snapshot?.loading == true)
-                    if model.page == .usage { ControlButton(icon: "settings", help: "Configure (C)", action: model.showSettings) }
-                }
-            }.padding(.horizontal, 16).frame(height: 49)
-            Divider().overlay(Palette.border)
+        if fading {
+            VStack(spacing: 0) {
+                LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .white, location: 0.92),
+                                       .init(color: .white, location: 1)],
+                               startPoint: .top, endPoint: .bottom).frame(height: SettingsNavigation.height)
+                Rectangle().fill(Color.white)
+            }
+        } else { Rectangle().fill(Color.white) }
+    }
+}
+
+struct PanelScrollContent: View {
+    @ObservedObject var model: Model
+    @State private var focusedID = ""
+    var body: some View {
+        GeometryReader { viewport in
             ScrollViewReader { scroll in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
@@ -1433,25 +2187,89 @@ struct PanelView: View {
                         switch model.page {
                         case .usage: UsagePage(model: model)
                         case .settings: SettingsPage(model: model)
-                        case .about: if let info = model.snapshot?.about { AboutPage(info: info) }
                         case .update: UpdatePage(model: model)
                         case .credits: if let provider = model.creditProvider { ResetCreditsPage(model: model, provider: provider) }
+                        case .cloudCredits:
+                            if let provider = model.cloudCreditProvider, let credit = model.cloudCredit {
+                                CloudCreditsPage(provider: provider, credit: credit)
+                            }
                         }
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 18)
+                    }.environment(\.panelScrollFocusTracking, true)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.bottom, 18)
+                        .padding(.top, model.page == .settings ? SettingsNavigation.height + 18 : 18)
                         .id("page-top")
-                }.onChange(of: model.page) { page in
-                    if page == .update { scroll.scrollTo("page-top", anchor: .top) }
+                }.mask(PanelScrollMask(fading: model.page == .settings))
+                    .onPreferenceChange(PanelFocusPreference.self) { positions in
+                        guard let focus = positions.first else { focusedID = ""; return }
+                        guard focus.id != focusedID, focus.frame.height > 0 else { return }
+                        focusedID = focus.id
+                        guard model.keyboardFocusVisible else { return }
+                        let top = model.page == .settings ? SettingsNavigation.height + 8 : 8
+                        if focus.frame.minY < top {
+                            let alignment = min(1, top / max(1, viewport.size.height - focus.frame.height))
+                            scroll.scrollTo(focus.id, anchor: UnitPoint(x: 0.5, y: alignment))
+                        } else if focus.frame.maxY > viewport.size.height - 8 {
+                            scroll.scrollTo(focus.id, anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: model.page) { page in
+                        focusedID = ""
+                        if page == .settings || page == .update || model.cloudCredit != nil { scroll.scrollTo("page-top", anchor: .top) }
+                    }.onChange(of: model.settingsSection) { _ in
+                        focusedID = ""
+                        scroll.scrollTo("page-top", anchor: .top)
+                    }
+            }
+        }.coordinateSpace(name: "panel-scroll")
+    }
+}
+
+struct PanelView: View {
+    @ObservedObject var model: Model
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                if model.page != .usage {
+                    ControlButton(icon: "arrow-left", help: "Back to usage (Esc)", action: model.back)
+                        .disabled(model.settingsSaving)
+                        .padding(.trailing, 4)
                 }
+                Text(model.page == .settings ? "Settings" : model.page == .update ? "Update AI Status" : "AI Status").foregroundColor(Palette.bright)
+                Spacer(minLength: 0)
+                Text(model.snapshot.map { "v" + $0.version.current } ?? "").font(.custom("GeistMono-Regular", size: 11))
+                if model.page != .settings && model.page != .update {
+                    ControlButton(icon: "refresh-cw", help: "Refresh usage (R)",
+                                  spinning: model.snapshot?.loading == true && model.isPresented, action: model.refresh)
+                        .disabled(model.snapshot?.loading == true)
+                    if model.page == .usage { ControlButton(icon: "settings", help: "Configure (C)", action: model.showSettings) }
+                }
+            }.padding(.horizontal, 16).frame(height: 49)
+            Rectangle().fill(Palette.border).frame(height: 1).accessibilityHidden(true)
+            ZStack(alignment: .top) {
+                PanelScrollContent(model: model).zIndex(0)
+                if model.page == .settings { SettingsNavigation(model: model).zIndex(1) }
             }
             if model.page == .settings {
-                HStack(spacing: 8) {
-                    Spacer()
-                    if model.draft.saved { Text("Saved").font(.custom("GeistMono-Regular", size: 11)) }
-                    Button("Cancel", action: model.back).buttonStyle(.plain).padding(6).disabled(model.settingsSaving)
-                    Button(model.settingsSaving ? "Saving…" : "Save", action: model.saveSettings)
-                        .buttonStyle(.plain).padding(6).overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.border))
-                        .disabled(!model.settingsValid || model.settingsSaving)
-                }.padding(.horizontal, 16).padding(.bottom, 12)
+                Rectangle().fill(Palette.border).frame(height: 1).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 8) {
+                    if !model.settingsError.isEmpty {
+                        Text(model.settingsError).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(.orange).padding(.top, 12)
+                    } else if let validation = model.settingsValidation {
+                        Text(validation.message).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(.orange).padding(.top, 12)
+                        if model.settingsSection != validation.section {
+                            Button("Review " + validation.section.title) { model.showSettingsSection(validation.section) }
+                                .buttonStyle(.borderless).disabled(model.settingsSaving)
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        Spacer()
+                        if model.draft.saved { Text("Saved").font(.custom("GeistMono-Regular", size: 11)) }
+                        Button("Cancel", action: model.back).buttonStyle(.plain).padding(6).disabled(model.settingsSaving)
+                        Button(model.settingsSaving ? "Saving…" : "Save", action: model.saveSettings)
+                            .buttonStyle(.plain).padding(6).overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.border))
+                            .disabled(!model.settingsValid || model.settingsSaving)
+                    }.frame(height: 49)
+                }.padding(.horizontal, 16)
             }
         }
         .frame(width: 380).frame(maxHeight: .infinity)
@@ -1461,11 +2279,33 @@ struct PanelView: View {
     }
 }
 
+final class PanelMenuTracking {
+    private let center: NotificationCenter
+    private var menus: Set<ObjectIdentifier> = []
+    private var observers: [NSObjectProtocol] = []
+    var isTracking: Bool { !menus.isEmpty }
+
+    init(center: NotificationCenter = .default) {
+        self.center = center
+        observers = [
+            center.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { [weak self] notification in
+                if let menu = notification.object as? NSMenu { self?.menus.insert(ObjectIdentifier(menu)) }
+            },
+            center.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: nil) { [weak self] notification in
+                if let menu = notification.object as? NSMenu { self?.menus.remove(ObjectIdentifier(menu)) }
+            }
+        ]
+    }
+
+    deinit { for observer in observers { center.removeObserver(observer) } }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNotificationCenterDelegate {
     private let model: Model
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var inputMonitor: Any?
+    private let menuTracking = PanelMenuTracking()
     private var signalSources: [DispatchSourceSignal] = []
     private var spinnerTimer: Timer?
     private var spinnerFrame = 0
@@ -1686,7 +2526,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     @objc private func openUsage(_ sender: Any?) { model.page = .usage; show() }
     @objc private func refresh(_ sender: Any?) { model.refresh() }
     @objc private func configure(_ sender: Any?) { model.showSettings(); show() }
-    @objc private func about(_ sender: Any?) { model.showSettings(); model.showAbout(); show() }
+    @objc private func about(_ sender: Any?) { model.showAbout(); show() }
     @objc private func receiveCommand(_ notification: Notification) {
         switch notification.object as? String {
         case "settings": configure(nil)
@@ -1695,13 +2535,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
     }
     private func handleKey(_ event: NSEvent) -> NSEvent? {
-        guard popover.isShown else { return event }
+        // Let an open native select consume Escape and its navigation keys
+        // before the panel's Back/close shortcuts see the same event.
+        guard popover.isShown, !menuTracking.isTracking else { return event }
         if event.keyCode == 53 {
             if model.page == .usage { popover.performClose(nil) } else { model.back() }
             return nil
         }
         guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return event }
-        if model.page != .settings && model.page != .about && model.page != .update {
+        if model.page != .settings && model.page != .update {
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "r": model.refresh(); return nil
             case "c": configure(nil); return nil
@@ -1803,10 +2645,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
         _ = try PanelIcons.load()
         try smokeFocusInput()
+        try smokeMenuTracking()
+        try smokeSettingsSelects(sample: sample)
         let model = Model()
         model.accept(Data(sample.utf8))
         guard let snapshot = model.snapshot, snapshot.providers.count == 2,
-              model.selectedProvider?.providerID == "codex" else { throw AppError.message("Legacy snapshot decoding failed.") }
+              model.selectedProvider?.providerID == "codex", snapshot.providers.allSatisfy({ $0.monetaryCredits.isEmpty }) else {
+            throw AppError.message("Legacy snapshot decoding failed.")
+        }
         guard !model.updateGuide.canUpdate, !model.updateGuide.command.isEmpty else {
             throw AppError.message("Legacy update guide fallback failed.")
         }
@@ -1831,17 +2677,188 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         let malformed = Data(sample.replacingOccurrences(of: "\"schemaVersion\":1", with: "\"schemaVersion\":2").utf8)
         model.accept(malformed)
         guard model.snapshot?.schemaVersion == 1 else { throw AppError.message("Invalid snapshot replaced usable data.") }
+        try smokeSettingsSections(sample: sample, directory: previewDirectory)
         try smokeAccounts(sample: sample, directory: previewDirectory)
+        try smokeCloudCredits(sample: sample, directory: previewDirectory)
         try smokeNotifications(sample: sample)
         try smokeUpdate(sample: sample, directory: previewDirectory)
         model.isPresented = true
         let pages: [(String, Page)] = [("usage", .usage), ("settings", .settings),
-                                      ("reset-credits", .credits(snapshot.providers[0].id)), ("about", .about)]
+                                      ("reset-credits", .credits(snapshot.providers[0].id))]
         for (name, page) in pages {
             model.page = page
             try renderSmokePage(model, name: name, directory: previewDirectory)
         }
-        print("AI Status macOS smoke OK: usage, settings, quota notifications, reset credits, update guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+        model.showAbout()
+        try renderSmokePage(model, name: "about", directory: previewDirectory)
+        print("AI Status macOS smoke OK: usage, settings subnavigation and shared draft, quota notifications, reset credits, Cloud credits, update guide, settings guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+    }
+
+    private static func smokeSettingsSections(sample: String, directory: URL?) throws {
+        let model = Model()
+        model.accept(Data(sample.utf8))
+        model.showSettings()
+        guard model.page == .settings, model.settingsSection == .general,
+              SettingsSection.allCases.map(\.rawValue) == ["general", "appearance", "alerts", "providers", "guide", "about"] else {
+            throw AppError.message("Settings did not open in General with the expected sections.")
+        }
+        guard let info = model.snapshot?.about,
+              AboutLink.allCases.map(\.title) == ["Guide", "Report a bug", "Documentation", "GitHub"],
+              AboutLink.guide.url(info) == nil,
+              AboutLink.issues.url(info) == URL(string: info.issues),
+              AboutLink.documentation.url(info) == URL(string: info.documentation),
+              AboutLink.github.url(info) == URL(string: info.github) else {
+            throw AppError.message("About link order or internal/external destinations are invalid.")
+        }
+        let guideRows = GuidePage.rows.map { ["feature": $0.feature, "action": $0.action] }
+        let guideData = try JSONSerialization.data(withJSONObject: guideRows)
+        guard !guideRows.isEmpty, Set(GuidePage.rows.map(\.id)).count == guideRows.count,
+              GuidePage.rows.allSatisfy({ !$0.feature.isEmpty && !$0.action.isEmpty }),
+              let decodedRows = try JSONSerialization.jsonObject(with: guideData) as? [[String: String]],
+              decodedRows == guideRows else {
+            throw AppError.message("Guide table contains missing, duplicate or invalid text.")
+        }
+        guard GuidePage.tokens("C / R / Esc / Tab / Shift+Tab / Space").filter(\.key).map(\.text)
+                == ["C", "R", "Esc", "Tab", "Shift+Tab", "Space"],
+              !GuidePage.tokens("Click the menu bar icon.").contains(where: { $0.key }) else {
+            throw AppError.message("Guide keyboard tokens or mouse instructions are invalid.")
+        }
+        model.draft.selected = model.choices[2].selection
+        model.draft.display["show_provider"] = false
+        model.draft.iconMode = "bot"
+        model.draft.usageDisplay = "remaining"
+        model.toggleProvider("antigravity")
+        model.moveProvider("codex", 1)
+        model.draft.notifications.recovery = false
+        model.draft.notifications.quietHours = NotificationHours(start: "22:00", end: "08:00")
+        model.draft.notifications.workHours = NotificationHours(start: "09:00", end: "18:00")
+        model.draft.notificationThresholds = "85, 95"
+        model.setNotificationOverride(true)
+        model.setNotificationRuleEnabled(false)
+        model.draft.notificationRuleThresholds[model.notificationRuleKey] = "90, 100"
+        model.notificationAdvancedExpanded = true
+        model.settingsError = "Retain pending save feedback."
+        let pending = model.draft
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let pendingNotifications = try encoder.encode(pending.notifications)
+        for section in SettingsSection.allCases {
+            model.showSettingsSection(section)
+            model.accept(Data(sample.utf8))
+            guard model.settingsSection == section, model.page == .settings,
+                  model.draft.order == pending.order, model.draft.enabled == pending.enabled,
+                  model.draft.display == pending.display, model.draft.iconMode == pending.iconMode,
+                  model.draft.usageDisplay == pending.usageDisplay, model.draft.selected == pending.selected,
+                  model.draft.notificationThresholds == pending.notificationThresholds,
+                  model.draft.notificationRuleThresholds == pending.notificationRuleThresholds,
+                  model.draft.saved == pending.saved,
+                  model.notificationAdvancedExpanded,
+                  try encoder.encode(model.draft.notifications) == pendingNotifications,
+                  model.settingsError == "Retain pending save feedback.", model.settingsValid,
+                  model.settingsSelectionLabel.contains("Claude"), model.settingsSelectionLabel.contains("Weekly") else {
+                throw AppError.message("Settings navigation or a refresh replaced pending edits or alert account context.")
+            }
+        }
+        model.showSettingsSection(.general)
+        model.showAbout()
+        guard model.page == .settings, model.settingsSection == .about,
+              model.draft.selected == pending.selected, model.draft.usageDisplay == pending.usageDisplay,
+              try encoder.encode(model.draft.notifications) == pendingNotifications else {
+            throw AppError.message("About did not open as a tab in the current settings session.")
+        }
+        model.openAboutLink(.guide)
+        guard model.page == .settings, model.settingsSection == .guide,
+              model.draft.selected == pending.selected, model.draft.usageDisplay == pending.usageDisplay,
+              try encoder.encode(model.draft.notifications) == pendingNotifications else {
+            throw AppError.message("The internal Guide link replaced pending settings edits.")
+        }
+        model.showSettingsSection(.general)
+        guard model.draft.selected == pending.selected, model.draft.usageDisplay == pending.usageDisplay else {
+            throw AppError.message("Leaving the About tab replaced pending settings edits.")
+        }
+        model.showSettingsSection(.alerts)
+        model.settingsSaving = true
+        model.showSettingsSection(.providers)
+        model.showAbout()
+        model.openAboutLink(.guide)
+        model.back()
+        guard model.page == .settings, model.settingsSection == .alerts else {
+            throw AppError.message("Settings navigation was allowed during a save.")
+        }
+        model.settingsSaving = false
+        model.draft.notificationThresholds = "80, invalid"
+        model.showSettingsSection(.general)
+        guard !model.settingsValid, model.settingsValidation?.section == .alerts else {
+            throw AppError.message("A hidden alert validation error was lost.")
+        }
+        model.draft.notificationThresholds = pending.notificationThresholds
+        model.draft.display = model.draft.display.mapValues { _ in false }
+        guard !model.settingsValid, model.settingsValidation?.section == .appearance else {
+            throw AppError.message("A hidden appearance validation error was lost.")
+        }
+        model.draft.display = pending.display
+        model.draft.enabled = []
+        guard !model.settingsValid, model.settingsValidation?.section == .providers else {
+            throw AppError.message("A hidden provider validation error was lost.")
+        }
+        model.showAbout()
+        model.back()
+        guard model.page == .usage else { throw AppError.message("Back from the About tab did not leave Settings.") }
+        model.showAbout()
+        guard model.page == .settings, model.settingsSection == .about,
+              model.draft.selected == model.snapshot?.selected else {
+            throw AppError.message("Opening About outside Settings did not start a saved settings session.")
+        }
+        model.back()
+        model.showSettings()
+        guard model.page == .settings, model.settingsSection == .general,
+              model.draft.selected == model.snapshot?.selected,
+              model.draft.usageDisplay == "used", model.draft.iconMode == "logo",
+              model.draft.enabled == Set(["codex", "claude"]), model.settingsError.isEmpty, model.settingsValid,
+              !model.notificationAdvancedExpanded, model.notificationEditingSelection == nil else {
+            throw AppError.message("Cancel and reopen did not restore saved settings in General.")
+        }
+        try smokeSettingsPreviews(sample: sample, directory: directory)
+    }
+
+    private static func smokeSettingsPreviews(sample: String, directory: URL?) throws {
+        guard var document = try JSONSerialization.jsonObject(with: Data(sample.utf8)) as? [String: Any],
+              var settings = document["settings"] as? [String: Any] else {
+            throw AppError.message("Settings preview fixture failed.")
+        }
+        let names = ["codex": "Codex", "claude": "Claude", "cursor": "Cursor", "opencode": "OpenCode",
+                     "copilot": "Copilot", "kiro": "Kiro", "openrouter": "OpenRouter", "anthropic-api": "Anthropic API",
+                     "openai-api": "OpenAI API", "google-cloud": "Google Cloud", "grok-bot": "Grok Bot",
+                     "commandcode": "Command Code", "deepinfra": "DeepInfra", "deepseek": "DeepSeek",
+                     "kimi": "Kimi", "minimax": "MiniMax"]
+        let order = ["codex", "claude", "cursor", "opencode", "copilot", "kiro", "openrouter", "anthropic-api",
+                     "openai-api", "google-cloud", "grok-bot", "commandcode", "deepinfra", "deepseek", "kimi", "minimax"]
+        settings["names"] = names
+        settings["available"] = order
+        settings["order"] = order
+        settings["enabled"] = Array(order.prefix(4))
+        document["settings"] = settings
+        if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !version.isEmpty {
+            if var metadata = document["version"] as? [String: Any] {
+                metadata["current"] = version
+                document["version"] = metadata
+            }
+            if var metadata = document["about"] as? [String: Any] {
+                metadata["version"] = version
+                document["about"] = metadata
+            }
+        }
+        let model = Model()
+        model.accept(try JSONSerialization.data(withJSONObject: document))
+        model.showSettings()
+        model.isPresented = true
+        for section in SettingsSection.allCases {
+            model.showSettingsSection(section)
+            try renderSmokePage(model, name: "settings-" + section.rawValue, directory: directory)
+        }
+        model.showSettingsSection(.alerts)
+        model.notificationAdvancedExpanded = true
+        try renderSmokePage(model, name: "settings-alerts-advanced", directory: directory)
     }
 
     private static func smokeNotifications(sample: String) throws {
@@ -1866,6 +2883,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
               model.draft.notifications.rules.first?.enabled == false else {
             throw AppError.message("Native notification settings or queue decoding failed.")
         }
+        guard model.notificationLevels == [80, 95, 100] else { throw AppError.message("Alert levels did not decode for sliders.") }
+        model.setNotificationLevel(0, 1)
+        model.setNotificationLevel(1, 100)
+        model.setNotificationLevel(0, 101)
+        guard model.notificationLevels == [1, 100, 100], Model.parseThresholds(model.draft.notificationThresholds) == [1, 100] else {
+            throw AppError.message("Slider limits or existing threshold normalization changed.")
+        }
+        model.removeNotificationLevel(2)
+        model.addNotificationLevel()
+        guard model.notificationLevels == [1, 100, 80] else { throw AppError.message("Adding or removing an alert level lost pending slider edits.") }
+        while !model.notificationLevels.isEmpty { model.removeNotificationLevel(0) }
+        guard model.notificationLevels.isEmpty, model.settingsValid else { throw AppError.message("Empty alert levels changed existing native validation.") }
+        model.draft.notificationThresholds = "80, 95, 100"
+        let overrideKey = model.draft.notificationRuleThresholds.keys.first!
+        model.draft.notificationRuleThresholds[overrideKey] = "invalid"
+        model.showSettingsSection(.alerts)
+        guard !model.settingsValid, model.notificationAdvancedExpanded else {
+            throw AppError.message("An invalid hidden notification override did not expand Advanced.")
+        }
+        let menuBarSelection = model.draft.selected
+        model.setNotificationOverride(true)
+        let menuBarRuleKey = model.notificationRuleKey
+        model.draft.notificationRuleThresholds[menuBarRuleKey] = "101"
+        guard model.invalidNotificationRules.count == 2,
+              let firstInvalid = model.invalidNotificationRules.first else {
+            throw AppError.message("Multiple invalid notification rules were not identified.")
+        }
+        model.reviewNotificationRule(firstInvalid)
+        guard model.notificationRuleKey == overrideKey, model.notificationEditingLabel.contains("Claude"),
+              model.notificationEditingLabel.contains("Fable"), model.draft.selected == menuBarSelection,
+              model.notificationAdvancedExpanded, model.notificationRuleFocusRequest == 1 else {
+            throw AppError.message("Reviewing a hidden rule changed menu bar selection or failed to target its editor.")
+        }
+        model.draft.notificationRuleThresholds[overrideKey] = "90, 100"
+        guard let secondInvalid = model.invalidNotificationRules.first else { throw AppError.message("Another invalid rule was lost during review.") }
+        model.reviewNotificationRule(secondInvalid)
+        model.draft.notificationRuleThresholds[model.notificationRuleKey] = "85, 100"
+        guard model.invalidNotificationRules.isEmpty, model.settingsValid,
+              model.draft.selected == menuBarSelection else { throw AppError.message("Resolving rule errors changed another setting.") }
+        model.notificationEditingSelection = nil
+        model.showSettingsSection(.appearance)
+        model.showSettingsSection(.alerts)
+        guard model.notificationAdvancedExpanded else { throw AppError.message("Settings navigation discarded Advanced disclosure state.") }
         model.draft.notificationThresholds = "80, invalid"
         guard !model.settingsValid else { throw AppError.message("Invalid notification thresholds were accepted.") }
         model.draft.notificationThresholds = "95, 80, 95, 100"
@@ -2006,6 +3066,213 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         guard model.keyboardFocusVisible else { throw AppError.message("Shift-Tab navigation did not enable a focus outline.") }
         model.page = .settings
         guard !model.keyboardFocusVisible else { throw AppError.message("A new page inherited a keyboard focus outline.") }
+        model.observeFocusInput(tab)
+        model.showSettingsSection(.alerts)
+        guard model.settingsSection == .alerts, model.keyboardFocusVisible else {
+            throw AppError.message("Settings subnavigation discarded keyboard focus feedback.")
+        }
+    }
+
+    private static func smokeMenuTracking() throws {
+        let center = NotificationCenter()
+        let tracking = PanelMenuTracking(center: center)
+        let menu = NSMenu()
+        let submenu = NSMenu()
+        guard !tracking.isTracking else { throw AppError.message("A closed select blocked panel shortcuts.") }
+        center.post(name: NSMenu.didBeginTrackingNotification, object: menu)
+        guard tracking.isTracking else { throw AppError.message("An open select did not keep native keyboard handling.") }
+        center.post(name: NSMenu.didBeginTrackingNotification, object: submenu)
+        center.post(name: NSMenu.didEndTrackingNotification, object: submenu)
+        guard tracking.isTracking else { throw AppError.message("Closing a submenu restored panel shortcuts before its select closed.") }
+        center.post(name: NSMenu.didEndTrackingNotification, object: NSMenu())
+        guard tracking.isTracking else { throw AppError.message("An unrelated menu ended select keyboard handling.") }
+        center.post(name: NSMenu.didEndTrackingNotification, object: menu)
+        guard !tracking.isTracking else { throw AppError.message("Closing a select left panel shortcuts blocked.") }
+    }
+
+    private static func smokeSettingsSelects(sample: String) throws {
+        let model = Model()
+        model.accept(Data(sample.utf8))
+        model.showSettings()
+        let choices = model.choices
+        guard choices.count > 1 else { throw AppError.message("Select menu fixture has no alternate provider limit.") }
+        let options = choices.map {
+            PanelSelectOption(value: $0.selection, title: $0.label, provider: $0.provider, logoPath: $0.logoPath)
+        }
+        let binding = Binding(get: { model.draft.selected }, set: { model.draft.selected = $0; model.draft.saved = false })
+        let first = choices[0]
+        let sourceImage = Assets.image(provider: first.provider, path: first.logoPath)
+        let sourceSize = sourceImage?.size
+        let (menu, target) = PanelSelectMenuPresenter.makeMenu(title: "Active provider & limit", options: options,
+                                                             selection: binding, placeholder: "Choose a provider and limit")
+        guard menu.items.map(\.title) == choices.map(\.label),
+              menu.items.filter({ $0.state == .on }).count == 1,
+              menu.items[0].state == .on,
+              menu.items.allSatisfy({ $0.image?.size == NSSize(width: 16, height: 16) }),
+              sourceImage?.size == sourceSize else {
+            throw AppError.message("Native select options, checked selection or resized provider artwork are invalid.")
+        }
+        model.draft.saved = true
+        let savedSelection = model.snapshot?.selected
+        withExtendedLifetime(target) { menu.performActionForItem(at: 1) }
+        guard model.draft.selected == choices[1].selection, !model.draft.saved,
+              model.snapshot?.selected == savedSelection else {
+            throw AppError.message("A native select action did not update only its pending draft.")
+        }
+        let usageBinding = Binding(get: { model.draft.usageDisplay }, set: { model.draft.usageDisplay = $0; model.draft.saved = false })
+        let (usageMenu, usageTarget) = PanelSelectMenuPresenter.makeMenu(title: "Usage display", options: [
+            PanelSelectOption(value: "used", title: "Used"), PanelSelectOption(value: "remaining", title: "Remaining")
+        ], selection: usageBinding, placeholder: "Choose an option")
+        withExtendedLifetime(usageTarget) { usageMenu.performActionForItem(at: 1) }
+        guard model.draft.usageDisplay == "remaining", usageMenu.items.allSatisfy({ $0.image == nil }) else {
+            throw AppError.message("A text-only native select lost its value or added provider artwork.")
+        }
+        let (emptyMenu, emptyTarget) = PanelSelectMenuPresenter.makeMenu(title: "Active provider & limit", options: [],
+                                                                       selection: binding, placeholder: "Choose a provider and limit")
+        try withExtendedLifetime(emptyTarget) {
+            guard emptyMenu.numberOfItems == 1, emptyMenu.items[0].title == "Choose a provider and limit",
+                  !emptyMenu.items[0].isEnabled else {
+                throw AppError.message("An empty provider select did not show its disabled placeholder.")
+            }
+        }
+    }
+
+    private static func smokeCloudCredits(sample: String, directory: URL?) throws {
+        guard var document = try JSONSerialization.jsonObject(with: Data(sample.utf8)) as? [String: Any],
+              var settings = document["settings"] as? [String: Any],
+              let providers = document["providers"] as? [[String: Any]],
+              var provider = providers.last else { throw AppError.message("Cloud credits sample setup failed.") }
+        let identity = "account:cloud-work"
+        provider["id"] = identity
+        provider["providerId"] = "claude"
+        provider["idx"] = 2
+        provider["name"] = "Claude (Max) · Work"
+        settings["available"] = [identity]
+        settings["enabled"] = [identity]
+        settings["order"] = [identity]
+        settings["names"] = [identity: "Claude · Work"]
+        settings["providerIds"] = [identity: "claude"]
+        document["settings"] = settings
+        document["selected"] = ["provider": identity, "idx": 2, "metric": "rolling"] as [String: Any]
+        let states = [("available", "$42.50", 42.5), ("exhausted", "$0.00", 0.0),
+                      ("expired", "Expired", 75.25), ("unavailable", "Unavailable", 75.25)]
+        for (state, value, balance) in states {
+            let detail = state.capitalized + " · Expires 2026-11-05T07:59:00Z"
+            var credit: [String: Any] = ["id": "claude-cloud", "title": "Cloud credits", "currency": "USD",
+                "heading": "Claude (Max) · Cloud credits · Work",
+                "status": state, "value": value, "balance": state == "available" || state == "exhausted" ? balance as Any : NSNull(),
+                "stale": state == "unavailable", "expires": "Nov 05, 2026, 07:59", "remaining": state == "expired" ? "Expired" : "24d 13h left",
+                "timezone": "UTC+00:00", "observed": "Oct 11, 2026, 18:05", "observed_value": String(format: "$%.2f", balance),
+                "limit_value": "$100.00", "used_value": String(format: "$%.2f", 100 - balance),
+                "status_note": state == "unavailable" ? "Refresh unavailable" : "", "detail": detail]
+            provider["monetaryCredits"] = [credit]
+            provider["metrics"] = [
+                ["key": "rolling", "name": "Rolling Usage", "percentage": 9,
+                 "detail": "Resets in 34m"] as [String: Any],
+                ["key": "credits:claude-cloud", "name": "Cloud credits", "percentage": NSNull(),
+                 "hasPercentage": false, "value": value, "isAmount": state == "available" || state == "exhausted",
+                 "detail": detail] as [String: Any],
+            ]
+            document["providers"] = [provider]
+            document["text"] = "Claude (Max) · Work " + value
+            let model = Model()
+            model.accept(try JSONSerialization.data(withJSONObject: document))
+            guard let current = model.selectedProvider, current.providerID == "claude",
+                  current.metrics.count == 2, current.metrics[0].percentage == 9,
+                  current.metrics[1].percentage == nil, current.metrics[1].usable,
+                  current.metrics[1].displayValue == value, current.metrics[1].detail == detail,
+                  current.monetaryCredits.count == 1, current.monetaryCredits[0].status == state,
+                  current.resetCredits?.available == 1 else {
+                throw AppError.message("Cloud credits state or coexistence with quota and reset credits failed.")
+            }
+            let selection = current.selection(current.metrics[1])
+            guard selection.provider == identity, selection.idx == 2, selection.metric == "credits:claude-cloud" else {
+                throw AppError.message("Cloud credits selection lost its account identity.")
+            }
+            model.isPresented = true
+            try renderSmokePage(model, name: "cloud-" + state, directory: directory)
+            let quotaSelection = model.snapshot?.selected
+            model.keyboardFocusVisible = true
+            model.showCloudCredits(current, current.monetaryCredits[0])
+            guard model.page == .cloudCredits(current.id, "claude-cloud"), model.cloudCreditProvider?.idx == 2,
+                  model.cloudCredit?.value == value, model.cloudCredit?.expires == "Nov 05, 2026, 07:59",
+                  model.cloudCredit?.remaining == (state == "expired" ? "Expired" : "24d 13h left"),
+                  model.cloudCredit?.observedValue == String(format: "$%.2f", balance),
+                  model.cloudCredit?.limitValue == "$100.00", model.cloudCredit?.usedValue == String(format: "$%.2f", 100 - balance),
+                  model.cloudCredit?.observed == "Oct 11, 2026, 18:05",
+                  model.cloudCredit?.heading == "Claude (Max) · Cloud credits · Work",
+                  model.cloudCredit?.timezone == "UTC+00:00", !model.keyboardFocusVisible,
+                  model.snapshot?.selected == quotaSelection else {
+                throw AppError.message("Cloud details navigation changed quota selection, lost its account, or omitted expiration details.")
+            }
+            try renderSmokePage(model, name: "cloud-details-" + state, directory: directory)
+            if state == "available" {
+                var legacyCredit = credit
+                for field in ["heading", "expires", "remaining", "timezone", "observed", "observed_value", "limit_value", "used_value", "status_note"] {
+                    legacyCredit.removeValue(forKey: field)
+                }
+                let legacy = try JSONDecoder().decode(MonetaryCredit.self, from: JSONSerialization.data(withJSONObject: legacyCredit))
+                guard legacy.heading == nil, legacy.expires == "Not reported", legacy.limitValue == "Not reported", legacy.observedValue == "Not reported" else {
+                    throw AppError.message("Legacy Cloud details invented missing balances or expiration.")
+                }
+                // A new snapshot updates an already open page without reopening it.
+                credit["status"] = "expired"
+                credit["value"] = "Expired"
+                credit["remaining"] = "Expired"
+                provider["monetaryCredits"] = [credit]
+                document["providers"] = [provider]
+                model.accept(try JSONSerialization.data(withJSONObject: document))
+                guard model.page == .cloudCredits(current.id, "claude-cloud"), model.cloudCredit?.status == "expired",
+                      model.snapshot?.selected == quotaSelection else {
+                    throw AppError.message("An open Cloud details page did not follow offline expiration.")
+                }
+                var other = provider
+                other["id"] = "account:cloud-personal"
+                other["name"] = "Claude (Max) · Personal"
+                other["monetaryCredits"] = [credit.merging(["value": "$8.25", "status": "available", "heading": "Claude (Max) · Cloud credits · Personal"]) { _, new in new }]
+                // Reorder two accounts with the same credit ID and keep the exact entry.
+                document["providers"] = [other, provider]
+                model.accept(try JSONSerialization.data(withJSONObject: document))
+                guard model.cloudCreditProvider?.connectionID == identity, model.cloudCredit?.value == "Expired" else {
+                    throw AppError.message("Cloud details followed another account after a refresh.")
+                }
+                provider["monetaryCredits"] = []
+                document["providers"] = [other, provider]
+                model.accept(try JSONSerialization.data(withJSONObject: document))
+                guard model.page == .usage, model.snapshot?.selected == quotaSelection else {
+                    throw AppError.message("A removed Cloud credit left a stale details page open.")
+                }
+                model.showCloudCredits(current, current.monetaryCredits[0])
+                guard model.page == .usage else {
+                    throw AppError.message("An old Cloud button reopened a removed credit.")
+                }
+                provider["monetaryCredits"] = [credit]
+                document["providers"] = [other, provider]
+                model.accept(try JSONSerialization.data(withJSONObject: document))
+                model.showCloudCredits(current, current.monetaryCredits[0])
+                document["providers"] = [other]
+                model.accept(try JSONSerialization.data(withJSONObject: document))
+                guard model.page == .usage else {
+                    throw AppError.message("A removed Cloud account left a stale details page open.")
+                }
+                provider["monetaryCredits"] = [credit]
+                document["providers"] = [provider]
+                model.accept(try JSONSerialization.data(withJSONObject: document))
+            }
+            model.back()
+            guard model.page == .usage, model.snapshot?.selected == quotaSelection else {
+                throw AppError.message("Going back from Cloud details changed quota selection.")
+            }
+            model.showCredits(current)
+            guard model.page == .credits(current.id), model.creditProvider?.resetCredits?.available == 1 else {
+                throw AppError.message("Cloud details displaced the existing reset credits page.")
+            }
+            model.showSettings()
+            guard model.settingsValid, model.choices.count == 2,
+                  model.choices.first(where: { $0.selection == selection })?.label == "Claude (Max) · Work · Cloud credits" else {
+                throw AppError.message("Cloud credits account settings label exposes an internal identity or omits the metric.")
+            }
+        }
     }
 
     private static func smokeAccounts(sample: String, directory: URL?) throws {
@@ -2079,19 +3346,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             window.contentViewController = host
             window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
             window.orderFront(nil)
+            defer { window.close() }
             // Let SwiftUI mount once with animations disabled for deterministic fills.
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
             host.view.layoutSubtreeIfNeeded()
-            host.view.displayIfNeeded()
-            guard let bitmap = host.view.bitmapImageRepForCachingDisplay(in: host.view.bounds) else {
-                throw AppError.message("Unable to render the \(name) preview.")
+            func capture(_ captureName: String) throws {
+                host.view.displayIfNeeded()
+                guard let bitmap = host.view.bitmapImageRepForCachingDisplay(in: host.view.bounds) else {
+                    throw AppError.message("Unable to render the \(captureName) preview.")
+                }
+                host.view.cacheDisplay(in: host.view.bounds, to: bitmap)
+                guard let png = bitmap.representation(using: .png, properties: [:]) else {
+                    throw AppError.message("Unable to encode the \(captureName) preview.")
+                }
+                try png.write(to: directory.appendingPathComponent(captureName + ".png"), options: .atomic)
             }
-            host.view.cacheDisplay(in: host.view.bounds, to: bitmap)
-            guard let png = bitmap.representation(using: .png, properties: [:]) else {
-                throw AppError.message("Unable to encode the \(name) preview.")
+            try capture(name)
+            if name.hasPrefix("settings-") {
+                func scrollViews(_ view: NSView) -> [NSScrollView] {
+                    var result = (view as? NSScrollView).map { [$0] } ?? []
+                    for child in view.subviews { result += scrollViews(child) }
+                    return result
+                }
+                guard let scroll = scrollViews(host.view).filter({ $0.contentView.bounds.height > SettingsNavigation.height })
+                        .max(by: { $0.contentView.bounds.height < $1.contentView.bounds.height }),
+                      let document = scroll.documentView else {
+                    throw AppError.message("Unable to inspect the \(name) native content scroll view.")
+                }
+                let clip = scroll.contentView
+                let range = max(0, document.frame.height - clip.bounds.height)
+                print("AI Status macOS \(name): native vertical scroll range \(range)")
+                if range > 0.5 {
+                    func captureAtPosition(_ fraction: CGFloat, suffix: String) throws {
+                        var destination = clip.bounds
+                        destination.origin.y = document.isFlipped
+                            ? document.frame.minY + range * fraction
+                            : document.frame.maxY - clip.bounds.height - range * fraction
+                        destination = clip.constrainBoundsRect(destination)
+                        clip.scroll(to: destination.origin)
+                        scroll.reflectScrolledClipView(clip)
+                        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+                        host.view.layoutSubtreeIfNeeded()
+                        guard abs(clip.bounds.minY - destination.minY) < 1 else {
+                            throw AppError.message("The \(name) native scroll view did not reach its \(suffix) capture position.")
+                        }
+                        try capture(name + "-" + suffix)
+                    }
+                    let usableHeight = max(1, clip.bounds.height - SettingsNavigation.height)
+                    if range > usableHeight { try captureAtPosition(0.5, suffix: "middle") }
+                    try captureAtPosition(1, suffix: "bottom")
+                }
             }
-            try png.write(to: directory.appendingPathComponent(name + ".png"), options: .atomic)
-            window.close()
         }
     }
 }
