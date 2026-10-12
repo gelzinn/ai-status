@@ -1899,7 +1899,8 @@ class Dashboard(QWidget):
                     self.visible_metrics.append((name, entry, metric, value))
         self.metric_values = [value for _, _, _, value in self.visible_metrics]
         if self.metric_values and self.selected_value() not in self.metric_values:
-            value = self.metric_values[0]
+            value = next((value for value in self.metric_values if value[:2] == self.selected_value()[:2]),
+                         self.metric_values[0])
             self.selected.update(provider=value[0], idx=value[1], metric=value[2])
             state.save_selected(self.selected)
         structure = tuple((value, render.metric_is_amount(metric),

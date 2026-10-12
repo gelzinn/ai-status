@@ -121,36 +121,48 @@ class UsageDisplayTests(unittest.TestCase):
         self.assertEqual([provider["metrics"][0]["percentage"] for provider in snapshot["providers"]], [100, 75])
         self.assertEqual(snapshot["providers"][1]["error"], "Temporarily unavailable")
 
-    def test_openrouter_credit_spend_ratio_shows_remaining_amount_with_stable_identity(self):
+    def test_openrouter_balance_stays_real_while_progress_respects_display_preference(self):
         parsed = parse_provider("openrouter", {"credits": {"data": {"total_credits": 100, "total_usage": 25}}})
         metric = parsed["metrics"][0]
         entry = dict(parsed, _dir="openrouter", _idx=0)
-        choice = dict(self.selected, provider="openrouter", metric=render.metric_key(metric), show_metric=True)
-        snapshot = quickshell.build_snapshot([entry], choice)
-        visible = snapshot["providers"][0]["metrics"][0]
-        self.assertEqual(visible["percentage"], 75)
-        self.assertEqual(visible["value"], "$75.00 / $100.00")
-        self.assertEqual(visible["name"], "Account credits remaining")
-        self.assertEqual(visible["key"], "credits:Account spend / total credits (USD)")
-        self.assertEqual(visible["detail"], "Available balance: $75.00")
-        self.assertEqual(snapshot["text"], "OpenRouter Account credits remaining $75.00 / $100.00")
-        self.assertEqual(render.metric_value(metric), "$25.00 / $100.00")
+        before = copy.deepcopy(parsed)
+        for mode, progress in (("used", 25), ("remaining", 75)):
+            with self.subTest(mode=mode):
+                choice = dict(self.selected, provider="openrouter", metric=render.metric_key(metric),
+                              show_metric=True, usage_display=mode)
+                snapshot = quickshell.build_snapshot([entry], choice)
+                visible = snapshot["providers"][0]["metrics"][0]
+                self.assertEqual(visible["percentage"], progress)
+                self.assertEqual(visible["value"], "$75.00")
+                self.assertEqual(visible["name"], "Credit balance")
+                self.assertEqual(visible["key"], "credits:Account spend / total credits (USD)")
+                self.assertEqual(visible["detail"], "$25.00 of $100.00 used (25%)")
+                self.assertEqual(snapshot["text"], "OpenRouter Credit balance $75.00")
+                final = render.build_final_state([entry], choice)
+                self.assertEqual(final["text"], snapshot["text"])
+                tooltip = quickshell.plain_text(final["tooltip"])
+                self.assertIn("Credit balance", tooltip)
+                self.assertIn("$75.00", tooltip)
+        self.assertEqual(parsed, before)
+        self.assertEqual(render.metric_value(metric), "$75.00")
 
-    def test_exhausted_credit_ratio_has_zero_remaining_without_altering_overdraft_detail(self):
+    def test_overdrawn_balance_stays_real_while_remaining_progress_is_bounded(self):
         parsed = parse_provider("openrouter", {"credits": {"data": {"total_credits": 100, "total_usage": 120}}})
         metric = parsed["metrics"][0]
         self.assertEqual(render.metric_percentage(metric, self.remaining), 0)
-        self.assertEqual(render.metric_value(metric, self.remaining), "$0.00 / $100.00")
-        self.assertEqual(render.metric_value(metric), "$120.00 / $100.00")
-        self.assertEqual(render.metric_detail(metric), "Available balance: $-20.00")
+        self.assertEqual(render.metric_value(metric, self.remaining), "$-20.00")
+        self.assertEqual(render.metric_value(metric), "$-20.00")
+        self.assertEqual(render.metric_detail(metric), "$120.00 of $100.00 used (120%)")
+        self.assertEqual(render.metric_title(metric, self.remaining), "Credit balance")
 
     def test_finite_credit_ratio_remains_convertible_when_percentage_overflows(self):
         parsed = parse_provider("openrouter", {"credits": {"data": {"total_credits": 1e-308, "total_usage": 1e308}}})
         metric = parsed["metrics"][0]
         self.assertIsNone(metric["percentage"])
         self.assertIsNone(render.metric_percentage(metric, self.remaining))
-        self.assertEqual(render.metric_value(metric, self.remaining), "$0.00 / $0.00")
-        self.assertEqual(render.metric_title(metric, self.remaining), "Account credits remaining")
+        self.assertEqual(render.metric_value(metric, self.remaining), f"${-1e308:.2f}")
+        self.assertEqual(render.metric_value(metric), f"${-1e308:.2f}")
+        self.assertEqual(render.metric_title(metric, self.remaining), "Credit balance")
 
     def test_invalid_ratio_limits_do_not_invent_a_remaining_amount(self):
         for limit in (None, 0, -1, True, "invalid", float("nan"), float("inf"), 10 ** 400):
