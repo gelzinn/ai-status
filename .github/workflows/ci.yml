@@ -5,21 +5,53 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, edited, ready_for_review]
   workflow_dispatch:
+    inputs:
+      windows-preview:
+        description: Build and test the Windows preview package
+        type: boolean
+        default: true
   workflow_call:
+    inputs:
+      windows-preview:
+        description: Include the Windows preview; releases package their exact tag separately
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   pr-metadata:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    outputs:
+      lint: ${{ steps.changes.outputs.lint }}
+      python-syntax: ${{ steps.changes.outputs.python-syntax }}
+      python-tests: ${{ steps.changes.outputs.python-tests }}
+      installer: ${{ steps.changes.outputs.installer }}
+      macos-installer: ${{ steps.changes.outputs.macos-installer }}
+      macos-native: ${{ steps.changes.outputs.macos-native }}
+      release-package: ${{ steps.changes.outputs.release-package }}
+      release-tests: ${{ steps.changes.outputs.release-tests }}
+      release-config: ${{ steps.changes.outputs.release-config }}
+      qml-syntax: ${{ steps.changes.outputs.qml-syntax }}
+      web-build: ${{ steps.changes.outputs.web-build }}
+      windows-package: ${{ steps.changes.outputs.windows-package }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Test affected-check selection
+        run: python3 -m unittest discover -s tests -p 'test_ci_selection.py' -v
+      - name: Select checks from changed files
+        id: changes
+        run: python3 .github/scripts/ci_selection.py "$GITHUB_EVENT_PATH"
       - name: Validate PR title and user-facing release notes
+        if: github.event_name == 'pull_request'
         run: python3 .github/scripts/check_pr.py "$GITHUB_EVENT_PATH"
 
   lint:
+    needs: pr-metadata
+    if: needs.pr-metadata.outputs.lint == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -39,18 +71,18 @@ jobs:
           severity: warning
 
   python-syntax:
+    needs: pr-metadata
+    if: needs.pr-metadata.outputs.python-syntax == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
       - name: Check Python syntax
-        run: |
-          python -m py_compile packages/lib/src/core/*.py
-          python -m py_compile packages/lib/src/providers/**/*.py
-          python -m py_compile packages/lib/src/windows.py
-          python -m py_compile packages/lib/install-wizard.py
+        run: python3 -m compileall -q packages/lib .github/scripts tests
 
   python-tests:
+    needs: pr-metadata
+    if: needs.pr-metadata.outputs.python-tests == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -66,13 +98,24 @@ jobs:
         run: python -m unittest discover -s packages/lib/tests -v
 
   installer:
+    needs: pr-metadata
+    if: needs.pr-metadata.outputs.installer == 'true' || needs.pr-metadata.outputs.macos-installer == 'true' || needs.pr-metadata.outputs.release-tests == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Test stable installs and updates
-        run: python3 -m unittest discover -s tests -v
+      - name: Test Linux stable installs and updates
+        if: needs.pr-metadata.outputs.installer == 'true'
+        run: python3 -m unittest discover -s tests -p 'test_installer.py' -v
+      - name: Test macOS stable installs and updates
+        if: needs.pr-metadata.outputs.macos-installer == 'true'
+        run: python3 -m unittest discover -s tests -p 'test_macos_installer.py' -v
+      - name: Test release metadata, archives and publication recovery
+        if: needs.pr-metadata.outputs.release-tests == 'true'
+        run: python3 -m unittest discover -s tests -p 'test_release_flow.py' -v
 
   macos-native:
+    needs: pr-metadata
+    if: needs.pr-metadata.outputs.macos-native == 'true'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v5
@@ -95,6 +138,8 @@ jobs:
           if-no-files-found: error
 
   release-package:
+    needs: pr-metadata
+    if: needs.pr-metadata.outputs.release-package == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -106,6 +151,8 @@ jobs:
           python3 .github/scripts/build_release.py --source "$RUNNER_TEMP/release-source" --output "$RUNNER_TEMP/release-assets" --version "$version"
 
   release-config:
+    needs: pr-metadata
+    if: needs.pr-metadata.outputs.release-config == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -118,6 +165,8 @@ jobs:
         run: NODE_PATH="$RUNNER_TEMP/release-validation/node_modules" node tests/test_release_config.cjs
 
   qml-syntax:
+    needs: pr-metadata
+    if: needs.pr-metadata.outputs.qml-syntax == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -134,6 +183,8 @@ jobs:
         run: python3 packages/lib/tests/run_qml_tests.py
 
   web-build:
+    needs: pr-metadata
+    if: needs.pr-metadata.outputs.web-build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -144,3 +195,8 @@ jobs:
         run: npm install --ignore-scripts
       - name: Build website
         run: npm run build --workspace @ai-status/web
+
+  windows-package:
+    needs: pr-metadata
+    if: needs.pr-metadata.outputs.windows-package == 'true' && (github.event_name == 'pull_request' || inputs.windows-preview)
+    uses: ./.github/workflows/windows.yml

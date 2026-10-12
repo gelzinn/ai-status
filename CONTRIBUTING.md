@@ -45,6 +45,44 @@ Waybar formatting lives in `packages/lib/src/core/render.py` using Pango markup.
 Run `python3 -m unittest discover -s packages/lib/tests -v` for adapter and isolated installer tests. For native plugin validation and desktop acceptance checks, see [Linux development](docs/development/linux.md#development-validation).
 
 Run `python3 packages/lib/tests/run_qml_tests.py` for native settings and usage page tests. These use the production QML pages with a fake daemon and theme, via Qt Quick Test's offscreen renderer. Install `qt6-declarative-dev-tools`, `qml6-module-qtquick`, `qml6-module-qtquick-window`, `qml6-module-qtquick-shapes`, `qml6-module-qtqml-models`, `qml6-module-qtqml-workerscript`, `qml6-module-qttest`, and `qt6-qpa-plugins`. They do not replace an Omarchy desktop smoke test.
+
+## CI checks
+
+CI selects checks from the complete PR diff or, after merging, the complete
+push to `main`. `pr-metadata` always validates the selection rules and checks
+PR titles and release notes. Jobs unrelated to the changed files report
+`skipped`, including required checks, so documentation changes can merge
+without running desktop or website builds.
+The required `installer` job runs only the relevant Linux, macOS or release
+test suites, keeping their existing merge protection.
+
+| Changed inputs | Checks |
+| --- | --- |
+| README, contributor docs, screenshots | Metadata and selection tests |
+| Website code, content or npm dependencies | Web build and tests |
+| Windows app, packaging or dependencies | Windows package and applicable Python/archive checks |
+| macOS app or backend | macOS checks and applicable Python/archive checks |
+| Quickshell QML or its test fixtures | QML checks and applicable archive checks |
+| Linux installer | Linux checks, archive checks and web build (the site serves the script) |
+| Shared Python backend or provider registry | Every runtime that consumes them; the registry also triggers web checks |
+| Shared panel assets | Windows, macOS, QML and archive checks |
+| Root version metadata | Runtime, release and website checks |
+
+The site also reads `LINUX.md`, `MACOS.md`, `WINDOWS.md` and `LLMS.md` from
+`packages/lib`, so changes to those guides trigger web checks. Packaged
+licenses trigger the builds that consume them.
+
+Rules live in [.github/scripts/ci_selection.py](.github/scripts/ci_selection.py).
+Update them when adding a build input. Unknown code paths and unavailable Git
+history run the full check set. Deleted files and both paths of renamed files
+are included. Manual CI runs validate the full set, with an optional Windows
+preview; manual Windows runs and release-tag packaging always build Windows.
+Release calls use the same selection for checks on `main` and package Windows
+separately from the exact pending release tag.
+
+Run `python3 -m unittest discover -s tests -p 'test_ci_selection.py' -v` to test
+documentation changes, platform isolation, shared inputs and Git diff handling.
+
 ## Releases
 
 Development continues on `main`. The public installer downloads the tag of
