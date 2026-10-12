@@ -34,6 +34,13 @@ Provider logos, app artwork and fonts come from the bundled assets. See
 
 ## Update flow previews
 
+The [complete update progress gallery](update-progress/README.md) includes the
+before/after comparison and every app step for Windows, macOS and Linux: checking,
+download progress, verification, installation or terminal handoff, restart,
+completion, errors and retry. It records each capture's platform and source and
+includes reproduction commands. Windows and Linux use production offscreen
+widgets; macOS uses the native compiled SwiftUI smoke artifact.
+
 The `updates-*-notice.png` and `updates-*-guide.png` pairs show the optional
 update notice and the guide inside the app. The guide includes versions,
 platform instructions, release links, and a copy control inside the terminal
