@@ -6,9 +6,12 @@ never run a real update during capture. The fixture starts at v0.15.0 with
 v0.16.0 available; the reopened Usage previews show v0.16.0.
 
 Windows and macOS use the same short progress labels, including **Downloading…**,
-and the same blue loader-circle spinner. The Windows spinner rotates around its
-exact center, and the active operation displays the spinner, bar and bytes without
-a redundant Updating button. Unknown download sizes use an indeterminate bar.
+with the percentage above a thin progress bar. Downloaded bytes appear on the left
+and the remaining size on the right, such as **10.4 MB left**. Known-size downloads
+use the bar; unknown sizes keep the same blue loader-circle spinner and an
+indeterminate bar without a percentage or remaining-size estimate. The active
+operation hides the action button. Other running stages use the shared spinner,
+which rotates around its exact center on Windows.
 
 ## Before
 
@@ -63,14 +66,14 @@ handoff; errors offer retry. SwiftBar keeps its Terminal update path.
 ## Capture sources and reproduction
 
 - Windows: production Qt widgets rendered offscreen on Linux with PySide6 6.12,
-  bundled fonts and artwork. Source: commit `cad99ad`. Baselines render the old
+  bundled fonts and artwork. Source: commit `a0ec11b`. Baselines render the old
   widgets and guide from `38df1df` with the same sample versions.
 - Linux: production QML rendered offscreen with Qt Quick's software renderer and
   the test daemon/Omarchy theme (dark surface, blue accent, 6px corners). Source:
-  commit `cad99ad`; this does not capture a running Omarchy desktop.
+  commit `09eb4fa`; this does not capture a running Omarchy desktop.
 - macOS: unmodified `update-*.png` files from the `macos-panel-preview` artifact
-  for commit `cad99ad` in the
-  [native macOS CI run](https://github.com/gelzinn/ai-status/actions/runs/38312006541/job/115019771382).
+  for commit `a0ec11b` in the
+  [native macOS CI run](https://github.com/gelzinn/ai-status/actions/runs/38313521244/job/115024675109).
 - The Linux and macOS baselines are the existing tracked
   [Linux guide](../updates-linux-guide.png) and
   [native macOS guide](../updates-macos-guide.png), copied without alteration.
