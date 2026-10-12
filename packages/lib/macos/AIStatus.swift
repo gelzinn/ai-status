@@ -321,6 +321,20 @@ enum Page: Equatable {
     case usage, settings, about, update, credits(String), cloudCredits(String, String)
 }
 
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case general, appearance, alerts, providers
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    var detail: String {
+        switch self {
+        case .general: return "Choose the account and limit shown in your menu bar."
+        case .appearance: return "Customize the menu bar icon and usage text."
+        case .alerts: return "Set quota notifications and account-specific rules."
+        case .providers: return "Enable providers and arrange their order in Usage."
+        }
+    }
+}
+
 struct Choice: Identifiable {
     let selection: Selection
     let label: String
@@ -433,6 +447,7 @@ final class Model: ObservableObject {
         didSet { if page != oldValue { keyboardFocusVisible = false } }
     }
     @Published var draft = SettingsDraft()
+    @Published var settingsSection: SettingsSection = .general
     @Published var error = ""
     @Published var settingsError = ""
     @Published var settingsSaving = false
@@ -487,11 +502,22 @@ final class Model: ObservableObject {
         }
     }
 
-    var settingsValid: Bool {
-        !draft.enabled.isEmpty && draft.display.values.contains(true) && ["used", "remaining"].contains(draft.usageDisplay)
-            && choices.contains { $0.selection == draft.selected }
-            && Self.parseThresholds(draft.notificationThresholds) != nil
-            && draft.notificationRuleThresholds.values.allSatisfy { Self.parseThresholds($0) != nil }
+    var settingsValid: Bool { settingsValidation == nil }
+    var settingsValidation: (section: SettingsSection, message: String)? {
+        if draft.enabled.isEmpty { return (.providers, "Enable at least one provider.") }
+        if !choices.contains(where: { $0.selection == draft.selected }) {
+            return (.general, "Choose an active provider and limit.")
+        }
+        if !draft.display.values.contains(true) { return (.appearance, "Choose at least one bar text field.") }
+        if !["used", "remaining"].contains(draft.usageDisplay) { return (.appearance, "Choose a usage display mode.") }
+        if Self.parseThresholds(draft.notificationThresholds) == nil ||
+            !draft.notificationRuleThresholds.values.allSatisfy({ Self.parseThresholds($0) != nil }) {
+            return (.alerts, "Alert thresholds must be whole percentages from 1 to 100, separated by commas.")
+        }
+        return nil
+    }
+    var settingsSelectionLabel: String {
+        choices.first { $0.selection == draft.selected }?.label ?? "Choose a provider and limit in General."
     }
     static func parseThresholds(_ text: String) -> [Int]? {
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }
@@ -657,8 +683,13 @@ final class Model: ObservableObject {
             ($0.connectionID + "\u{001f}" + $0.metric, $0.thresholds.map(String.init).joined(separator: ", "))
         })
         settingsError = ""
+        settingsSection = .general
         page = .settings
         changed?()
+    }
+    func showSettingsSection(_ section: SettingsSection) {
+        guard page == .settings, !settingsSaving else { return }
+        settingsSection = section
     }
     func toggleProvider(_ provider: String) {
         if draft.enabled.contains(provider) { draft.enabled.remove(provider) } else { draft.enabled.insert(provider) }
@@ -1028,11 +1059,74 @@ struct UsagePage: View {
     }
 }
 
+struct SettingsNavigationButton: View {
+    let section: SettingsSection
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovering = false
+    @FocusState private var focused: Bool
+    @Environment(\.controlKeyboardFocusVisible) private var keyboardFocusVisible
+    @Environment(\.isEnabled) private var enabled
+    var body: some View {
+        Button(action: action) {
+            Text(section.title).frame(maxWidth: .infinity).padding(.vertical, 9).contentShape(Rectangle())
+        }.buttonStyle(.plain).focused($focused)
+            .foregroundColor(selected || (focused && keyboardFocusVisible) ? Palette.bright : Palette.dim)
+            .background(RoundedRectangle(cornerRadius: 6)
+                .fill(selected ? Palette.bright.opacity(0.09) : hovering && enabled ? Palette.bright.opacity(0.045) : .clear))
+            .overlay(RoundedRectangle(cornerRadius: 6)
+                .stroke(focused && keyboardFocusVisible ? Palette.bright.opacity(0.5) : selected ? Palette.border : .clear))
+            .opacity(enabled ? 1 : 0.4)
+            .onHover { hovering = $0 }
+            .accessibilityLabel(section.title)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .help(section.detail)
+    }
+}
+
+struct SettingsNavigation: View {
+    @ObservedObject var model: Model
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 4) {
+            ForEach(SettingsSection.allCases) { section in
+                SettingsNavigationButton(section: section, selected: model.settingsSection == section,
+                                         action: { model.showSettingsSection(section) })
+            }
+        }.padding(.horizontal, 16).padding(.vertical, 10).disabled(model.settingsSaving)
+    }
+}
+
 struct SettingsPage: View {
     @ObservedObject var model: Model
     private let fields = [("show_provider", "Provider name"), ("show_model", "Model / plan"),
                           ("show_metric", "Limit name"), ("show_pct", "Usage value")]
     var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(model.settingsSection.title).foregroundColor(Palette.bright)
+                Text(model.settingsSection.detail).font(.custom("GeistMono-Regular", size: 11))
+            }
+            switch model.settingsSection {
+            case .general:
+                general
+            case .appearance:
+                appearance
+            case .alerts:
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Active account & limit").foregroundColor(Palette.bright)
+                    Text(model.settingsSelectionLabel).fixedSize(horizontal: false, vertical: true)
+                    HoverButton(bordered: true, action: { model.showSettingsSection(.general) }) {
+                        HStack { Text("Change in General"); Spacer(); PanelIcon(name: "arrow-right") }
+                    }
+                }
+                NotificationSettingsView(model: model)
+            case .providers:
+                providers
+            }
+        }.disabled(model.settingsSaving)
+    }
+
+    private var general: some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Active provider & limit").foregroundColor(Palette.bright)
@@ -1046,6 +1140,14 @@ struct SettingsPage: View {
                     }
                 }.labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
             }
+            HoverButton(bordered: true, action: model.showAbout) {
+                HStack { Text("About AI Status"); Spacer(); PanelIcon(name: "arrow-right") }
+            }
+        }
+    }
+
+    private var appearance: some View {
+        VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Usage display").foregroundColor(Palette.bright)
                 Picker("Usage display", selection: Binding(get: { model.draft.usageDisplay }, set: {
@@ -1055,7 +1157,6 @@ struct SettingsPage: View {
                     Text("Remaining").tag("remaining")
                 }.labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
             }
-            NotificationSettingsView(model: model)
             VStack(alignment: .leading, spacing: 8) {
                 Text("Bar display").foregroundColor(Palette.bright)
                 ForEach(fields, id: \.0) { key, label in
@@ -1071,33 +1172,27 @@ struct SettingsPage: View {
                     Text("Provider logo").tag("logo")
                 }.pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
             }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Providers").foregroundColor(Palette.bright)
-                Text("Enable providers and set their order in the usage page.").font(.custom("GeistMono-Regular", size: 11))
-                ForEach(model.draft.order, id: \.self) { provider in
-                    HStack(spacing: 4) {
-                        Toggle(isOn: Binding(get: { model.draft.enabled.contains(provider) }, set: { _ in model.toggleProvider(provider) })) {
-                            HStack(spacing: 6) {
-                                ProviderLogo(provider: model.logoProviderID(provider))
-                                Text(model.providerName(provider))
-                            }
-                        }.toggleStyle(.checkbox)
-                        Spacer(minLength: 0)
-                        ControlButton(icon: "arrow-up", help: "Move \(model.providerName(provider)) up",
-                                      action: { model.moveProvider(provider, -1) }).disabled(model.draft.order.first == provider)
-                        ControlButton(icon: "arrow-down", help: "Move \(model.providerName(provider)) down",
-                                      action: { model.moveProvider(provider, 1) }).disabled(model.draft.order.last == provider)
-                    }.padding(.vertical, 3)
-                }
+        }
+    }
+
+    private var providers: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(model.draft.order, id: \.self) { provider in
+                HStack(spacing: 4) {
+                    Toggle(isOn: Binding(get: { model.draft.enabled.contains(provider) }, set: { _ in model.toggleProvider(provider) })) {
+                        HStack(spacing: 6) {
+                            ProviderLogo(provider: model.logoProviderID(provider))
+                            Text(model.providerName(provider))
+                        }
+                    }.toggleStyle(.checkbox)
+                    Spacer(minLength: 0)
+                    ControlButton(icon: "arrow-up", help: "Move \(model.providerName(provider)) up",
+                                  action: { model.moveProvider(provider, -1) }).disabled(model.draft.order.first == provider)
+                    ControlButton(icon: "arrow-down", help: "Move \(model.providerName(provider)) down",
+                                  action: { model.moveProvider(provider, 1) }).disabled(model.draft.order.last == provider)
+                }.padding(.vertical, 3)
             }
-            if !model.settingsError.isEmpty || !model.settingsValid {
-                Text(model.settingsError.isEmpty ? "Choose a provider, limit and bar text field. Alert thresholds must be whole percentages from 1 to 100, separated by commas." : model.settingsError)
-                    .font(.custom("GeistMono-Regular", size: 11)).foregroundColor(.orange)
-            }
-            HoverButton(bordered: true, action: model.showAbout) {
-                HStack { Text("About AI Status"); Spacer(); PanelIcon(name: "arrow-right") }
-            }
-        }.disabled(model.settingsSaving)
+        }
     }
 }
 
@@ -1406,7 +1501,7 @@ struct AboutPage: View {
                 Text("Quick guide").foregroundColor(Palette.bright)
                 Text("Menu bar: click to show usage; right-click for settings and other actions.")
                 Text("Usage: click a limit to show it in the bar. Refresh checks now; Reset credits shows the available resets. Update available opens the update guide.")
-                Text("Settings: pick a limit, text and icon. Enable providers and reorder them with the arrows. Save applies changes and keeps settings open.")
+                Text("Settings: use General, Appearance, Alerts and Providers to configure the menu bar and quota notifications. Save applies all changes and keeps settings open.")
                 Text("Keyboard: R refreshes, C opens settings, Esc goes back. Tab moves between controls.")
             }.font(.custom("GeistMono-Regular", size: 11))
         }
@@ -1434,6 +1529,10 @@ struct PanelView: View {
                 }
             }.padding(.horizontal, 16).frame(height: 49)
             Divider().overlay(Palette.border)
+            if model.page == .settings {
+                SettingsNavigation(model: model)
+                Divider().overlay(Palette.border)
+            }
             ScrollViewReader { scroll in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
@@ -1461,18 +1560,32 @@ struct PanelView: View {
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 18)
                         .id("page-top")
                 }.onChange(of: model.page) { page in
-                    if page == .update || model.cloudCredit != nil { scroll.scrollTo("page-top", anchor: .top) }
+                    if page == .settings || page == .update || model.cloudCredit != nil { scroll.scrollTo("page-top", anchor: .top) }
+                }.onChange(of: model.settingsSection) { _ in
+                    scroll.scrollTo("page-top", anchor: .top)
                 }
             }
             if model.page == .settings {
-                HStack(spacing: 8) {
-                    Spacer()
-                    if model.draft.saved { Text("Saved").font(.custom("GeistMono-Regular", size: 11)) }
-                    Button("Cancel", action: model.back).buttonStyle(.plain).padding(6).disabled(model.settingsSaving)
-                    Button(model.settingsSaving ? "Saving…" : "Save", action: model.saveSettings)
-                        .buttonStyle(.plain).padding(6).overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.border))
-                        .disabled(!model.settingsValid || model.settingsSaving)
-                }.padding(.horizontal, 16).padding(.bottom, 12)
+                Divider().overlay(Palette.border)
+                VStack(alignment: .leading, spacing: 8) {
+                    if !model.settingsError.isEmpty {
+                        Text(model.settingsError).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(.orange)
+                    } else if let validation = model.settingsValidation {
+                        Text(validation.message).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(.orange)
+                        if model.settingsSection != validation.section {
+                            Button("Review " + validation.section.title) { model.showSettingsSection(validation.section) }
+                                .buttonStyle(.borderless).disabled(model.settingsSaving)
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        Spacer()
+                        if model.draft.saved { Text("Saved").font(.custom("GeistMono-Regular", size: 11)) }
+                        Button("Cancel", action: model.back).buttonStyle(.plain).padding(6).disabled(model.settingsSaving)
+                        Button(model.settingsSaving ? "Saving…" : "Save", action: model.saveSettings)
+                            .buttonStyle(.plain).padding(6).overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.border))
+                            .disabled(!model.settingsValid || model.settingsSaving)
+                    }
+                }.padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 12)
             }
         }
         .frame(width: 380).frame(maxHeight: .infinity)
@@ -1854,6 +1967,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         let malformed = Data(sample.replacingOccurrences(of: "\"schemaVersion\":1", with: "\"schemaVersion\":2").utf8)
         model.accept(malformed)
         guard model.snapshot?.schemaVersion == 1 else { throw AppError.message("Invalid snapshot replaced usable data.") }
+        try smokeSettingsSections(sample: sample, directory: previewDirectory)
         try smokeAccounts(sample: sample, directory: previewDirectory)
         try smokeCloudCredits(sample: sample, directory: previewDirectory)
         try smokeNotifications(sample: sample)
@@ -1865,7 +1979,95 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             model.page = page
             try renderSmokePage(model, name: name, directory: previewDirectory)
         }
-        print("AI Status macOS smoke OK: usage, settings, quota notifications, reset credits, Cloud credits, update guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+        print("AI Status macOS smoke OK: usage, settings subnavigation and shared draft, quota notifications, reset credits, Cloud credits, update guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+    }
+
+    private static func smokeSettingsSections(sample: String, directory: URL?) throws {
+        let model = Model()
+        model.accept(Data(sample.utf8))
+        model.showSettings()
+        guard model.page == .settings, model.settingsSection == .general,
+              SettingsSection.allCases.map(\.rawValue) == ["general", "appearance", "alerts", "providers"] else {
+            throw AppError.message("Settings did not open in General with the expected sections.")
+        }
+        model.draft.selected = model.choices[2].selection
+        model.draft.display["show_provider"] = false
+        model.draft.iconMode = "bot"
+        model.draft.usageDisplay = "remaining"
+        model.toggleProvider("antigravity")
+        model.moveProvider("codex", 1)
+        model.draft.notifications.recovery = false
+        model.draft.notifications.quietHours = NotificationHours(start: "22:00", end: "08:00")
+        model.draft.notifications.workHours = NotificationHours(start: "09:00", end: "18:00")
+        model.draft.notificationThresholds = "85, 95"
+        model.setNotificationOverride(true)
+        model.setNotificationRuleEnabled(false)
+        model.draft.notificationRuleThresholds[model.notificationRuleKey] = "90, 100"
+        model.settingsError = "Retain pending save feedback."
+        let pending = model.draft
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let pendingNotifications = try encoder.encode(pending.notifications)
+        for section in SettingsSection.allCases {
+            model.showSettingsSection(section)
+            model.accept(Data(sample.utf8))
+            guard model.settingsSection == section, model.page == .settings,
+                  model.draft.order == pending.order, model.draft.enabled == pending.enabled,
+                  model.draft.display == pending.display, model.draft.iconMode == pending.iconMode,
+                  model.draft.usageDisplay == pending.usageDisplay, model.draft.selected == pending.selected,
+                  model.draft.notificationThresholds == pending.notificationThresholds,
+                  model.draft.notificationRuleThresholds == pending.notificationRuleThresholds,
+                  model.draft.saved == pending.saved,
+                  try encoder.encode(model.draft.notifications) == pendingNotifications,
+                  model.settingsError == "Retain pending save feedback.", model.settingsValid,
+                  model.settingsSelectionLabel.contains("Claude"), model.settingsSelectionLabel.contains("Weekly") else {
+                throw AppError.message("Settings navigation or a refresh replaced pending edits or alert account context.")
+            }
+        }
+        model.showSettingsSection(.general)
+        model.showAbout()
+        model.back()
+        guard model.page == .settings, model.settingsSection == .general,
+              model.draft.selected == pending.selected, model.draft.usageDisplay == pending.usageDisplay,
+              try encoder.encode(model.draft.notifications) == pendingNotifications else {
+            throw AppError.message("About navigation replaced the current settings session.")
+        }
+        model.showSettingsSection(.alerts)
+        model.settingsSaving = true
+        model.showSettingsSection(.providers)
+        model.back()
+        guard model.page == .settings, model.settingsSection == .alerts else {
+            throw AppError.message("Settings navigation was allowed during a save.")
+        }
+        model.settingsSaving = false
+        model.draft.notificationThresholds = "80, invalid"
+        model.showSettingsSection(.general)
+        guard !model.settingsValid, model.settingsValidation?.section == .alerts else {
+            throw AppError.message("A hidden alert validation error was lost.")
+        }
+        model.draft.notificationThresholds = pending.notificationThresholds
+        model.draft.display = model.draft.display.mapValues { _ in false }
+        guard !model.settingsValid, model.settingsValidation?.section == .appearance else {
+            throw AppError.message("A hidden appearance validation error was lost.")
+        }
+        model.draft.display = pending.display
+        model.draft.enabled = []
+        guard !model.settingsValid, model.settingsValidation?.section == .providers else {
+            throw AppError.message("A hidden provider validation error was lost.")
+        }
+        model.back()
+        model.showSettings()
+        guard model.page == .settings, model.settingsSection == .general,
+              model.draft.selected == model.snapshot?.selected,
+              model.draft.usageDisplay == "used", model.draft.iconMode == "logo",
+              model.draft.enabled == Set(["codex", "claude"]), model.settingsError.isEmpty, model.settingsValid else {
+            throw AppError.message("Cancel and reopen did not restore saved settings in General.")
+        }
+        model.isPresented = true
+        for section in SettingsSection.allCases {
+            model.showSettingsSection(section)
+            try renderSmokePage(model, name: "settings-" + section.rawValue, directory: directory)
+        }
     }
 
     private static func smokeNotifications(sample: String) throws {
@@ -2030,6 +2232,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         guard model.keyboardFocusVisible else { throw AppError.message("Shift-Tab navigation did not enable a focus outline.") }
         model.page = .settings
         guard !model.keyboardFocusVisible else { throw AppError.message("A new page inherited a keyboard focus outline.") }
+        model.observeFocusInput(tab)
+        model.showSettingsSection(.alerts)
+        guard model.settingsSection == .alerts, model.keyboardFocusVisible else {
+            throw AppError.message("Settings subnavigation discarded keyboard focus feedback.")
+        }
     }
 
     private static func smokeCloudCredits(sample: String, directory: URL?) throws {

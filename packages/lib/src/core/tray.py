@@ -11,7 +11,7 @@ import uuid
 from PySide6.QtCore import QEasingCurve, QEvent, QModelIndex, QObject, QPoint, QPointF, QRectF, QLockFile, QThread, QTimer, Qt, QUrl, Signal, QSize, QVariantAnimation
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
-    QAbstractButton, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout,
+    QAbstractButton, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
     QPushButton, QScrollArea, QSizePolicy, QSpacerItem, QStackedWidget, QStyledItemDelegate, QStyle,
     QSystemTrayIcon, QVBoxLayout, QWidget,
@@ -825,22 +825,71 @@ class ProviderSettings(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 18, 16, 18)
         layout.setSpacing(8)
-        layout.addWidget(plain_label("Active provider & limit", "#eeeeee"))
+        self.current_section = "general"
+        self.section_positions = {}
+        self.sections = {}
+        self.navigation = QWidget(self)
+        self.navigation.hide()
+        self.navigation.setStyleSheet("""
+            QPushButton { padding: 7px 5px; font-size: 12px; border: 1px solid transparent; border-radius: 6px; }
+            QPushButton:checked { color: #eeeeee; background: #252525; border-color: #303030; }
+            QPushButton:focus { border-color: #888888; }
+        """)
+        navigation_layout = QVBoxLayout(self.navigation)
+        navigation_layout.setContentsMargins(0, 0, 0, 0)
+        navigation_layout.setSpacing(4)
+        self.section_group = QButtonGroup(self)
+        self.section_buttons = {}
+        for index, (key, label) in enumerate((("general", "General"), ("appearance", "Appearance"),
+                                              ("alerts", "Alerts"), ("providers", "Providers"))):
+            if index % 2 == 0:
+                row = QHBoxLayout()
+                row.setSpacing(4)
+                navigation_layout.addLayout(row)
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setChecked(key == self.current_section)
+            button.setAccessibleName(label + " settings")
+            button.clicked.connect(lambda checked=False, section=key: self.select_section(section))
+            self.section_group.addButton(button)
+            self.section_buttons[key] = button
+            row.addWidget(button)
+            section = QWidget()
+            section.setVisible(key == self.current_section)
+            section_layout = QVBoxLayout(section)
+            section_layout.setContentsMargins(0, 0, 0, 0)
+            section_layout.setSpacing(8)
+            self.sections[key] = section
+            layout.addWidget(section)
+        layout.addStretch()
+        general = self.sections["general"].layout()
+        general.addWidget(plain_label("Active provider & limit", "#eeeeee"))
+        hint = plain_label("Choose the account and limit shown in the bar.", "#666666")
+        hint.setWordWrap(True)
+        general.addWidget(hint)
         self.active = QComboBox()
         self.active.setIconSize(QSize(16, 16))
         self.active.setAccessibleName("Active provider and limit")
-        layout.addWidget(self.active)
-        layout.addSpacing(14)
+        general.addWidget(self.active)
+        self.startup = QCheckBox("Start when I sign in to Windows")
+        self.startup.setVisible(paths.IS_WINDOWS)
+        self.startup.setChecked(startup_enabled())
+        general.addWidget(self.startup)
+        general.addSpacing(14)
+        self.about_button = QPushButton("About AI Status")
+        self.about_button.clicked.connect(self.about_requested)
+        general.addWidget(self.about_button)
+        appearance = self.sections["appearance"].layout()
         selected = state.load_selected() or {}
-        layout.addWidget(plain_label("Usage display", "#eeeeee"))
+        appearance.addWidget(plain_label("Usage display", "#eeeeee"))
         self.usage_display = QComboBox()
         self.usage_display.setAccessibleName("Usage display")
         for value, label in (("used", "Used"), ("remaining", "Remaining")):
             self.usage_display.addItem(label, value)
         self.usage_display.setCurrentIndex(self.usage_display.findData(state.get_usage_display(selected)))
-        layout.addWidget(self.usage_display)
-        layout.addSpacing(14)
-        layout.addWidget(plain_label("Bar display", "#eeeeee"))
+        appearance.addWidget(self.usage_display)
+        appearance.addSpacing(14)
+        appearance.addWidget(plain_label("Bar display", "#eeeeee"))
         self.display = {}
         for key, label, default in (("show_provider", "Provider name", True),
                                     ("show_model", "Model / plan", True),
@@ -849,18 +898,18 @@ class ProviderSettings(QWidget):
             checkbox = QCheckBox(label)
             checkbox.setChecked(selected.get(key, default))
             self.display[key] = checkbox
-            layout.addWidget(checkbox)
+            appearance.addWidget(checkbox)
         self.icon_mode = QComboBox()
         self.icon_mode.setAccessibleName("Bar icon")
         for value, label in (("off", "None"), ("bot", "Bot"), ("logo", "Provider logo")):
             self.icon_mode.addItem("Icon: " + label, value)
         self.icon_mode.setCurrentIndex(self.icon_mode.findData(state.get_icon_mode(selected)))
-        layout.addWidget(self.icon_mode)
-        layout.addSpacing(14)
-        layout.addWidget(plain_label("Providers", "#eeeeee"))
+        appearance.addWidget(self.icon_mode)
+        providers = self.sections["providers"].layout()
+        providers.addWidget(plain_label("Providers", "#eeeeee"))
         hint = plain_label("Enable providers and set their order.", "#666666")
         hint.setWordWrap(True)
-        layout.addWidget(hint)
+        providers.addWidget(hint)
         self.providers = ProviderList()
         enabled = config.enabled_connection_order()
         available = config.available_connections()
@@ -874,17 +923,8 @@ class ProviderSettings(QWidget):
             item.setSizeHint(QSize(0, 36))
             self.providers.addItem(item)
         self.providers.setFixedHeight(self.providers.count() * 36 + 4)
-        layout.addWidget(self.providers)
-        self.startup = QCheckBox("Start when I sign in to Windows")
-        self.startup.setVisible(paths.IS_WINDOWS)
-        self.startup.setChecked(startup_enabled())
-        layout.addWidget(self.startup)
-        layout.addSpacing(14)
-        self.add_notification_controls(layout)
-        layout.addSpacing(14)
-        self.about_button = QPushButton("About AI Status")
-        self.about_button.clicked.connect(self.about_requested)
-        layout.addWidget(self.about_button)
+        providers.addWidget(self.providers)
+        self.add_notification_controls(self.sections["alerts"].layout())
         self.message = plain_label("")
         self.message.setWordWrap(True)
         self.message.hide()
@@ -915,6 +955,29 @@ class ProviderSettings(QWidget):
         self.active.currentIndexChanged.connect(self.notification_choice_changed)
         self.startup.toggled.connect(self.clear_message)
 
+    def select_section(self, key):
+        if key not in self.sections or key == self.current_section:
+            return
+        scroll = getattr(self.dashboard, "settings_scroll", None)
+        if scroll and self.dashboard.configuring():
+            self.section_positions[self.current_section] = scroll.verticalScrollBar().value()
+        focus = self.focusWidget()
+        leaving_section = self.sections[self.current_section]
+        self.current_section = key
+        for section_key, section in self.sections.items():
+            section.setVisible(section_key == key)
+        self.section_buttons[key].setChecked(True)
+        self.layout().activate()
+        if focus and leaving_section.isAncestorOf(focus):
+            self.section_buttons[key].setFocus()
+        if scroll and self.dashboard.configuring():
+            self.dashboard.fit_content()
+            scroll.verticalScrollBar().setValue(self.section_positions.get(key, 0))
+
+    def change_active_limit(self):
+        self.select_section("general")
+        self.active.setFocus()
+
     def add_notification_controls(self, layout):
         self.notification_settings = notifications.load_settings()
         self.notification_rule_choice = None
@@ -925,6 +988,14 @@ class ProviderSettings(QWidget):
             }
             for rule in self.notification_settings.get("rules", [])
         }
+        layout.addWidget(plain_label("Active account & limit", "#eeeeee"))
+        self.notification_rule_label = plain_label("", "#666666")
+        self.notification_rule_label.setWordWrap(True)
+        layout.addWidget(self.notification_rule_label)
+        self.notification_change_limit = QPushButton("Change in General")
+        self.notification_change_limit.clicked.connect(self.change_active_limit)
+        layout.addWidget(self.notification_change_limit)
+        layout.addSpacing(14)
         layout.addWidget(plain_label("Quota notifications", "#eeeeee"))
         self.notifications_enabled = QCheckBox("Notify before quota limits")
         self.notifications_enabled.setChecked(self.notification_settings["enabled"])
@@ -970,9 +1041,8 @@ class ProviderSettings(QWidget):
         work_times.addWidget(self.notification_work_start)
         work_times.addWidget(self.notification_work_end)
         layout.addLayout(work_times)
-        self.notification_rule_label = plain_label("", "#666666")
-        self.notification_rule_label.setWordWrap(True)
-        layout.addWidget(self.notification_rule_label)
+        layout.addSpacing(14)
+        layout.addWidget(plain_label("Account & limit override", "#eeeeee"))
         self.notification_rule_custom = QCheckBox("Customize this account and limit")
         layout.addWidget(self.notification_rule_custom)
         self.notification_rule_enabled = QCheckBox("Notify for this account and limit")
@@ -1002,7 +1072,7 @@ class ProviderSettings(QWidget):
         self.store_notification_rule()
         choice = self.active.currentData()
         self.notification_rule_choice = (choice[0], choice[2]) if choice else None
-        self.notification_rule_label.setText("Alerts for " + self.active.currentText() if choice else "Select an active account and limit above.")
+        self.notification_rule_label.setText(self.active.currentText() if choice else "Select an active account and limit in General.")
         draft = self.notification_rule_drafts.get(self.notification_rule_choice, {})
         self.notification_rule_custom.setChecked(draft.get("custom", False))
         self.notification_rule_enabled.setChecked(draft.get("enabled", True))
@@ -1089,17 +1159,20 @@ class ProviderSettings(QWidget):
                  if self.providers.item(i).checkState() == Qt.CheckState.Checked]
         display = {key: checkbox.isChecked() for key, checkbox in self.display.items()}
         if not any(display.values()):
+            self.select_section("appearance")
             self.message.setText("Show at least one text field in the bar.")
             self.message.show()
             return
         usage_display = self.usage_display.currentData()
         if usage_display not in state.USAGE_DISPLAY_MODES:
+            self.select_section("appearance")
             self.message.setText("Choose Used or Remaining for usage display.")
             self.message.show()
             return
         try:
             notification_settings = self.collect_notification_settings()
         except ValueError as error:
+            self.select_section("alerts")
             self.message.setText(str(error))
             self.message.show()
             return
@@ -1157,7 +1230,7 @@ class AboutView(QWidget):
         for text in (
             "Tray: click to show usage; right-click for settings and other actions.",
             "Usage: click a limit to show it in the tray. Credit rows open balance and validity details. Refresh checks now.",
-            "Settings: pick a limit, text and icon. Enable providers and reorder them with arrows or drag and drop. Save applies changes and keeps settings open.",
+            "Settings: General selects a limit; Appearance controls text and icons; Alerts configures notifications; Providers enables and reorders accounts. Save applies all sections and keeps settings open.",
             "Keyboard: R refreshes, C opens settings, Esc goes back. Tab moves between controls; Alt+Up/Down reorders providers.",
         ):
             label = plain_label(text)
@@ -1392,7 +1465,13 @@ class Dashboard(QWidget):
         self.settings_scroll = QScrollArea()
         self.settings_scroll.setWidgetResizable(True)
         self.settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.settings_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.pages.addWidget(self.settings_scroll)
+        self.settings_navigation = QWidget()
+        self.settings_navigation_layout = QVBoxLayout(self.settings_navigation)
+        self.settings_navigation_layout.setContentsMargins(16, 12, 16, 0)
+        self.settings_navigation.hide()
+        self.panel_layout.insertWidget(1, self.settings_navigation)
         self.about_scroll = QScrollArea()
         self.about_scroll.setWidgetResizable(True)
         self.about_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -1662,6 +1741,7 @@ class Dashboard(QWidget):
         self.refresh_button.setVisible(not configuring and not about_page and not update_page)
         self.settings_button.setVisible(not configuring and not about_page and not update_page and not self.viewing_credit_details())
         self.settings_footer.setVisible(configuring)
+        self.settings_navigation.setVisible(configuring)
 
     def animate(self):
         self.animation_frame += 1
@@ -1690,11 +1770,15 @@ class Dashboard(QWidget):
                 previous.deleteLater()
             while self.settings_footer_layout.count():
                 self.settings_footer_layout.takeAt(0).widget().deleteLater()
+            while self.settings_navigation_layout.count():
+                self.settings_navigation_layout.takeAt(0).widget().deleteLater()
             self.settings_view = ProviderSettings(self)
             self.settings_view.saved.connect(self.settings_saved)
             self.settings_view.cancelled.connect(self.show_usage)
             self.settings_view.about_requested.connect(self.show_about)
             self.settings_scroll.setWidget(self.settings_view)
+            self.settings_navigation_layout.addWidget(self.settings_view.navigation)
+            self.settings_view.navigation.show()
             self.settings_footer_layout.addWidget(self.settings_view.buttons)
             self.settings_view.buttons.show()
             self.reset_provider = None
@@ -1705,7 +1789,7 @@ class Dashboard(QWidget):
             self.fit_content()
         if not self.isVisible():
             self.show_dashboard()
-        self.settings_view.active.setFocus()
+        self.settings_view.section_buttons[self.settings_view.current_section].setFocus()
 
     def settings_saved(self):
         self.last_config = config.load_config()
@@ -2125,7 +2209,9 @@ class Dashboard(QWidget):
         content.layout().activate()
         height = content.heightForWidth(self.width() - 2) if content.hasHeightForWidth() else content.sizeHint().height()
         height = max(height, content.minimumSizeHint().height())
-        natural_height = height + 57 + (self.settings_footer.sizeHint().height() if self.configuring() else 0)
+        settings_height = (self.settings_footer.sizeHint().height() + self.settings_navigation.sizeHint().height()
+                           if self.configuring() else 0)
+        natural_height = height + 57 + settings_height
         screen = self.screen().availableGeometry()
         bottom = self.geometry().bottom()
         self.resize(self.width(), min(max(180, natural_height), 720, max(180, screen.height() - 32)))

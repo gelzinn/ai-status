@@ -62,7 +62,7 @@ Column {
         Label { text: "Quick guide"; font.bold: true }
         Label { text: "Bar: click to show usage; right-click to open settings. Scroll to switch providers; middle-click to switch limits." }
         Label { text: "Usage: click a limit to show it in the bar. Refresh checks now; Reset credits shows the available resets. Update available opens the update guide." }
-        Label { text: "Settings: pick a limit, text and icon. Enable providers and reorder them with the arrows. Save applies changes and keeps settings open." }
+        Label { text: "Settings: use General, Appearance, Alerts and Providers to configure the bar and quota notifications. Save applies all changes and keeps settings open." }
         Label { text: "Keyboard: R refreshes, C opens settings, Esc goes back. Tab moves between controls; arrows move through selector options." }
     }
 }

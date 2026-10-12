@@ -274,14 +274,20 @@ Item {
             verify(settings.selectedLabel.indexOf("Fable") !== -1)
         }
         function test_controls_respond_to_click_and_keyboard() {
+            settings.selectSection("appearance")
+            wait(20)
             const checkbox = findChild(settings, "display-show_pct")
             verify(checkbox !== null)
             mouseClick(checkbox)
             verify(!settings.display.show_pct)
             keyClick(Qt.Key_Space)
             verify(settings.display.show_pct)
+            settings.selectSection("providers")
+            wait(20)
             mouseClick(findChild(settings, "provider-claude"))
             compare(settings.selected.provider, "codex")
+            settings.selectSection("general")
+            wait(20)
             mouseClick(findChild(settings, "active-provider"))
             verify(settings.selectionOpen)
         }
@@ -361,8 +367,10 @@ Item {
             const icon = findChild(settings, "icon-mode")
             const usageDisplay = findChild(settings, "usage-display")
             wait(20)
-            const height = settings.implicitHeight
             for (const trigger of [provider, icon, usageDisplay]) {
+                settings.selectSection(trigger === provider ? "general" : "appearance")
+                wait(20)
+                const height = settings.implicitHeight
                 compare(trigger.trailingIconName, "chevron-down")
                 const chevron = findChild(trigger, "trailing-icon")
                 compare(chevron.x + chevron.width, trigger.width - 8)
@@ -382,21 +390,73 @@ Item {
             compare(settings.selected.metric, "weekly")
             compare(settings.iconMode, "logo")
             compare(settings.usageDisplay, "remaining")
+            settings.selectSection("appearance")
+            wait(20)
             mouseClick(icon)
             wait(20)
             keyClick(Qt.Key_Home)
             keyClick(Qt.Key_Return)
             compare(settings.iconMode, "off")
+            settings.selectSection("general")
+            wait(20)
             mouseClick(provider)
             wait(20)
             keyClick(Qt.Key_Escape)
             verify(!provider.popupOpen)
             verify(settings.visible)
+            settings.selectSection("appearance")
+            wait(20)
+            const height = settings.implicitHeight
             mouseClick(icon)
             wait(20)
             mouseClick(icon.popupItem, 370, 780)
             verify(!icon.popupOpen)
             compare(settings.implicitHeight, height)
+        }
+        function test_submenus_keep_one_draft_and_cancel_reloads_every_section() {
+            const provider = findChild(settings, "active-provider")
+            mouseClick(provider)
+            verify(settings.selectionOpen)
+            settings.selectSection("appearance")
+            verify(!settings.selectionOpen)
+            settings.usageDisplay = "remaining"
+            settings.iconMode = "logo"
+            settings.selectSection("alerts")
+            settings.alertThresholds = "90,100"
+            settings.selectSection("providers")
+            settings.toggleProvider("kiro")
+            settings.selectSection("general")
+            settings.selected = {provider: "codex", idx: 0, metric: "weekly"}
+            settings.save()
+            compare(Plugin.Model.saved.usageDisplay, "remaining")
+            compare(Plugin.Model.saved.iconMode, "logo")
+            compare(Plugin.Model.saved.notifications.thresholds.join(","), "90,100")
+            verify(Plugin.Model.saved.enabled.indexOf("kiro") !== -1)
+            compare(Plugin.Model.saved.selected.provider, "codex")
+            settings.selectSection("providers")
+            settings.begin()
+            compare(settings.section, "general")
+            compare(settings.usageDisplay, "used")
+            compare(settings.alertThresholds, "80,95,100")
+            verify(settings.enabledProviders.indexOf("kiro") === -1)
+        }
+        function test_invalid_hidden_section_has_a_visible_review_action() {
+            settings.alertThresholds = "101"
+            settings.selectSection("appearance")
+            wait(20)
+            verify(!settings.valid)
+            compare(settings.validationSection, "alerts")
+            const review = findChild(settings, "settings-review-validation")
+            verify(review.visible)
+            mouseClick(review)
+            compare(settings.section, "alerts")
+            verify(!review.visible)
+            settings.selectSection("unknown")
+            compare(settings.section, "alerts")
+            Plugin.Model.settingsSaving = true
+            settings.selectSection("general")
+            compare(settings.section, "alerts")
+            Plugin.Model.settingsSaving = false
         }
         function test_usage_display_draft_save_reopen_and_validation() {
             compare(settings.usageDisplay, "used")

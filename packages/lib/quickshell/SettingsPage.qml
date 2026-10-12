@@ -24,6 +24,23 @@ Column {
     property Item popupParent: parent
     readonly property bool selectionOpen: providerSelector.popupOpen || iconSelector.popupOpen || usageDisplaySelector.popupOpen
     property bool saved: false
+    property bool inlineValidation: true
+    property string section: "general"
+    readonly property var sections: [
+        {key: "general", label: "General"},
+        {key: "appearance", label: "Appearance"},
+        {key: "alerts", label: "Alerts"},
+        {key: "providers", label: "Providers"}
+    ]
+    readonly property string validationSection: enabledProviders.length === 0 ? "providers"
+        : !Object.keys(display).some(key => display[key]) || ["used", "remaining"].indexOf(usageDisplay) === -1 ? "appearance"
+        : !choices.some(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) ? "general"
+        : !valid ? "alerts" : ""
+    readonly property string validationMessage: validationSection === "providers" ? "Enable at least one provider in Providers."
+        : validationSection === "appearance" ? "Choose a usage display and at least one bar text field in Appearance."
+        : validationSection === "general" ? "Choose an active provider and limit in General."
+        : validationSection === "alerts" ? "Alert thresholds must be whole percentages from 1 to 100. Review Alerts."
+        : ""
     signal aboutRequested()
     readonly property var choices: {
         const items = []
@@ -90,6 +107,7 @@ Column {
     onAlertQuietHoursChanged: saved = false
     onAlertWorkHoursChanged: saved = false
     onVisibleChanged: if (!visible) closeSelectors()
+    onSectionChanged: closeSelectors()
 
     Connections {
         target: Plugin.Model
@@ -127,6 +145,7 @@ Column {
     }
 
     function begin() {
+        section = "general"
         const settings = Plugin.Model.snapshot.settings || {}
         order = (settings.order || []).slice()
         enabledProviders = (settings.enabled || []).slice()
@@ -145,9 +164,18 @@ Column {
     }
 
     function focusFirstControl() {
-        providerSelector.forceActiveFocus(Qt.TabFocusReason)
+        const first = section === "appearance" ? usageDisplaySelector
+            : section === "alerts" ? alertAccountButton
+            : section === "providers" && providerRows.count > 0 ? providerRows.itemAt(0).firstControl : providerSelector
+        if (first) first.forceActiveFocus(Qt.TabFocusReason)
     }
     function focusAboutControl() { aboutButton.forceActiveFocus(); return aboutButton }
+
+    function selectSection(key) {
+        if (Plugin.Model.settingsSaving || !sections.some(item => item.key === key)) return
+        closeSelectors()
+        section = key
+    }
 
     function toggleProvider(name) {
         enabledProviders = enabledProviders.indexOf(name) === -1 ? enabledProviders.concat([name]) : enabledProviders.filter(item => item !== name)
@@ -256,9 +284,12 @@ Column {
     }
 
     Column {
+        objectName: "settings-section-general"
+        visible: root.section === "general"
         width: parent.width
         spacing: Style.space(8)
         Label { text: "Active provider & limit"; font.bold: true }
+        Label { text: "Choose the account and limit shown in the bar."; opacity: 0.5; font.pixelSize: Style.font.caption }
         Plugin.PanelSelect {
             id: providerSelector
             objectName: "active-provider"
@@ -278,6 +309,8 @@ Column {
         }
     }
     Column {
+        objectName: "settings-section-appearance"
+        visible: root.section === "appearance"
         width: parent.width
         spacing: Style.space(8)
         Label { text: "Usage display"; font.bold: true }
@@ -296,6 +329,7 @@ Column {
         }
     }
     Column {
+        visible: root.section === "appearance"
         width: parent.width
         spacing: Style.space(4)
         Label { text: "Bar display"; font.bold: true }
@@ -336,10 +370,23 @@ Column {
         }
     }
     Column {
+        objectName: "settings-section-alerts"
+        visible: root.section === "alerts"
         width: parent.width
         spacing: Style.space(8)
         Label { text: "Quota alerts"; font.bold: true }
         Label { text: "Alerts use quota consumed. Recovery requires a successful fresh check of all applicable limits."; opacity: 0.5; font.pixelSize: Style.font.caption }
+        Label { text: "Selected account & limit: " + root.selectedLabel; font.pixelSize: Style.font.caption }
+        Button {
+            id: alertAccountButton
+            objectName: "alerts-change-selection"
+            width: parent.width
+            text: "Change account & limit"
+            alignLeft: true
+            trailingIconName: "arrow-right"
+            outlined: true
+            onClicked: root.selectSection("general")
+        }
         Repeater {
             model: [{key: "enabled", label: "Desktop quota alerts"}, {key: "recovery", label: "Notify when capacity recovers"}, {key: "recent_only", label: "Recovery only for accounts active in the last 24h"}]
             delegate: Button {
@@ -347,6 +394,7 @@ Column {
                 objectName: "alerts-" + modelData.key
                 width: parent.width
                 alignLeft: true
+                multiline: true
                 text: (root.alertSettings[modelData.key] ? "[x]  " : "[ ]  ") + modelData.label
                 Accessible.role: Accessible.CheckBox
                 Accessible.checked: !!root.alertSettings[modelData.key]
@@ -360,6 +408,7 @@ Column {
             objectName: "alert-rule-customize"
             width: parent.width
             alignLeft: true
+            multiline: true
             text: (root.selectedAlertRule ? "[x]  " : "[ ]  ") + "Custom alerts for selected account & limit"
             onClicked: {
                 if (root.selectedAlertRule) {
@@ -398,6 +447,8 @@ Column {
         Field { objectName: "alerts-work-hours"; text: root.alertWorkHours; label: "Working hours"; onEdited: value => root.setHours("work_hours", value) }
     }
     Column {
+        objectName: "settings-section-providers"
+        visible: root.section === "providers"
         width: parent.width
         spacing: Style.space(6)
         Label { text: "Providers"; font.bold: true }
@@ -407,13 +458,16 @@ Column {
             font.pixelSize: Style.font.caption
         }
         Repeater {
+            id: providerRows
             model: root.order
             delegate: Row {
                 required property string modelData
                 required property int index
                 width: root.width
                 spacing: Style.space(4)
+                property alias firstControl: providerButton
                 Button {
+                    id: providerButton
                     objectName: "provider-" + parent.modelData
                     width: Math.max(0, parent.width - Style.space(68))
                     prefixText: root.enabledProviders.indexOf(parent.modelData) !== -1 ? "[x]" : "[ ]"
@@ -425,6 +479,7 @@ Column {
                     onClicked: root.toggleProvider(parent.modelData)
                 }
                 Button {
+                    objectName: "provider-move-up-" + parent.modelData
                     width: Style.space(30)
                     iconName: "arrow-up"
                     enabled: parent.index > 0
@@ -432,6 +487,7 @@ Column {
                     onClicked: root.moveProvider(parent.index, -1)
                 }
                 Button {
+                    objectName: "provider-move-down-" + parent.modelData
                     width: Style.space(30)
                     iconName: "arrow-down"
                     enabled: parent.index < root.order.length - 1
@@ -442,14 +498,23 @@ Column {
         }
     }
     Label {
-        visible: text !== ""
-        text: Plugin.Model.settingsError || (!root.valid ? "Enable a provider and at least one bar text field, then choose a limit." : "")
+        visible: root.inlineValidation && text !== ""
+        text: Plugin.Model.settingsError || root.validationMessage
         color: Commons.Color.urgent
         font.pixelSize: Style.font.caption
     }
     Button {
+        objectName: "settings-review-validation"
+        visible: root.inlineValidation && root.validationSection !== "" && root.validationSection !== root.section
+        width: parent.width
+        text: root.validationSection ? "Review " + root.sections.find(item => item.key === root.validationSection).label : ""
+        outlined: true
+        onClicked: root.selectSection(root.validationSection)
+    }
+    Button {
         id: aboutButton
         objectName: "settings-about"
+        visible: root.section === "general"
         width: parent.width
         text: "About AI Status"
         alignLeft: true

@@ -183,7 +183,7 @@ Ui.Panel {
         open: root.opened
         focusTarget: keyCatcher
         contentWidth: panel.fittedContentWidth(Style.space(380))
-        contentHeight: panel.fittedContentHeight(header.height + panel.padding + Style.space(13) + content.implicitHeight + (footer.visible ? footer.height + Style.space(12) : 0), Style.space(680))
+        contentHeight: panel.fittedContentHeight(header.height + panel.padding + Style.space(13) + content.implicitHeight + (settingsNavigation.visible ? settingsNavigation.height + Style.space(12) : 0) + (footer.visible ? footer.height + Style.space(12) : 0), Style.space(680))
 
         Ui.PanelKeyCatcher {
             id: keyCatcher
@@ -195,7 +195,7 @@ Ui.Panel {
             }
             onTabRequested: direction => {
                 if (root.aboutPage) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
-                else if (root.configurationPage) settings.focusFirstControl()
+                else if (root.configurationPage) settingsNavigation.focusCurrentControl()
                 else if (root.resetProvider || root.creditSelection) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
                 else if (root.updatePage) updates.focusFirstControl()
                 else root.switchPanel(direction)
@@ -287,10 +287,52 @@ Ui.Panel {
                 color: Qt.rgba(root.barForeground.r, root.barForeground.g, root.barForeground.b, 0.12)
             }
 
+            Grid {
+                id: settingsNavigation
+                objectName: "settings-navigation"
+                anchors.top: divider.bottom
+                anchors.topMargin: Style.space(12)
+                width: parent.width
+                columns: 2
+                spacing: Style.space(4)
+                visible: root.configurationPage && !root.aboutPage
+                enabled: !Plugin.Model.settingsSaving
+                function focusCurrentControl() {
+                    sectionButtons.itemAt(settings.sections.findIndex(item => item.key === settings.section)).forceActiveFocus(Qt.TabFocusReason)
+                }
+                function moveFocus(index, offset) {
+                    const next = (index + offset + sectionButtons.count) % sectionButtons.count
+                    sectionButtons.itemAt(next).forceActiveFocus(Qt.TabFocusReason)
+                }
+                Repeater {
+                    id: sectionButtons
+                    model: settings.sections
+                    delegate: Plugin.PanelButton {
+                        required property var modelData
+                        required property int index
+                        objectName: "settings-nav-" + modelData.key
+                        width: (settingsNavigation.width - settingsNavigation.spacing) / 2
+                        text: modelData.label
+                        fontFamily: root.panelFont
+                        foreground: root.barForeground
+                        outlined: true
+                        color: settings.section === modelData.key ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.12)
+                            : activeFocus ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.06) : "transparent"
+                        Accessible.role: Accessible.PageTab
+                        Accessible.selected: settings.section === modelData.key
+                        onClicked: settings.selectSection(modelData.key)
+                        Keys.onLeftPressed: settingsNavigation.moveFocus(index, -1)
+                        Keys.onRightPressed: settingsNavigation.moveFocus(index, 1)
+                        Keys.onUpPressed: settingsNavigation.moveFocus(index, -2)
+                        Keys.onDownPressed: settingsNavigation.moveFocus(index, 2)
+                    }
+                }
+            }
+
             Flickable {
                 id: scroller
                 objectName: "panel-scroller"
-                anchors.top: divider.bottom
+                anchors.top: settingsNavigation.visible ? settingsNavigation.bottom : divider.bottom
                 anchors.topMargin: Style.space(12)
                 anchors.bottom: footer.visible ? footer.top : parent.bottom
                 anchors.bottomMargin: footer.visible ? Style.space(12) : 0
@@ -370,7 +412,18 @@ Ui.Panel {
                         foreground: root.barForeground
                         fontFamily: root.panelFont
                         popupParent: keyCatcher
+                        inlineValidation: false
                         onAboutRequested: root.showAbout()
+                        onSectionChanged: {
+                            scroller.cancelFlick()
+                            scroller.contentY = 0
+                            Qt.callLater(() => {
+                                content.forceLayout()
+                                if (!root.configurationPage || root.aboutPage) return
+                                const item = keyCatcher.Window.window ? keyCatcher.Window.window.activeFocusItem : null
+                                if (item && !item.visible) settingsNavigation.focusCurrentControl()
+                            })
+                        }
                     }
                     Plugin.AboutPage {
                         width: parent.width
@@ -385,7 +438,7 @@ Ui.Panel {
                 objectName: "settings-footer"
                 anchors.bottom: parent.bottom
                 width: parent.width
-                height: footerDivider.height + Style.space(12) + footerActions.height
+                height: footerDivider.height + Style.space(12) + footerActions.height + (footerFeedback.visible ? footerFeedback.height + Style.space(8) : 0)
                 visible: root.configurationPage && !root.aboutPage
                 Rectangle {
                     id: footerDivider
@@ -394,6 +447,33 @@ Ui.Panel {
                     width: parent.width + panel.padding * 2
                     height: Style.space(1)
                     color: divider.color
+                }
+                Column {
+                    id: footerFeedback
+                    anchors.top: footerDivider.bottom
+                    anchors.topMargin: Style.space(12)
+                    width: parent.width
+                    spacing: Style.space(6)
+                    visible: !Plugin.Model.settingsSaving && (Plugin.Model.settingsError !== "" || settings.validationSection !== "")
+                    Text {
+                        objectName: "settings-validation-message"
+                        width: parent.width
+                        text: Plugin.Model.settingsError || settings.validationMessage
+                        textFormat: Text.PlainText
+                        wrapMode: Text.WordWrap
+                        color: Commons.Color.urgent
+                        font.family: root.panelFont
+                        font.pixelSize: Style.font.caption
+                    }
+                    Plugin.PanelButton {
+                        objectName: "settings-review-section"
+                        visible: settings.validationSection !== "" && settings.validationSection !== settings.section
+                        text: settings.validationSection ? "Review " + settings.sections.find(item => item.key === settings.validationSection).label : ""
+                        fontFamily: root.panelFont
+                        foreground: root.barForeground
+                        outlined: true
+                        onClicked: settings.selectSection(settings.validationSection)
+                    }
                 }
                 Item {
                     id: saveStatus

@@ -319,7 +319,7 @@ Item {
             prepareUpdate(true)
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
             const original = snapshot.providers[0].metrics[0]
-            for (let index = 0; index < 20; index++) {
+            for (let index = 0; index < 30; index++) {
                 const metric = Object.assign({}, original, {key: "rolling:long-" + index, name: "Usage " + index})
                 snapshot.providers[0].metrics.push(metric)
             }
@@ -574,7 +574,7 @@ Item {
         function configureManyProviders() {
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
             snapshot.settings.providerIds = {claude: "claude", codex: "codex", kiro: "kiro"}
-            for (let index = 0; index < 20; index++) {
+            for (let index = 0; index < 30; index++) {
                 const id = "account:scroll-" + index
                 const entry = JSON.parse(JSON.stringify(snapshot.providers[0]))
                 entry.id = id
@@ -589,9 +589,12 @@ Item {
             Plugin.Model.snapshot = snapshot
             panel.configure()
             wait(20)
+            const settings = findChild(panel, "panel-settings-page")
+            settings.selectSection("providers")
+            wait(20)
             const scroller = findChild(panel, "panel-scroller")
             verify(scroller.contentHeight > scroller.height * 2)
-            return findChild(panel, "panel-settings-page")
+            return settings
         }
         function verifyControlInViewport(control, scroller) {
             tryVerify(() => {
@@ -610,8 +613,8 @@ Item {
         function test_tab_and_backtab_reveal_controls_through_long_settings() {
             const settings = configureManyProviders()
             const scroller = findChild(panel, "panel-scroller")
-            const first = findChild(settings, "active-provider")
-            const last = findChild(settings, "settings-about")
+            const first = findChild(settings, "provider-claude")
+            const last = findChild(settings, "provider-move-up-" + settings.order[settings.order.length - 1])
             first.forceActiveFocus(Qt.TabFocusReason)
             verifyControlInViewport(first, scroller)
             compare(scroller.contentY, 0)
@@ -633,7 +636,7 @@ Item {
         function test_fixed_footer_and_header_focus_preserve_settings_scroll() {
             const settings = configureManyProviders()
             const scroller = findChild(panel, "panel-scroller")
-            const about = findChild(settings, "settings-about")
+            const about = findChild(settings, "provider-move-up-" + settings.order[settings.order.length - 1])
             scroller.contentY = Math.max(0, scroller.contentHeight - scroller.height)
             about.forceActiveFocus(Qt.TabFocusReason)
             verifyControlInViewport(about, scroller)
@@ -652,8 +655,80 @@ Item {
             verify(back.activeFocus)
             compare(scroller.contentY, position)
         }
+        function test_submenu_navigation_is_fixed_and_preserves_draft_and_keyboard_access() {
+            const settings = configureManyProviders()
+            settings.toggleProvider("kiro")
+            settings.usageDisplay = "remaining"
+            const scroller = findChild(panel, "panel-scroller")
+            const navigation = findChild(panel, "settings-navigation")
+            const providers = findChild(panel, "settings-nav-providers")
+            const appearance = findChild(panel, "settings-nav-appearance")
+            const navY = navigation.y
+            scroller.contentY = scroller.contentHeight - scroller.height
+            providers.forceActiveFocus(Qt.TabFocusReason)
+            wait(20)
+            compare(navigation.y, navY)
+            verify(scroller.contentY > scroller.height)
+            keyClick(Qt.Key_Up)
+            verify(appearance.activeFocus)
+            keyClick(Qt.Key_Return)
+            compare(settings.section, "appearance")
+            tryCompare(scroller, "contentY", 0)
+            compare(settings.usageDisplay, "remaining")
+            verify(settings.enabledProviders.indexOf("kiro") !== -1)
+            const general = findChild(panel, "settings-nav-general")
+            mouseClick(general)
+            compare(settings.section, "general")
+            wait(20)
+            general.forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Tab)
+            verify(appearance.activeFocus)
+            keyClick(Qt.Key_Tab)
+            verify(findChild(panel, "settings-nav-alerts").activeFocus)
+            keyClick(Qt.Key_Tab)
+            verify(providers.activeFocus)
+            keyClick(Qt.Key_Tab)
+            verify(findChild(settings, "active-provider").activeFocus)
+            // Controls in the other sections are skipped by the focus chain.
+            keyClick(Qt.Key_Tab)
+            verify(findChild(settings, "settings-about").activeFocus)
+            Plugin.Model.settingsSaving = true
+            verify(!navigation.enabled)
+            settings.selectSection("providers")
+            compare(settings.section, "general")
+            Plugin.Model.settingsSaving = false
+            mouseClick(findChild(panel, "settings-save"))
+            compare(Plugin.Model.saved.usageDisplay, "remaining")
+            panel.showUsage()
+            panel.configure()
+            compare(settings.section, "general")
+            compare(settings.usageDisplay, "used")
+        }
+        function test_hidden_validation_stays_in_fixed_footer_and_routes_to_affected_section() {
+            const settings = configureManyProviders()
+            const scroller = findChild(panel, "panel-scroller")
+            settings.alertThresholds = "101"
+            wait(20)
+            compare(scroller.contentY, 0)
+            verify(!findChild(panel, "settings-save").enabled)
+            const review = findChild(panel, "settings-review-section")
+            const footer = findChild(panel, "settings-footer")
+            verify(review.visible)
+            verify(review.mapToItem(footer, 0, 0).y >= 0)
+            verify(review.mapToItem(footer, 0, review.height).y <= footer.height)
+            verify(findChild(panel, "settings-validation-message").visible)
+            mouseClick(review)
+            compare(settings.section, "alerts")
+            verify(!review.visible)
+            settings.alertThresholds = "80,95,100"
+            wait(20)
+            verify(findChild(panel, "settings-save").enabled)
+            verify(!findChild(panel, "settings-validation-message").visible)
+        }
         function test_tab_dismisses_selector_without_scrolling_to_popup_overlay() {
             const settings = configureManyProviders()
+            settings.selectSection("general")
+            wait(20)
             const scroller = findChild(panel, "panel-scroller")
             const selector = findChild(settings, "active-provider")
             selector.forceActiveFocus(Qt.TabFocusReason)
@@ -665,7 +740,13 @@ Item {
             compare(scroller.contentY, position)
             keyClick(Qt.Key_Tab)
             tryCompare(selector, "popupOpen", false)
+            const about = findChild(settings, "settings-about")
+            tryVerify(() => about.activeFocus)
+            verifyControlInViewport(about, scroller)
+            settings.selectSection("appearance")
+            wait(20)
             const next = findChild(settings, "usage-display")
+            next.forceActiveFocus(Qt.TabFocusReason)
             tryVerify(() => next.activeFocus)
             verifyControlInViewport(next, scroller)
             keyClick(Qt.Key_Space)
