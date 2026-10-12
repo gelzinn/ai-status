@@ -40,7 +40,7 @@ jobs:
         id: package
         shell: pwsh
         run: |
-          $version = (Get-Content packages/lib/VERSION -Raw).Trim()
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') { throw "Invalid package version" }
           ./packages/lib/windows/build.ps1
           "version=$version" >> $env:GITHUB_OUTPUT
@@ -60,7 +60,7 @@ jobs:
           $env:QT_QPA_PLATFORM = "offscreen"
           python packages/lib/tests/packaged_smoke.py dist/ai-status/ai-status-cli.exe
           if ($LASTEXITCODE -ne 0) { throw "Packaged CLI smoke test failed" }
-          $version = (Get-Content packages/lib/VERSION -Raw).Trim()
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $installer = Join-Path $PWD "dist/ai-status-$version-windows-x64-setup.exe"
           $identity = (Get-Item $installer).VersionInfo
           $identity | Select-Object OriginalFilename, ProductName, CompanyName, FileDescription, ProductVersion | ConvertTo-Json -Compress | Write-Host

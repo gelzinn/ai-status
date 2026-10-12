@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Release Please creates a draft first. This also resumes an existing draft
 # after a failed upload, even when Release Please has no new outputs on retry.
-VERSION=$(cat packages/lib/VERSION)
+VERSION=$(python3 -c 'import json; print(json.load(open("package.json", encoding="utf-8"))["version"])')
 TAG="v$VERSION"
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -15,7 +15,7 @@ fi
 
 git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
 mkdir "$WORK_DIR/source"
-git archive "$TAG" packages/lib packages/shared | tar -x -C "$WORK_DIR/source"
+git archive "$TAG" package.json packages/lib packages/shared | tar -x -C "$WORK_DIR/source"
 python3 .github/scripts/build_release.py --source "$WORK_DIR/source" --output "$WORK_DIR/assets" --version "$VERSION"
 assets=("$WORK_DIR/assets/ai-status-$TAG.tar.gz" "$WORK_DIR/assets/SHA256SUMS")
 patterns=(--pattern "ai-status-$TAG.tar.gz" --pattern SHA256SUMS)

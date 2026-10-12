@@ -4,8 +4,8 @@ import path from "node:path";
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.resolve(__dirname, "../.."),
   outputFileTracingIncludes: {
-    "/": ["../../packages/lib/VERSION"],
-    "/opengraph-image": ["../../packages/lib/VERSION"],
+    "/": ["../../package.json"],
+    "/opengraph-image": ["../../package.json"],
     "/macos": ["../../packages/lib/MACOS.md"],
   },
 };

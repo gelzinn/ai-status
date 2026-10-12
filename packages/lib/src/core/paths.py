@@ -8,6 +8,8 @@ import tempfile
 IS_WINDOWS = sys.platform == "win32"
 LIB_DIR = (Path(sys._MEIPASS) / "lib" if getattr(sys, "frozen", False)
            else Path(__file__).resolve().parents[2])
+PROJECT_ROOT = (Path(sys._MEIPASS) if getattr(sys, "frozen", False)
+                else LIB_DIR.parents[1])
 PROVIDERS_DIR = LIB_DIR / "src" / "providers"
 CONFIG_DIR = (Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming")) / "ai-status"
               if IS_WINDOWS else Path.home() / ".config/ai-status")

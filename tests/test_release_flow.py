@@ -89,8 +89,9 @@ class DraftPublicationTests(unittest.TestCase):
         }
         shutil.copytree(ROOT / "packages/lib", self.repo / "packages/lib", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         shutil.copytree(ROOT / "packages/shared", self.repo / "packages/shared")
+        shutil.copyfile(ROOT / "package.json", self.repo / "package.json")
         shutil.copytree(ROOT / ".github/scripts", self.repo / ".github/scripts", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-        self.version = (self.repo / "packages/lib/VERSION").read_text().strip()
+        self.version = json.loads((self.repo / "package.json").read_text())["version"]
         self.tag = "v" + self.version
         self.asset = "ai-status-" + self.tag + ".tar.gz"
         self.git("init", "-b", "main")
@@ -263,11 +264,29 @@ else:
         self.assertEqual(first.read_bytes(), second.read_bytes())
         with tarfile.open(first) as archive:
             names = archive.getnames()
-        self.assertTrue(all(name.startswith(("packages/lib/", "packages/shared/")) for name in names))
+        self.assertTrue(all(name == "package.json" or name.startswith(("packages/lib/", "packages/shared/")) for name in names))
+        self.assertEqual(names.count("packages/lib/VERSION"), 1)
+        with tarfile.open(first) as archive:
+            self.assertEqual(json.load(archive.extractfile("package.json"))["version"], self.version)
+            self.assertEqual(archive.extractfile("packages/lib/VERSION").read().decode().strip(), self.version)
         self.assertFalse(any("__pycache__" in name or name.endswith(".pyc") for name in names))
         self.assertEqual((first.parent / "SHA256SUMS").read_text(), hashlib.sha256(first.read_bytes()).hexdigest() + "  " + first.name + "\n")
         with self.assertRaises(ValueError):
             builder.build(source, self.root / "wrong", "99.99.99")
+
+    def test_canonical_package_metadata_rejects_symlinks_and_non_objects(self):
+        package = self.repo / "package.json"
+        target = self.repo / "metadata.json"
+        package.rename(target)
+        package.symlink_to(target.name)
+        with self.assertRaisesRegex(ValueError, "Unexpected symlink"):
+            builder.build(self.repo, self.root / "linked", self.version)
+        package.unlink()
+        for contents in ("null", "[]", "{}", '{"version":"99.99.99"}'):
+            with self.subTest(contents=contents):
+                package.write_text(contents)
+                with self.assertRaises(ValueError):
+                    builder.build(self.repo, self.root / "invalid", self.version)
 
 
 if __name__ == "__main__":

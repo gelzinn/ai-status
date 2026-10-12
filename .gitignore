@@ -8,7 +8,6 @@ node_modules/
 !package.json
 !tsconfig.json
 !release-please-config.json
-!.release-please-manifest.json
 *.key
 *.pem
 *.cert

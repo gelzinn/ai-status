@@ -217,7 +217,7 @@ class SnapshotTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[3]
         manifest = json.loads((root / "manifest.json").read_text())
         self.assertTrue((root / manifest["entryPoints"]["barWidget"]).is_file())
-        self.assertEqual(manifest["version"], (root / "packages/lib/VERSION").read_text().strip())
+        self.assertEqual(manifest["version"], json.loads((root / "package.json").read_text())["version"])
 
     def test_unavailable_selection_does_not_report_zero_usage(self):
         data = DATA[1:] + [{"_dir": "claude", "_idx": 0, "provider": "Claude", "metrics": [], "_error": "Authentication failed"}]
@@ -238,7 +238,8 @@ class SnapshotTests(unittest.TestCase):
     def test_streamed_metrics_are_selectable_before_all_queries_finish(self):
         saved_cache = []
 
-        def query(on_result=None, include_errors=False):
+        def query(on_result=None, include_errors=False, check_updates=False):
+            self.assertTrue(check_updates)
             on_result("claude", DATA[:1])
             self.assertEqual(saved_cache, DATA[:1])
             self.assertNotIn("claude", daemon._pending)

@@ -1,6 +1,15 @@
 #!/bin/bash
 export VERSION
-VERSION=$(cat "$(dirname "$0")/VERSION")
+CONFIG_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ "${1:-}" != --repository-only ]; then
+    VERSION=$(python3 - "$CONFIG_LIB_DIR/src" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from core import __version__
+print(__version__)
+PY
+) || { return 1 2>/dev/null || exit 1; }
+fi
 
 WORKSPACE_CONFIG="$(dirname "$0")/../../workspace.config"
 if [ -f "$WORKSPACE_CONFIG" ]; then

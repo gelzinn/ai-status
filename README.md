@@ -242,7 +242,7 @@ process. The connection stores the variable reference, not the key value.
 - **Multiple accounts.** Add as many connections as you need for each provider, with independent labels, credentials, caches and selected metrics. Manage connections with `ai-status accounts`; enable and reorder them in the desktop Settings.
 - **Native settings.** Enable providers, reorder them and select limits inside the Omarchy, Windows and macOS panels. Windows also supports drag and drop; Waybar uses an interactive configuration TUI.
 - **Useful reset details.** See reset countdowns and available Claude/Codex reset credits, with expiry dates, remaining time and time zones when reported. Redeem credits in the provider's own app.
-- **Refresh when you need it.** Usage updates every five minutes, with manual refresh and loading feedback. Usable cached data remains visible when a refresh fails.
+- **Refresh when you need it.** Usage updates every five minutes, with manual refresh and loading feedback. Each refresh also checks for a newer stable release. Usable cached data remains visible when a refresh fails.
 - **Optional updates.** The blue update link opens instructions inside the desktop panel. Start an update in a terminal on Linux/macOS, or download and open a verified installer on Windows. Portable installations include manual instructions.
 - **A desktop runtime.** The Omarchy widget runs inside the existing shell with one backend across monitors. Windows uses Qt widgets with a bundled runtime. macOS uses SwiftUI/AppKit and the same Python backend. Desktop installation requires no Node or NPM.
 
@@ -344,6 +344,7 @@ Credentials come from your local provider authentication stores or explicitly co
 
 | Path | Purpose |
 | --- | --- |
+| `package.json` | Canonical product version and npm workspaces |
 | `packages/lib/src/bin/ai-status` | CLI entry point |
 | `packages/lib/src/core/` | Shared queries, state, output and desktop adapter |
 | `packages/lib/src/providers/` | Provider collectors and parsers |
@@ -353,7 +354,7 @@ Credentials come from your local provider authentication stores or explicitly co
 | `packages/shared/providers/` | Provider names, logos and metadata |
 | `apps/web/` | Website, interactive preview and documentation |
 | `docs/development/` | Platform build and development validation instructions |
-| `manifest.json` | Omarchy plugin contract |
+| `manifest.json` | Omarchy plugin contract; version synchronized from `package.json` |
 
 </details>
 

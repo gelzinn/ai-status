@@ -2,6 +2,8 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../../..")).Path
 Push-Location $repoRoot
 try {
+    $version = python -c "import sys; sys.path.insert(0, 'packages/lib/src'); from core import __version__; print(__version__)"
+    if ($LASTEXITCODE -ne 0) { throw "Product version validation failed" }
     python packages/lib/windows/assets.py
     if ($LASTEXITCODE -ne 0) { throw "Application icon build failed" }
     $previousCompression = $env:PYINSTALLER_ZLIB_COMPRESSION_LEVEL
@@ -18,7 +20,6 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "GUI launcher build failed" }
     python packages/lib/windows/licenses.py dist/ai-status/THIRD_PARTY_LICENSES.txt
     if ($LASTEXITCODE -ne 0) { throw "License collection failed" }
-    $version = (Get-Content packages/lib/VERSION -Raw).Trim()
     $compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
     if ($compiler) {
         & $compiler.Source "/DAppVersion=$version" packages/lib/windows/installer.iss
