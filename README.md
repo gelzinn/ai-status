@@ -160,7 +160,15 @@ ai-status status             # Collect usage and print JSON
 ai-status doctor             # Installation details as JSON
 ai-status update             # Start the updater for your installation
 ai-status config             # Provider and display settings
+ai-status config --usage-display remaining  # Show quota remaining
+ai-status config --usage-display used       # Show quota used (default)
 ```
+
+Choose **Used** or **Remaining** in Settings, the terminal configuration UI,
+or the Linux installation wizard. The CLI option saves the same preference
+without opening Settings. It applies to quota percentages, progress bars, and
+amounts with a known limit; uncapped spend and available balances keep their
+original meaning.
 
 Sign in through the provider's own app or CLI. Your normal Codex login supplies
 the default Codex connection; it does not need `accounts add`.
