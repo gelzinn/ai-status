@@ -8,6 +8,7 @@ Column {
     property color foreground: "white"
     property string fontFamily: Style.font.family
     signal resetRequested(string provider, int idx)
+    signal creditRequested(string provider, int idx, string creditId)
     signal settingsRequested()
     spacing: Style.space(20)
 
@@ -18,6 +19,13 @@ Column {
         for (let index = 0; index < providerRepeater.count; index++) {
             const item = providerRepeater.itemAt(index)
             if (item.modelData.id === id && item.modelData.idx === idx) return item.resetLink
+        }
+        return null
+    }
+    function creditButton(id, idx, creditId) {
+        for (let index = 0; index < providerRepeater.count; index++) {
+            const item = providerRepeater.itemAt(index)
+            if (item.modelData.id === id && item.modelData.idx === idx) return item.creditButton(creditId)
         }
         return null
     }
@@ -66,6 +74,13 @@ Column {
             width: root.width
             spacing: Style.space(10)
             function choose(key) { Plugin.Model.selectMetric(modelData.id, modelData.idx, key) }
+            function creditButton(creditId) {
+                for (let index = 0; index < metricRepeater.count; index++) {
+                    const item = metricRepeater.itemAt(index)
+                    if (item.creditEntry && item.creditEntry.id === creditId) return item
+                }
+                return null
+            }
             function syncMetrics() { StableList.sync(metrics, modelData.metrics, entry => entry.key) }
             onModelDataChanged: syncMetrics()
             Component.onCompleted: syncMetrics()
@@ -129,6 +144,7 @@ Column {
                 width: parent.width
                 spacing: Style.space(10)
                 Repeater {
+                    id: metricRepeater
                     model: metrics
                     delegate: Item {
                         id: metric
@@ -136,30 +152,49 @@ Column {
                         required property var entry
                         readonly property var modelData: entry
                         readonly property bool selected: provider.selected && modelData.key === Plugin.Model.snapshot.selected.metric
-                        readonly property bool inlineAmount: modelData.isAmount === true
+                        readonly property var creditEntry: (provider.modelData.monetaryCredits || []).find(item => "credits:" + item.id === modelData.key) || null
+                        readonly property bool inlineAmount: !!creditEntry || modelData.isAmount === true
                         width: provider.width
                         implicitHeight: block.implicitHeight
                         activeFocusOnTab: true
                         Accessible.role: Accessible.Button
                         Accessible.name: provider.modelData.name + " " + modelData.name + " " + (modelData.value || Math.round(modelData.percentage) + "%")
-                        Keys.onReturnPressed: provider.choose(modelData.key)
-                        Keys.onSpacePressed: provider.choose(modelData.key)
+                        function activate() {
+                            if (creditEntry) root.creditRequested(provider.modelData.id, provider.modelData.idx, creditEntry.id)
+                            else provider.choose(modelData.key)
+                        }
+                        Keys.onReturnPressed: activate()
+                        Keys.onEnterPressed: activate()
+                        Keys.onSpacePressed: activate()
+                        Rectangle {
+                            x: Style.space(38)
+                            width: Math.max(0, parent.width - x)
+                            height: parent.height
+                            visible: !!metric.creditEntry
+                            color: metricMouse.containsMouse || metric.activeFocus ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.09) : "transparent"
+                            radius: Style.cornerRadius
+                            border.width: metric.activeFocus ? 1 : 0
+                            border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.2)
+                        }
                         Label { width: Style.space(16); text: metric.selected ? "•" : "" }
                         Column {
                             id: block
                             x: Style.space(48)
                             width: Math.max(0, parent.width - x)
+                            topPadding: metric.creditEntry ? Style.space(8) : 0
+                            bottomPadding: metric.creditEntry ? Style.space(8) : 0
                             spacing: Style.space(4)
                             Item {
                                 id: metricHeader
                                 width: parent.width
                                 height: Math.max(metricTitle.implicitHeight, metricValue.implicitHeight)
+                                readonly property real textWidth: width - (metric.creditEntry ? Style.space(30) : 0)
                                 Label {
                                     id: metricTitle
                                     objectName: "usage-title-" + provider.modelData.id + "-" + provider.modelData.idx + "-" + metric.modelData.key
-                                    width: metric.inlineAmount ? Math.min(implicitWidth, Math.max(0, parent.width - metricValue.width - Style.space(6))) : Math.max(0, parent.width - metricValue.width - Style.space(12))
+                                    width: metric.inlineAmount ? Math.min(implicitWidth, Math.max(0, parent.textWidth - metricValue.width - Style.space(6))) : Math.max(0, parent.textWidth - metricValue.width - Style.space(12))
                                     text: (metric.modelData.title || metric.modelData.name) + (metric.inlineAmount ? ":" : "")
-                                    opacity: metric.selected ? 1 : 0.55
+                                    opacity: metric.creditEntry || metric.selected ? 1 : 0.55
                                     wrapMode: Text.WordWrap
                                 }
                                 TextMetrics {
@@ -172,11 +207,22 @@ Column {
                                     objectName: "usage-value-" + provider.modelData.id + "-" + provider.modelData.idx + "-" + metric.modelData.key
                                     anchors.right: metric.inlineAmount ? undefined : parent.right
                                     x: metric.inlineAmount ? metricTitle.width + Style.space(6) : 0
-                                    width: Math.min(parent.width * 0.6, Math.max(Style.space(40), Math.ceil(valueMetrics.advanceWidth)))
+                                    width: Math.min(parent.textWidth * 0.6, Math.max(Style.space(40), Math.ceil(valueMetrics.advanceWidth)))
                                     horizontalAlignment: metric.inlineAmount ? Text.AlignLeft : Text.AlignRight
                                     wrapMode: Text.WordWrap
                                     text: provider.modelData.loading ? Plugin.Model.spinner : (metric.modelData.value || Math.round(metric.modelData.percentage) + "%")
-                                    opacity: metric.selected ? 1 : 0.55
+                                    opacity: metric.creditEntry || metric.selected ? 1 : 0.55
+                                }
+                                Plugin.PanelIcon {
+                                    objectName: "usage-credit-arrow-" + provider.modelData.id + "-" + provider.modelData.idx + "-" + metric.modelData.key
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: Style.space(8)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: Style.space(16)
+                                    height: width
+                                    name: "arrow-right"
+                                    foreground: root.foreground
+                                    visible: !!metric.creditEntry
                                 }
                             }
                             Row {
@@ -201,7 +247,7 @@ Column {
                             Label {
                                 width: parent.width
                                 objectName: "usage-detail-" + provider.modelData.id + "-" + provider.modelData.idx + "-" + metric.modelData.key
-                                visible: text !== ""
+                                visible: !metric.creditEntry && text !== ""
                                 text: metric.modelData.detail
                                 opacity: 0.4
                                 font.pixelSize: Style.font.caption
@@ -209,9 +255,11 @@ Column {
                             }
                         }
                         MouseArea {
+                            id: metricMouse
                             anchors.fill: parent
+                            hoverEnabled: !!metric.creditEntry
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: { metric.forceActiveFocus(); provider.choose(metric.modelData.key) }
+                            onClicked: { metric.forceActiveFocus(); metric.activate() }
                         }
                     }
                 }

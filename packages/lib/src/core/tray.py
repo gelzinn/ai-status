@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
-from . import __version__, about, config, fetch, notifications, paths, render, reset_credits, state, updates
+from . import __version__, about, config, fetch, notifications, paths, render, reset_credits, state, updates, usage_credits
 
 RELEASE_URL = "https://github.com/gelzinn/ai-status/releases/latest"
 ASSETS = paths.LIB_DIR / "assets"
@@ -48,6 +48,13 @@ QWidget#creditTableHeader {
     border-top-left-radius: 7px; border-top-right-radius: 7px;
 }
 QWidget#creditRow { border-top: 1px solid #262626; }
+QWidget#usageCreditRow { border-top: 1px solid #262626; }
+QWidget#usageCreditRow[firstRow="true"] { border-top: none; }
+QWidget#usageCreditLabel {
+    background: rgba(255, 255, 255, 10); border-right: 1px solid #262626;
+}
+QWidget#usageCreditLabel[firstRow="true"] { border-top-left-radius: 7px; }
+QWidget#usageCreditLabel[lastRow="true"] { border-bottom-left-radius: 7px; }
 QWidget#creditTableFooter {
     background: rgba(255, 255, 255, 10); border-top: 1px solid #262626;
     border-bottom-left-radius: 7px; border-bottom-right-radius: 7px;
@@ -453,6 +460,121 @@ class ResetCreditsView(QWidget):
                 expiry.setText("Not provided")
                 remaining.setText("")
         self.rows_layout.activate()
+        self.table.layout().activate()
+        self.layout().invalidate()
+        self.layout().activate()
+
+
+class MonetaryCreditsView(QWidget):
+    """Account-specific balances and validity, separate from quota selection."""
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 18, 16, 18)
+        layout.setSpacing(18)
+        self.heading = QWidget()
+        heading_layout = QHBoxLayout(self.heading)
+        heading_layout.setContentsMargins(0, 0, 0, 0)
+        heading_layout.setSpacing(8)
+        self.logo = plain_label("")
+        self.logo.setFixedSize(16, 16)
+        heading_layout.addWidget(self.logo)
+        self.provider_label = plain_label("", "#eeeeee")
+        self.provider_label.setWordWrap(True)
+        heading_layout.addWidget(self.provider_label, 1)
+        layout.addWidget(self.heading)
+        self.balance_summary = QWidget()
+        balance_layout = QVBoxLayout(self.balance_summary)
+        balance_layout.setContentsMargins(0, 0, 0, 0)
+        balance_layout.setSpacing(4)
+        self.balance_label = plain_label("Available balance", "#888888")
+        balance_layout.addWidget(self.balance_label)
+        self.balance = plain_label("", "#eeeeee")
+        self.balance.setStyleSheet(self.balance.styleSheet() + "font-size: 24px; font-weight: 500;")
+        balance_layout.addWidget(self.balance)
+        layout.addWidget(self.balance_summary)
+        self.explanation = plain_label("Credit for Claude cloud sessions. The balance expires on the date below.")
+        self.explanation.setWordWrap(True)
+        layout.addWidget(self.explanation)
+        self.notice = ResetCreditsView.secondary_label("")
+        self.notice.setWordWrap(True)
+        layout.addWidget(self.notice)
+        self.table = QWidget()
+        self.table.setObjectName("creditTable")
+        table_layout = QVBoxLayout(self.table)
+        table_layout.setContentsMargins(1, 1, 1, 1)
+        table_layout.setSpacing(0)
+        self.fields = {}
+        self.field_rows = {}
+        self.label_cells = {}
+        for key, title in (("status", "Status"), ("limit_value", "Allowance"), ("used_value", "Used"),
+                           ("expires", "Expires"), ("remaining", "Time remaining"),
+                           ("observed_value", "Last observed balance"), ("observed", "Last observed")):
+            row = QWidget()
+            row.setObjectName("usageCreditRow")
+            first = not self.fields
+            row.setProperty("firstRow", first)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(0)
+            label_cell = QWidget()
+            label_cell.setObjectName("usageCreditLabel")
+            label_cell.setProperty("firstRow", first)
+            label_cell.setProperty("lastRow", False)
+            label_layout = QVBoxLayout(label_cell)
+            label_layout.setContentsMargins(12, 12, 12, 12)
+            label = ResetCreditsView.secondary_label(title)
+            label.setWordWrap(True)
+            label_layout.addWidget(label)
+            row_layout.addWidget(label_cell, 1)
+            value_cell = QWidget()
+            value_layout = QVBoxLayout(value_cell)
+            value_layout.setContentsMargins(12, 12, 12, 12)
+            value = plain_label("", "#dddddd")
+            value.setWordWrap(True)
+            value_layout.addWidget(value)
+            row_layout.addWidget(value_cell, 1)
+            self.fields[key] = value
+            self.field_rows[key] = row
+            self.label_cells[key] = label_cell
+            table_layout.addWidget(row)
+        layout.addWidget(self.table)
+        self.timezone_note = ResetCreditsView.secondary_label("")
+        self.timezone_note.setWordWrap(True)
+        layout.addWidget(self.timezone_note)
+        layout.addStretch()
+
+    def update_credit(self, name, entry, label, credit):
+        heading = credit.get("heading") or label + " · " + credit["title"]
+        self.provider_label.setText(heading)
+        self.logo.setPixmap(provider_icon(name).pixmap(16, 16))
+        self.heading.setAccessibleName(heading)
+        self.balance_label.setText("Available balance" if credit["balance"] is not None else "Current balance")
+        self.balance.setText(credit["value"])
+        for key, field in self.fields.items():
+            field.setText(credit["status"].capitalize() if key == "status" else credit[key])
+        self.field_rows["remaining"].setVisible(bool(credit["remaining"]))
+        historical = credit["balance"] is None
+        for key in ("observed_value", "observed"):
+            self.field_rows[key].setVisible(historical)
+        visible_rows = [key for key, row in self.field_rows.items() if not row.isHidden()]
+        for key, cell in self.label_cells.items():
+            last = key == visible_rows[-1]
+            if cell.property("lastRow") != last:
+                cell.setProperty("lastRow", last)
+                cell.style().unpolish(cell)
+                cell.style().polish(cell)
+                cell.update()
+        self.timezone_note.setText("Local time · " + credit["timezone"] if credit["timezone"] else "")
+        self.timezone_note.setVisible(bool(credit["timezone"]))
+        notice = ("These credits have expired. The last observed balance is shown for reference."
+                  if credit["status"] == "expired" else
+                  credit["status_note"] + ". Amounts below reflect the last observation."
+                  if credit["stale"] else
+                  "These credits are unavailable. The last observed balance is shown for reference."
+                  if historical else "")
+        self.notice.setText(notice)
+        self.notice.setVisible(bool(notice))
         self.table.layout().activate()
         self.layout().invalidate()
         self.layout().activate()
@@ -942,7 +1064,7 @@ class ProviderSettings(QWidget):
             name = item.data(Qt.ItemDataRole.UserRole)
             entries = data.get(name) or [{"provider": provider_name(name), "metrics": []}]
             for entry in entries:
-                metrics = entry.get("metrics") or [{"type": "rolling"}]
+                metrics = render.entry_metrics(entry) or [{"type": "rolling"}]
                 for metric in metrics:
                     key = render.metric_key(metric)
                     title = render.metric_title(metric, {"usage_display": self.usage_display.currentData()})
@@ -1034,7 +1156,7 @@ class AboutView(QWidget):
         layout.addWidget(plain_label("Quick guide", "#eeeeee"))
         for text in (
             "Tray: click to show usage; right-click for settings and other actions.",
-            "Usage: click a limit to show it in the tray. Refresh checks now; Reset credits shows the available resets.",
+            "Usage: click a limit to show it in the tray. Credit rows open balance and validity details. Refresh checks now.",
             "Settings: pick a limit, text and icon. Enable providers and reorder them with arrows or drag and drop. Save applies changes and keeps settings open.",
             "Keyboard: R refreshes, C opens settings, Esc goes back. Tab moves between controls; Alt+Up/Down reorders providers.",
         ):
@@ -1201,6 +1323,7 @@ class Dashboard(QWidget):
         self.metric_buttons = []
         self.provider_buttons = {}
         self.reset_provider = None
+        self.monetary_credit = None
         self.settings_view = None
         self.settings_scroll_position = 0
         self.usage_scroll_position = 0
@@ -1256,9 +1379,15 @@ class Dashboard(QWidget):
         self.credits_scroll.setWidgetResizable(True)
         self.credits_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.credits_scroll.setWidget(self.credits_view)
+        self.monetary_view = MonetaryCreditsView()
+        self.monetary_scroll = QScrollArea()
+        self.monetary_scroll.setWidgetResizable(True)
+        self.monetary_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.monetary_scroll.setWidget(self.monetary_view)
         self.pages = QStackedWidget()
         self.pages.addWidget(self.scroll)
         self.pages.addWidget(self.credits_scroll)
+        self.pages.addWidget(self.monetary_scroll)
         self.panel_layout.addWidget(self.pages)
         self.settings_scroll = QScrollArea()
         self.settings_scroll.setWidgetResizable(True)
@@ -1347,20 +1476,20 @@ class Dashboard(QWidget):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
-            self.go_back() if self.reset_provider is not None or self.configuring() or self.viewing_about() or self.viewing_updates() else self.hide()
+            self.go_back() if self.viewing_credit_details() or self.configuring() or self.viewing_about() or self.viewing_updates() else self.hide()
         elif self.configuring() or self.viewing_about() or self.viewing_updates():
             super().keyPressEvent(event)
         elif event.key() == Qt.Key.Key_R:
             self.refresh()
         elif event.key() == Qt.Key.Key_C:
             self.configure()
-        elif self.reset_provider is None and event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
+        elif not self.viewing_credit_details() and event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
             self.cycle_metric(1 if event.key() == Qt.Key.Key_Down else -1)
         else:
             super().keyPressEvent(event)
 
     def wheelEvent(self, event):
-        if self.reset_provider is not None or self.configuring() or self.viewing_about() or self.viewing_updates():
+        if self.viewing_credit_details() or self.configuring() or self.viewing_about() or self.viewing_updates():
             super().wheelEvent(event)
             return
         self.cycle_metric(1 if event.angleDelta().y() < 0 else -1)
@@ -1369,11 +1498,34 @@ class Dashboard(QWidget):
     def reset_entry(self, key):
         return next((entry for _, entry, _, value in self.visible_metrics if value[:2] == key), None)
 
+    def viewing_credit_details(self):
+        return self.reset_provider is not None or self.monetary_credit is not None
+
+    def monetary_entry(self, key):
+        entry = self.reset_entry(key[:2])
+        credit = next((row for row in usage_credits.presentation(entry) if row["id"] == key[2]), None)
+        return entry, credit
+
+    def show_monetary_credit(self, key):
+        entry, credit = self.monetary_entry(key)
+        if entry is None or credit is None:
+            return
+        self.usage_scroll_position = self.scroll.verticalScrollBar().value()
+        self.reset_provider = None
+        self.monetary_credit = key
+        self.monetary_view.update_credit(key[0], entry, self.entry_name(key[0], entry), credit)
+        self.pages.setCurrentWidget(self.monetary_scroll)
+        self.monetary_scroll.verticalScrollBar().setValue(0)
+        self.update_header()
+        self.fit_content()
+        self.back_button.setFocus()
+
     def show_reset_credits(self, key):
         entry = self.reset_entry(key)
         if entry is None or not reset_credits.available_credits(entry.get("reset_credits"))["available"]:
             return
         self.reset_provider = key
+        self.monetary_credit = None
         self.credits_view.update_provider(key[0], entry, self.entry_name(key[0], entry))
         self.pages.setCurrentWidget(self.credits_scroll)
         self.credits_scroll.verticalScrollBar().setValue(0)
@@ -1385,14 +1537,27 @@ class Dashboard(QWidget):
         was_configuring = self.configuring()
         was_updating = self.viewing_updates()
         key = self.reset_provider
+        monetary_key = self.monetary_credit
         self.reset_provider = None
+        self.monetary_credit = None
         self.pages.setCurrentWidget(self.scroll)
         self.update_header()
         self.fit_content()
-        if was_updating:
+        if was_updating or monetary_key is not None:
             self.scroll.verticalScrollBar().setValue(self.usage_scroll_position)
+        credit_button = next((button for button in self.metric_buttons
+                              if monetary_key and button.value == (*monetary_key[:2], "credits:" + monetary_key[2])), None)
         heading = self.provider_buttons.get(key)
-        if heading:
+        if credit_button:
+            credit_button.setFocus()
+        elif monetary_key is not None:
+            def restore_credit_focus():
+                if self.pages.currentWidget() is self.scroll:
+                    (self.provider_buttons.get(monetary_key[:2]) or self.refresh_button).setFocus()
+            # Removing a credit can rebuild usage while this page is closing.
+            # Wait until the replacement provider rows belong to the scroller.
+            QTimer.singleShot(0, restore_credit_focus)
+        elif heading:
             (heading.credits if not heading.credits.isHidden() else heading).setFocus()
         elif was_configuring:
             self.settings_button.setFocus()
@@ -1412,6 +1577,7 @@ class Dashboard(QWidget):
         if not self.viewing_updates():
             self.usage_scroll_position = self.scroll.verticalScrollBar().value()
         self.reset_provider = None
+        self.monetary_credit = None
         self.update_view.set_guide(updates.update_guide(), fetch.get_version_info())
         self.pages.setCurrentWidget(self.update_scroll)
         self.update_scroll.verticalScrollBar().setValue(0)
@@ -1486,7 +1652,7 @@ class Dashboard(QWidget):
         about_page = self.viewing_about()
         update_page = self.viewing_updates()
         self.brand.setText("Updates" if update_page else "About" if about_page else "Settings" if configuring else "AI Status")
-        show_back = configuring or about_page or update_page or self.reset_provider is not None
+        show_back = configuring or about_page or update_page or self.viewing_credit_details()
         self.back_button.setVisible(show_back)
         self.back_title_gap.changeSize(8 if show_back else 0, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
         self.back_button.parentWidget().layout().invalidate()
@@ -1494,7 +1660,7 @@ class Dashboard(QWidget):
         self.back_button.setToolTip(back_label)
         self.back_button.setAccessibleName(back_label)
         self.refresh_button.setVisible(not configuring and not about_page and not update_page)
-        self.settings_button.setVisible(not configuring and not about_page and not update_page and self.reset_provider is None)
+        self.settings_button.setVisible(not configuring and not about_page and not update_page and not self.viewing_credit_details())
         self.settings_footer.setVisible(configuring)
 
     def animate(self):
@@ -1532,6 +1698,7 @@ class Dashboard(QWidget):
             self.settings_footer_layout.addWidget(self.settings_view.buttons)
             self.settings_view.buttons.show()
             self.reset_provider = None
+            self.monetary_credit = None
             self.pages.setCurrentWidget(self.settings_scroll)
             self.settings_scroll.verticalScrollBar().setValue(0)
             self.update_header()
@@ -1576,6 +1743,14 @@ class Dashboard(QWidget):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(paths.LOG_FILE.parent)))
 
     def poll_state(self):
+        # Credits can expire or become stale while collection is offline. Only
+        # redraw when their display state changes, retaining the selected row.
+        credit_states = tuple((name, entry.get("_idx", 0), row["id"], row["status"], row["balance"], row["detail"], row["remaining"])
+                              for name, entries in self.data.items() for entry in entries
+                              for row in usage_credits.presentation(entry))
+        if credit_states != getattr(self, "credit_states", ()):
+            self.credit_states = credit_states
+            self.draw()
         activation = paths.read_json(paths.RUNTIME_DIR / "desktop-request.json")
         if activation != self.last_activation:
             self.last_activation = activation
@@ -1719,7 +1894,7 @@ class Dashboard(QWidget):
         self.visible_metrics = []
         for name in config.enabled_connection_order():
             for entry in self.data.get(name) or []:
-                for metric in sorted(entry.get("metrics", []), key=render.metric_sort_key):
+                for metric in sorted(render.entry_metrics(entry), key=render.metric_sort_key):
                     value = (name, entry.get("_idx", 0), render.metric_key(metric))
                     self.visible_metrics.append((name, entry, metric, value))
         self.metric_values = [value for _, _, _, value in self.visible_metrics]
@@ -1727,8 +1902,9 @@ class Dashboard(QWidget):
             value = self.metric_values[0]
             self.selected.update(provider=value[0], idx=value[1], metric=value[2])
             state.save_selected(self.selected)
-        structure = tuple((value, render.metric_is_amount(metric))
-                          for _, _, metric, value in self.visible_metrics)
+        structure = tuple((value, render.metric_is_amount(metric),
+                           metric.get("id") in {row["id"] for row in usage_credits.presentation(entry)})
+                          for _, entry, metric, value in self.visible_metrics)
         focused_value = next((button.value for button in self.metric_buttons if button.hasFocus()), None)
         focused_update = getattr(self, "update_link", None) is not None and self.update_link.hasFocus()
         if structure == self.structure:
@@ -1755,7 +1931,8 @@ class Dashboard(QWidget):
         layout.addWidget(self.update_link)
         for name in config.enabled_connection_order():
             for entry in self.data.get(name) or []:
-                metrics = sorted(entry.get("metrics", []), key=render.metric_sort_key)
+                metrics = sorted(render.entry_metrics(entry), key=render.metric_sort_key)
+                monetary_ids = {row["id"] for row in usage_credits.presentation(entry)}
                 if not metrics:
                     continue
                 group = QWidget()
@@ -1796,8 +1973,13 @@ class Dashboard(QWidget):
                     button = UsageButton()
                     button.value = value
                     button.is_amount = render.metric_is_amount(metric)
+                    button.credit_id = metric.get("id") if metric.get("id") in monetary_ids else None
                     button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {render.metric_value(metric, self.selected)}")
-                    button.clicked.connect(lambda checked=False, value=value: self.choose_metric(value))
+                    if button.credit_id:
+                        key = (*value[:2], button.credit_id)
+                        button.clicked.connect(lambda checked=False, key=key: self.show_monetary_credit(key))
+                    else:
+                        button.clicked.connect(lambda checked=False, value=value: self.choose_metric(value))
                     self.metric_buttons.append(button)
                     metric_layout = QVBoxLayout(button)
                     metric_layout.setContentsMargins(4, 4, 4, 4)
@@ -1816,6 +1998,8 @@ class Dashboard(QWidget):
                     title_row.addWidget(button.percentage)
                     if button.is_amount:
                         title_row.addStretch()
+                    if button.credit_id:
+                        title_row.addWidget(ArrowIcon())
                     metric_layout.addLayout(title_row)
                     button.bar_container = QWidget()
                     bar_row = QHBoxLayout(button.bar_container)
@@ -1902,7 +2086,7 @@ class Dashboard(QWidget):
             value_width = max(38, self.fontMetrics().horizontalAdvance(render.metric_value(metric, self.selected)) + 4)
             button.percentage.setFixedWidth(value_width)
             if button.is_amount:
-                available = self.width() - 2 - 32 - 8 - 46 - 8 - value_width
+                available = self.width() - 2 - 32 - 8 - 46 - 8 - value_width - (24 if button.credit_id else 0)
                 title_width = self.fontMetrics().horizontalAdvance(title + ":") + 1
                 button.title.setFixedWidth(max(24, min(title_width, available)))
             button.percentage.setText(render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else render.metric_value(metric, self.selected))
@@ -1910,8 +2094,9 @@ class Dashboard(QWidget):
                 label.setStyleSheet(f"color: {color};")
             detail = render.metric_detail(metric)
             button.description.setText(detail)
-            button.description.setVisible(bool(detail))
-            button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {render.metric_value(metric, self.selected)}")
+            button.description.setVisible(bool(detail) and not button.credit_id)
+            button.setAccessibleName(f"{self.entry_name(name, entry)} {title} {render.metric_value(metric, self.selected)}"
+                                     + (". Open credit details" if button.credit_id else ""))
         if not self.metric_values:
             self.empty_message.setText("Checking your connected providers…" if self.busy else
                 "No usage available. Connect a provider and refresh." if config.enabled_connection_order() else
@@ -1926,6 +2111,13 @@ class Dashboard(QWidget):
             else:
                 name = self.reset_provider[0]
                 self.credits_view.update_provider(name, entry, self.entry_name(name, entry))
+        if self.monetary_credit is not None:
+            entry, credit = self.monetary_entry(self.monetary_credit)
+            if entry is None or credit is None:
+                self.show_usage()
+            else:
+                name = self.monetary_credit[0]
+                self.monetary_view.update_credit(name, entry, self.entry_name(name, entry), credit)
 
     def fit_content(self):
         content = self.pages.currentWidget().widget()

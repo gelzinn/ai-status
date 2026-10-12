@@ -102,6 +102,45 @@ struct ResetCredits: Decodable {
     let timezone: String?
 }
 
+struct MonetaryCredit: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let heading: String?
+    let status: String
+    let value: String
+    let expires: String
+    let remaining: String
+    let timezone: String
+    let observed: String
+    let observedValue: String
+    let limitValue: String
+    let usedValue: String
+    let statusNote: String
+    let stale: Bool
+    enum CodingKeys: String, CodingKey {
+        case id, title, heading, status, value, expires, remaining, timezone, observed, stale
+        case observedValue = "observed_value", limitValue = "limit_value", usedValue = "used_value"
+        case statusNote = "status_note"
+    }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        title = try values.decode(String.self, forKey: .title)
+        heading = try values.decodeIfPresent(String.self, forKey: .heading)
+        status = try values.decode(String.self, forKey: .status)
+        value = try values.decode(String.self, forKey: .value)
+        expires = try values.decodeIfPresent(String.self, forKey: .expires) ?? "Not reported"
+        remaining = try values.decodeIfPresent(String.self, forKey: .remaining) ?? "Not reported"
+        timezone = try values.decodeIfPresent(String.self, forKey: .timezone) ?? ""
+        observed = try values.decodeIfPresent(String.self, forKey: .observed) ?? "Not reported"
+        observedValue = try values.decodeIfPresent(String.self, forKey: .observedValue) ?? "Not reported"
+        limitValue = try values.decodeIfPresent(String.self, forKey: .limitValue) ?? "Not reported"
+        usedValue = try values.decodeIfPresent(String.self, forKey: .usedValue) ?? "Not reported"
+        statusNote = try values.decodeIfPresent(String.self, forKey: .statusNote) ?? ""
+        stale = try values.decodeIfPresent(Bool.self, forKey: .stale) ?? false
+    }
+}
+
 struct Provider: Decodable, Identifiable {
     let connectionID: String
     let providerID: String
@@ -113,11 +152,12 @@ struct Provider: Decodable, Identifiable {
     let error: String
     let metrics: [Metric]
     let resetCredits: ResetCredits?
+    let monetaryCredits: [MonetaryCredit]
     var id: String { "\(connectionID):\(idx)" }
     enum CodingKeys: String, CodingKey {
         case connectionID = "id"
         case providerID = "providerId"
-        case idx, name, logoPath, loading, cached, error, metrics, resetCredits
+        case idx, name, logoPath, loading, cached, error, metrics, resetCredits, monetaryCredits
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -131,9 +171,13 @@ struct Provider: Decodable, Identifiable {
         error = try values.decode(String.self, forKey: .error)
         metrics = try values.decode([Metric].self, forKey: .metrics)
         resetCredits = try values.decodeIfPresent(ResetCredits.self, forKey: .resetCredits)
+        monetaryCredits = try values.decodeIfPresent([MonetaryCredit].self, forKey: .monetaryCredits) ?? []
     }
     func selection(_ metric: Metric) -> Selection {
         Selection(provider: connectionID, idx: idx, metric: metric.key)
+    }
+    func monetaryCredit(_ metric: Metric) -> MonetaryCredit? {
+        monetaryCredits.first { metric.key == "credits:" + $0.id }
     }
 }
 
@@ -274,7 +318,7 @@ struct Snapshot: Decodable {
 }
 
 enum Page: Equatable {
-    case usage, settings, about, update, credits(String)
+    case usage, settings, about, update, credits(String), cloudCredits(String, String)
 }
 
 struct Choice: Identifiable {
@@ -432,7 +476,10 @@ final class Model: ObservableObject {
             }
             return providers.flatMap { provider in
                 provider.metrics.map { metric in
-                    let suffix = metric.key.split(separator: ":", maxSplits: 1).dropFirst().first.map { " (\($0))" } ?? ""
+                    let parts = metric.key.split(separator: ":", maxSplits: 1)
+                    let periodName = ["rolling": "Rolling Usage", "daily": "Daily Usage", "weekly": "Weekly Usage", "monthly": "Monthly Usage"][String(parts.first ?? "")]
+                    let remainingName = periodName?.replacingOccurrences(of: "Usage", with: "Remaining")
+                    let suffix = parts.count == 2 && (periodName == metric.name || remainingName == metric.name) && String(parts[1]) != metric.name ? " (\(parts[1]))" : ""
                     return Choice(selection: provider.selection(metric), label: provider.name + " · " + metric.name + suffix,
                                   provider: provider.providerID, logoPath: provider.logoPath)
                 }
@@ -495,6 +542,14 @@ final class Model: ObservableObject {
         guard case .credits(let id) = page else { return nil }
         return snapshot?.providers.first { $0.id == id }
     }
+    var cloudCreditProvider: Provider? {
+        guard case .cloudCredits(let id, _) = page else { return nil }
+        return snapshot?.providers.first { $0.id == id }
+    }
+    var cloudCredit: MonetaryCredit? {
+        guard case .cloudCredits(_, let id) = page else { return nil }
+        return cloudCreditProvider?.monetaryCredits.first { $0.id == id }
+    }
     var updateGuide: UpdateGuide { snapshot?.update ?? .manualMacOS }
     var panelHeight: CGFloat {
         switch page {
@@ -502,10 +557,11 @@ final class Model: ObservableObject {
         case .about: return 640
         case .update: return 600
         case .credits: return min(680, CGFloat(310 + (creditProvider?.resetCredits?.rows.count ?? 0) * 82))
+        case .cloudCredits: return 660
         case .usage:
             guard let providers = snapshot?.providers, !providers.isEmpty else { return 210 }
             let height = providers.reduce(85) { total, provider in
-                total + 62 + provider.metrics.count * 78 + (provider.cached ? 18 : 0)
+                total + 62 + provider.metrics.reduce(0) { $0 + (provider.monetaryCredit($1) == nil ? 78 : 36) } + (provider.cached ? 18 : 0)
                     + ((provider.resetCredits?.available ?? 0) > 0 ? 36 : 0)
             }
             return min(680, max(180, CGFloat(height)))
@@ -520,6 +576,7 @@ final class Model: ObservableObject {
         error = ""
         retryDelay = 1
         if case .credits(let id) = page, !next.providers.contains(where: { $0.id == id }) { page = .usage }
+        if case .cloudCredits = page, cloudCredit == nil { page = .usage }
         changed?()
     }
 
@@ -645,6 +702,13 @@ final class Model: ObservableObject {
     func showCredits(_ provider: Provider) {
         guard (provider.resetCredits?.available ?? 0) > 0 else { return }
         page = .credits(provider.id)
+        changed?()
+    }
+    func showCloudCredits(_ provider: Provider, _ credit: MonetaryCredit) {
+        guard snapshot?.providers.contains(where: {
+            $0.id == provider.id && $0.monetaryCredits.contains(where: { $0.id == credit.id })
+        }) == true else { return }
+        page = .cloudCredits(provider.id, credit.id)
         changed?()
     }
     func showAbout() { page = .about; changed?() }
@@ -911,32 +975,43 @@ struct UsagePage: View {
                             .padding(.leading, 24).help(provider.error)
                     }
                     ForEach(provider.metrics) { metric in
-                        let active = selected && metric.key == model.snapshot?.selected.metric
-                        HoverButton(padding: 4, action: { model.select(provider.selection(metric)) }) {
-                            HStack(alignment: .top, spacing: 8) {
-                                Text(active ? "•" : " ").frame(width: 16)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                        Text(metric.name + (metric.isAmount ? ":" : ""))
-                                        if !metric.isAmount { Spacer(minLength: 0) }
-                                        Text(provider.loading && model.isPresented ? "…" : metric.displayValue)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                    if let percentage = metric.percentage {
-                                        HStack(spacing: 5) {
-                                            Text("[")
-                                            UsageBar(percentage: percentage, selected: active,
-                                                     loading: provider.loading && model.isPresented, index: groupIndex)
-                                            Text("]")
+                        if let credit = provider.monetaryCredit(metric) {
+                            HoverButton(action: { model.showCloudCredits(provider, credit) }) {
+                                HStack {
+                                    Text(credit.title + ": " + credit.value)
+                                    Spacer()
+                                    PanelIcon(name: "arrow-right")
+                                }
+                            }.padding(.leading, 18)
+                                .accessibilityLabel("\(provider.name), \(credit.title), \(credit.value), show details")
+                        } else {
+                            let active = selected && metric.key == model.snapshot?.selected.metric
+                            HoverButton(padding: 4, action: { model.select(provider.selection(metric)) }) {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text(active ? "•" : " ").frame(width: 16)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                            Text(metric.name + (metric.isAmount ? ":" : ""))
+                                            if !metric.isAmount { Spacer(minLength: 0) }
+                                            Text(provider.loading && model.isPresented ? "…" : metric.displayValue)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                        if let percentage = metric.percentage {
+                                            HStack(spacing: 5) {
+                                                Text("[")
+                                                UsageBar(percentage: percentage, selected: active,
+                                                         loading: provider.loading && model.isPresented, index: groupIndex)
+                                                Text("]")
+                                            }
+                                        }
+                                        if !metric.detail.isEmpty {
+                                            Text(metric.detail).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(Palette.dim.opacity(0.7))
+                                                .fixedSize(horizontal: false, vertical: true).padding(.leading, 10)
                                         }
                                     }
-                                    if !metric.detail.isEmpty {
-                                        Text(metric.detail).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(Palette.dim.opacity(0.7))
-                                            .fixedSize(horizontal: false, vertical: true).padding(.leading, 10)
-                                    }
-                                }
-                            }.foregroundColor(active ? Palette.bright : Palette.dim)
-                        }.accessibilityLabel("\(provider.name), \(metric.name), \(metric.displayValue)")
+                                }.foregroundColor(active ? Palette.bright : Palette.dim)
+                            }.accessibilityLabel("\(provider.name), \(metric.name), \(metric.displayValue)")
+                        }
                     }
                     if let credits = provider.resetCredits, credits.available > 0 {
                         HoverButton(action: { model.showCredits(provider) }) {
@@ -1164,6 +1239,79 @@ struct ResetCreditsPage: View {
     }
 }
 
+struct CloudCreditsPage: View {
+    let provider: Provider
+    let credit: MonetaryCredit
+
+    private struct Field: Identifiable {
+        let label: String
+        let value: String
+        var hint = ""
+        var id: String { label }
+    }
+    private var fields: [Field] {
+        var rows = [Field(label: "Status", value: credit.status.capitalized),
+                    Field(label: "Allowance", value: credit.limitValue),
+                    Field(label: "Used", value: credit.usedValue),
+                    Field(label: "Expires", value: credit.expires, hint: credit.remaining),
+                    Field(label: "Last observed", value: credit.observed)]
+        if credit.status == "expired" || credit.status == "unavailable" {
+            rows.append(Field(label: "Last observed balance", value: credit.observedValue))
+        }
+        return rows
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 8) {
+                ProviderLogo(provider: provider.providerID, path: provider.logoPath)
+                Text(credit.heading ?? (provider.name + " · " + credit.title)).foregroundColor(Palette.bright)
+            }
+            if provider.cached { Text("Cached data").font(.custom("GeistMono-Regular", size: 11)).help(provider.error) }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(credit.status == "available" || credit.status == "exhausted" ? "Available balance" : "Current balance")
+                    .font(.custom("GeistMono-Regular", size: 11))
+                Text(credit.value).font(.custom("GeistMono-Regular", size: 24)).fontWeight(.medium)
+                    .foregroundColor(Palette.bright)
+            }
+            Text("Credits for Claude cloud sessions.")
+            if credit.status == "expired" {
+                Text("These credits have expired. The last observed balance is shown for reference.")
+                    .font(.custom("GeistMono-Regular", size: 11))
+            } else if !credit.statusNote.isEmpty {
+                Text(credit.statusNote + ". Amounts below reflect the last observation.")
+                    .font(.custom("GeistMono-Regular", size: 11))
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(fields.enumerated()), id: \.element.id) { index, field in
+                    if index > 0 {
+                        Rectangle().fill(Palette.border).frame(height: 1).accessibilityHidden(true)
+                    }
+                    HStack(alignment: .top, spacing: 0) {
+                        Text(field.label).frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(field.value).foregroundColor(Palette.bright)
+                            if !field.hint.isEmpty {
+                                Text(field.hint).font(.custom("GeistMono-Regular", size: 11))
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                    }
+                }
+            }.background {
+                GeometryReader { geometry in
+                    Palette.bright.opacity(0.04).frame(width: geometry.size.width / 2)
+                        .overlay(alignment: .trailing) {
+                            Rectangle().fill(Palette.border).frame(width: 1).accessibilityHidden(true)
+                        }
+                }
+            }.clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.border, lineWidth: 1))
+            if !credit.timezone.isEmpty {
+                Text("Local time · " + credit.timezone).font(.custom("GeistMono-Regular", size: 11))
+            }
+        }
+    }
+}
+
 struct UpdatePage: View {
     @ObservedObject var model: Model
     @State private var copiedCommand = false
@@ -1305,11 +1453,15 @@ struct PanelView: View {
                         case .about: if let info = model.snapshot?.about { AboutPage(info: info) }
                         case .update: UpdatePage(model: model)
                         case .credits: if let provider = model.creditProvider { ResetCreditsPage(provider: provider) }
+                        case .cloudCredits:
+                            if let provider = model.cloudCreditProvider, let credit = model.cloudCredit {
+                                CloudCreditsPage(provider: provider, credit: credit)
+                            }
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 18)
                         .id("page-top")
                 }.onChange(of: model.page) { page in
-                    if page == .update { scroll.scrollTo("page-top", anchor: .top) }
+                    if page == .update || model.cloudCredit != nil { scroll.scrollTo("page-top", anchor: .top) }
                 }
             }
             if model.page == .settings {
@@ -1675,7 +1827,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         let model = Model()
         model.accept(Data(sample.utf8))
         guard let snapshot = model.snapshot, snapshot.providers.count == 2,
-              model.selectedProvider?.providerID == "codex" else { throw AppError.message("Legacy snapshot decoding failed.") }
+              model.selectedProvider?.providerID == "codex", snapshot.providers.allSatisfy({ $0.monetaryCredits.isEmpty }) else {
+            throw AppError.message("Legacy snapshot decoding failed.")
+        }
         guard !model.updateGuide.canUpdate, !model.updateGuide.command.isEmpty else {
             throw AppError.message("Legacy update guide fallback failed.")
         }
@@ -1701,6 +1855,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         model.accept(malformed)
         guard model.snapshot?.schemaVersion == 1 else { throw AppError.message("Invalid snapshot replaced usable data.") }
         try smokeAccounts(sample: sample, directory: previewDirectory)
+        try smokeCloudCredits(sample: sample, directory: previewDirectory)
         try smokeNotifications(sample: sample)
         try smokeUpdate(sample: sample, directory: previewDirectory)
         model.isPresented = true
@@ -1710,7 +1865,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             model.page = page
             try renderSmokePage(model, name: name, directory: previewDirectory)
         }
-        print("AI Status macOS smoke OK: usage, settings, quota notifications, reset credits, update guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+        print("AI Status macOS smoke OK: usage, settings, quota notifications, reset credits, Cloud credits, update guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
     }
 
     private static func smokeNotifications(sample: String) throws {
@@ -1875,6 +2030,144 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         guard model.keyboardFocusVisible else { throw AppError.message("Shift-Tab navigation did not enable a focus outline.") }
         model.page = .settings
         guard !model.keyboardFocusVisible else { throw AppError.message("A new page inherited a keyboard focus outline.") }
+    }
+
+    private static func smokeCloudCredits(sample: String, directory: URL?) throws {
+        guard var document = try JSONSerialization.jsonObject(with: Data(sample.utf8)) as? [String: Any],
+              var settings = document["settings"] as? [String: Any],
+              let providers = document["providers"] as? [[String: Any]],
+              var provider = providers.last else { throw AppError.message("Cloud credits sample setup failed.") }
+        let identity = "account:cloud-work"
+        provider["id"] = identity
+        provider["providerId"] = "claude"
+        provider["idx"] = 2
+        provider["name"] = "Claude (Max) · Work"
+        settings["available"] = [identity]
+        settings["enabled"] = [identity]
+        settings["order"] = [identity]
+        settings["names"] = [identity: "Claude · Work"]
+        settings["providerIds"] = [identity: "claude"]
+        document["settings"] = settings
+        document["selected"] = ["provider": identity, "idx": 2, "metric": "rolling"] as [String: Any]
+        let states = [("available", "$42.50", 42.5), ("exhausted", "$0.00", 0.0),
+                      ("expired", "Expired", 75.25), ("unavailable", "Unavailable", 75.25)]
+        for (state, value, balance) in states {
+            let detail = state.capitalized + " · Expires 2026-11-05T07:59:00Z"
+            var credit: [String: Any] = ["id": "claude-cloud", "title": "Cloud credits", "currency": "USD",
+                "heading": "Claude (Max) · Cloud credits · Work",
+                "status": state, "value": value, "balance": state == "available" || state == "exhausted" ? balance as Any : NSNull(),
+                "stale": state == "unavailable", "expires": "Nov 05, 2026, 07:59", "remaining": state == "expired" ? "Expired" : "24d 13h left",
+                "timezone": "UTC+00:00", "observed": "Oct 11, 2026, 18:05", "observed_value": String(format: "$%.2f", balance),
+                "limit_value": "$100.00", "used_value": String(format: "$%.2f", 100 - balance),
+                "status_note": state == "unavailable" ? "Refresh unavailable" : "", "detail": detail]
+            provider["monetaryCredits"] = [credit]
+            provider["metrics"] = [
+                ["key": "rolling", "name": "Rolling Usage", "percentage": 9,
+                 "detail": "Resets in 34m"] as [String: Any],
+                ["key": "credits:claude-cloud", "name": "Cloud credits", "percentage": NSNull(),
+                 "hasPercentage": false, "value": value, "isAmount": state == "available" || state == "exhausted",
+                 "detail": detail] as [String: Any],
+            ]
+            document["providers"] = [provider]
+            document["text"] = "Claude (Max) · Work " + value
+            let model = Model()
+            model.accept(try JSONSerialization.data(withJSONObject: document))
+            guard let current = model.selectedProvider, current.providerID == "claude",
+                  current.metrics.count == 2, current.metrics[0].percentage == 9,
+                  current.metrics[1].percentage == nil, current.metrics[1].usable,
+                  current.metrics[1].displayValue == value, current.metrics[1].detail == detail,
+                  current.monetaryCredits.count == 1, current.monetaryCredits[0].status == state,
+                  current.resetCredits?.available == 1 else {
+                throw AppError.message("Cloud credits state or coexistence with quota and reset credits failed.")
+            }
+            let selection = current.selection(current.metrics[1])
+            guard selection.provider == identity, selection.idx == 2, selection.metric == "credits:claude-cloud" else {
+                throw AppError.message("Cloud credits selection lost its account identity.")
+            }
+            model.isPresented = true
+            try renderSmokePage(model, name: "cloud-" + state, directory: directory)
+            let quotaSelection = model.snapshot?.selected
+            model.keyboardFocusVisible = true
+            model.showCloudCredits(current, current.monetaryCredits[0])
+            guard model.page == .cloudCredits(current.id, "claude-cloud"), model.cloudCreditProvider?.idx == 2,
+                  model.cloudCredit?.value == value, model.cloudCredit?.expires == "Nov 05, 2026, 07:59",
+                  model.cloudCredit?.remaining == (state == "expired" ? "Expired" : "24d 13h left"),
+                  model.cloudCredit?.observedValue == String(format: "$%.2f", balance),
+                  model.cloudCredit?.limitValue == "$100.00", model.cloudCredit?.usedValue == String(format: "$%.2f", 100 - balance),
+                  model.cloudCredit?.observed == "Oct 11, 2026, 18:05",
+                  model.cloudCredit?.heading == "Claude (Max) · Cloud credits · Work",
+                  model.cloudCredit?.timezone == "UTC+00:00", !model.keyboardFocusVisible,
+                  model.snapshot?.selected == quotaSelection else {
+                throw AppError.message("Cloud details navigation changed quota selection, lost its account, or omitted expiration details.")
+            }
+            try renderSmokePage(model, name: "cloud-details-" + state, directory: directory)
+            if state == "available" {
+                var legacyCredit = credit
+                for field in ["heading", "expires", "remaining", "timezone", "observed", "observed_value", "limit_value", "used_value", "status_note"] {
+                    legacyCredit.removeValue(forKey: field)
+                }
+                let legacy = try JSONDecoder().decode(MonetaryCredit.self, from: JSONSerialization.data(withJSONObject: legacyCredit))
+                guard legacy.heading == nil, legacy.expires == "Not reported", legacy.limitValue == "Not reported", legacy.observedValue == "Not reported" else {
+                    throw AppError.message("Legacy Cloud details invented missing balances or expiration.")
+                }
+                // A new snapshot updates an already open page without reopening it.
+                credit["status"] = "expired"
+                credit["value"] = "Expired"
+                credit["remaining"] = "Expired"
+                provider["monetaryCredits"] = [credit]
+                document["providers"] = [provider]
+                model.accept(try JSONSerialization.data(withJSONObject: document))
+                guard model.page == .cloudCredits(current.id, "claude-cloud"), model.cloudCredit?.status == "expired",
+                      model.snapshot?.selected == quotaSelection else {
+                    throw AppError.message("An open Cloud details page did not follow offline expiration.")
+                }
+                var other = provider
+                other["id"] = "account:cloud-personal"
+                other["name"] = "Claude (Max) · Personal"
+                other["monetaryCredits"] = [credit.merging(["value": "$8.25", "status": "available", "heading": "Claude (Max) · Cloud credits · Personal"]) { _, new in new }]
+                // Reorder two accounts with the same credit ID and keep the exact entry.
+                document["providers"] = [other, provider]
+                model.accept(try JSONSerialization.data(withJSONObject: document))
+                guard model.cloudCreditProvider?.connectionID == identity, model.cloudCredit?.value == "Expired" else {
+                    throw AppError.message("Cloud details followed another account after a refresh.")
+                }
+                provider["monetaryCredits"] = []
+                document["providers"] = [other, provider]
+                model.accept(try JSONSerialization.data(withJSONObject: document))
+                guard model.page == .usage, model.snapshot?.selected == quotaSelection else {
+                    throw AppError.message("A removed Cloud credit left a stale details page open.")
+                }
+                model.showCloudCredits(current, current.monetaryCredits[0])
+                guard model.page == .usage else {
+                    throw AppError.message("An old Cloud button reopened a removed credit.")
+                }
+                provider["monetaryCredits"] = [credit]
+                document["providers"] = [other, provider]
+                model.accept(try JSONSerialization.data(withJSONObject: document))
+                model.showCloudCredits(current, current.monetaryCredits[0])
+                document["providers"] = [other]
+                model.accept(try JSONSerialization.data(withJSONObject: document))
+                guard model.page == .usage else {
+                    throw AppError.message("A removed Cloud account left a stale details page open.")
+                }
+                provider["monetaryCredits"] = [credit]
+                document["providers"] = [provider]
+                model.accept(try JSONSerialization.data(withJSONObject: document))
+            }
+            model.back()
+            guard model.page == .usage, model.snapshot?.selected == quotaSelection else {
+                throw AppError.message("Going back from Cloud details changed quota selection.")
+            }
+            model.showCredits(current)
+            guard model.page == .credits(current.id), model.creditProvider?.resetCredits?.available == 1 else {
+                throw AppError.message("Cloud details displaced the existing reset credits page.")
+            }
+            model.showSettings()
+            guard model.settingsValid, model.choices.count == 2,
+                  model.choices.first(where: { $0.selection == selection })?.label == "Claude (Max) · Work · Cloud credits" else {
+                throw AppError.message("Cloud credits account settings label exposes an internal identity or omits the metric.")
+            }
+        }
     }
 
     private static func smokeAccounts(sample: String, directory: URL?) throws {

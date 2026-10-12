@@ -11,7 +11,7 @@ from . import logos
 from . import config as cfgmod
 from . import quickshell
 from . import paths
-from . import notifications, desktop_notifications
+from . import notifications, desktop_notifications, usage_credits
 
 should_update = True
 is_updating = False
@@ -29,6 +29,12 @@ def _group_by_dir(data):
     for p in (data or []):
         groups.setdefault(render.connection_key(p), []).append(p)
     return groups
+
+
+def _credit_signature(data):
+    return tuple((render.connection_key(entry), entry.get("_idx", 0),
+                  row["id"], row["status"], row["balance"], row["detail"])
+                 for entry in data for row in usage_credits.presentation(entry))
 
 
 def _ordered_merged(order):
@@ -88,9 +94,9 @@ def _run(output_format="waybar"):
     selected = state.load_selected() or {}
     if not selected.get("provider"):
         for p in latest_data:
-            if p.get("metrics"):
+            if render.entry_metrics(p):
                 selected.update(provider=render.connection_key(p), idx=p.get("_idx", 0),
-                                metric=render.metric_key(sorted(p["metrics"], key=render.metric_sort_key)[0]))
+                                metric=render.metric_key(sorted(render.entry_metrics(p), key=render.metric_sort_key)[0]))
                 state.save_selected(selected)
                 break
         else:
@@ -109,9 +115,11 @@ def _run(output_format="waybar"):
     else:
         logo_cache = quickshell.LogoCache() if output_format == "quickshell" else None
     last_snapshot = None
+    last_credit_signature = None
+    last_credit_check = 0
 
     def emit(data, selected, frame=None):
-        nonlocal last_snapshot
+        nonlocal last_snapshot, last_credit_signature
         if output_format in ("quickshell", "macos"):
             logo_paths = {name: logo_cache.get(name) for name in cfgmod.available_providers()}
             logo = logo_paths.get((cfgmod.connection_info(selected.get("provider", "")) or {}).get("provider", ""), "") if state.get_icon_mode(selected) == "logo" else ""
@@ -130,6 +138,9 @@ def _run(output_format="waybar"):
                 print(serialized, flush=True)
                 last_snapshot = serialized
         else:
+            # Observe before rendering: a deadline crossed while rendering is
+            # then detected by the next idle check instead of being missed.
+            last_credit_signature = _credit_signature(data)
             output = (render.build_loading_state(data, frame, selected, pending=_pending.copy())
                       if frame is not None else render.build_final_state(data, selected))
             print(json.dumps(output, ensure_ascii=False), flush=True)
@@ -211,6 +222,13 @@ def _run(output_format="waybar"):
             elif output_format in ("quickshell", "macos"):
                 # Publish asynchronously downloaded logos without a new fetch.
                 emit(latest_data, selected)
+
+            elif now - last_credit_check >= 1:
+                last_credit_check = now
+                # Expiration and stale observations change without a new
+                # request. Refresh Waybar only when their displayed state does.
+                if _credit_signature(latest_data) != last_credit_signature:
+                    emit(latest_data, selected)
 
             # Short poll so the text reacts to a scroll/selection change almost
             # as fast as the logo (which updates instantly via its signal),

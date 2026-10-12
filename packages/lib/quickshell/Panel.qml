@@ -16,9 +16,12 @@ Ui.Panel {
     property bool updatePage: false
     property real settingsScrollPosition: 0
     property var resetProvider: null
+    property var creditSelection: null
     property real usageScrollPosition: 0
     property Item restoredFocusControl: null
     readonly property var resetEntry: resetProvider ? Plugin.Model.snapshot.providers.find(entry => entry.id === resetProvider.id && entry.idx === resetProvider.idx) || null : null
+    readonly property var creditProvider: creditSelection ? Plugin.Model.snapshot.providers.find(entry => entry.id === creditSelection.id && entry.idx === creditSelection.idx) || null : null
+    readonly property var creditEntry: creditSelection && creditProvider ? (creditProvider.monetaryCredits || []).find(entry => entry.id === creditSelection.creditId) || null : null
     readonly property string panelFont: bar ? bar.fontFamily : Style.font.family
 
     component IconButton: Plugin.PanelIconButton {
@@ -32,6 +35,7 @@ Ui.Panel {
         aboutPage = false
         updatePage = false
         resetProvider = null
+        creditSelection = null
         configurationPage = true
         open()
     }
@@ -43,10 +47,18 @@ Ui.Panel {
         const wasUpdate = updatePage
         updatePage = false
         const previous = resetProvider
+        const previousCredit = creditSelection
         resetProvider = null
+        creditSelection = null
         if (previous) Qt.callLater(() => {
             restoreScrollPosition(usageScrollPosition)
             const button = usage.resetButton(previous.id, previous.idx)
+            if (button && button.visible) restoreFocus(button)
+            else keyCatcher.forceActiveFocus()
+        })
+        else if (previousCredit) Qt.callLater(() => {
+            restoreScrollPosition(usageScrollPosition)
+            const button = usage.creditButton(previousCredit.id, previousCredit.idx, previousCredit.creditId)
             if (button && button.visible) restoreFocus(button)
             else keyCatcher.forceActiveFocus()
         })
@@ -79,7 +91,18 @@ Ui.Panel {
         const entry = Plugin.Model.snapshot.providers.find(item => item.id === provider && item.idx === idx)
         if (!entry || !entry.resetCredits || entry.resetCredits.available === 0) return
         usageScrollPosition = scroller.contentY
+        creditSelection = null
         resetProvider = {id: provider, idx: idx}
+        scroller.contentY = 0
+        Qt.callLater(() => backButton.focusProgrammatically())
+    }
+
+    function showUsageCredits(provider, idx, creditId) {
+        const entry = Plugin.Model.snapshot.providers.find(item => item.id === provider && item.idx === idx)
+        if (!entry || !(entry.monetaryCredits || []).some(item => item.id === creditId)) return
+        usageScrollPosition = scroller.contentY
+        resetProvider = null
+        creditSelection = {id: provider, idx: idx, creditId: creditId}
         scroller.contentY = 0
         Qt.callLater(() => backButton.focusProgrammatically())
     }
@@ -138,7 +161,10 @@ Ui.Panel {
     onResetEntryChanged: if (resetProvider && !resetEntry) Qt.callLater(() => {
         if (resetProvider && !resetEntry) showUsage()
     })
-    onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; aboutPage = false; updatePage = false; resetProvider = null }
+    onCreditEntryChanged: if (creditSelection && !creditEntry) Qt.callLater(() => {
+        if (creditSelection && !creditEntry) showUsage()
+    })
+    onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; aboutPage = false; updatePage = false; resetProvider = null; creditSelection = null }
 
     Connections {
         target: keyCatcher.Window.window
@@ -164,13 +190,13 @@ Ui.Panel {
             objectName: "panel-key-catcher"
             anchors.fill: parent
             onCloseRequested: {
-                if (root.configurationPage || root.resetProvider || root.updatePage) root.goBack()
+                if (root.configurationPage || root.resetProvider || root.creditSelection || root.updatePage) root.goBack()
                 else root.close()
             }
             onTabRequested: direction => {
                 if (root.aboutPage) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
                 else if (root.configurationPage) settings.focusFirstControl()
-                else if (root.resetProvider) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
+                else if (root.resetProvider || root.creditSelection) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
                 else if (root.updatePage) updates.focusFirstControl()
                 else root.switchPanel(direction)
             }
@@ -191,7 +217,7 @@ Ui.Panel {
                     objectName: "panel-back"
                     anchors.left: parent.left
                     anchors.verticalCenter: parent.verticalCenter
-                    visible: root.configurationPage || !!root.resetProvider || root.updatePage
+                    visible: root.configurationPage || !!root.resetProvider || !!root.creditSelection || root.updatePage
                     iconName: "arrow-left"
                     tooltipText: root.aboutPage ? "Back to settings (Esc)" : "Back to usage (Esc)"
                     enabled: !Plugin.Model.settingsSaving
@@ -238,7 +264,7 @@ Ui.Panel {
                     }
                     IconButton {
                         objectName: "panel-settings"
-                        visible: !root.configurationPage && !root.resetProvider && !root.updatePage
+                        visible: !root.configurationPage && !root.resetProvider && !root.creditSelection && !root.updatePage
                         iconName: "settings"
                         tooltipText: "Configure (C)"
                         enabled: !Plugin.Model.settingsSaving && !!Plugin.Model.snapshot.settings
@@ -293,7 +319,7 @@ Ui.Panel {
                         id: updateLink
                         objectName: "update-available"
                         width: parent.width
-                        visible: !root.configurationPage && !root.resetProvider && !root.updatePage && !!Plugin.Model.snapshot.version && !!Plugin.Model.snapshot.version.has_update
+                        visible: !root.configurationPage && !root.resetProvider && !root.creditSelection && !root.updatePage && !!Plugin.Model.snapshot.version && !!Plugin.Model.snapshot.version.has_update
                         text: "Update available: v" + (Plugin.Model.snapshot.version ? Plugin.Model.snapshot.version.latest || "" : "")
                         trailingIconName: "arrow-right"
                         alignLeft: true
@@ -304,10 +330,11 @@ Ui.Panel {
                     Plugin.UsagePage {
                         id: usage
                         width: parent.width
-                        visible: !root.configurationPage && !root.resetProvider && !root.updatePage
+                        visible: !root.configurationPage && !root.resetProvider && !root.creditSelection && !root.updatePage
                         foreground: root.barForeground
                         fontFamily: root.panelFont
                         onResetRequested: (provider, idx) => root.showResetCredits(provider, idx)
+                        onCreditRequested: (provider, idx, creditId) => root.showUsageCredits(provider, idx, creditId)
                         onSettingsRequested: root.configure()
                     }
                     Plugin.UpdatePage {
@@ -323,6 +350,15 @@ Ui.Panel {
                         width: parent.width
                         visible: !!root.resetProvider && !root.configurationPage
                         provider: root.resetEntry
+                        foreground: root.barForeground
+                        fontFamily: root.panelFont
+                    }
+                    Plugin.UsageCreditsPage {
+                        objectName: "panel-usage-credits-page"
+                        width: parent.width
+                        visible: !!root.creditSelection && !root.configurationPage
+                        provider: root.creditProvider
+                        credit: root.creditEntry
                         foreground: root.barForeground
                         fontFamily: root.panelFont
                     }
