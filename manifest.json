@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.gelzinn.ai-status",
   "name": "AI Status",
-  "version": "0.13.3",
+  "version": "0.14.0",
   "author": "gelzinn",
   "license": "MIT",
   "description": "Monitor AI provider usage limits in the Omarchy bar.",
