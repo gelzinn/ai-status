@@ -4,8 +4,10 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import plistlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -104,10 +106,36 @@ class UpdateGuideTests(unittest.TestCase):
                 patch.object(updates.shutil, "which", return_value="/usr/bin/omarchy"):
             guide = updates.update_guide()
         self.assertEqual(guide["method"], "omarchy")
-        self.assertEqual(guide["command"], "omarchy plugin update " + updates.PLUGIN_ID + " --yes")
+        self.assertEqual(guide["command"], "omarchy plugin update " + updates.PLUGIN_ID + " --yes && omarchy restart shell")
         lib = self.managed_lib()
         with patch.object(paths, "LIB_DIR", lib), patch.object(sys, "platform", "linux"):
             self.assertIn("--bar quickshell", updates.update_guide()["command"])
+
+    @unittest.skipIf(sys.platform == "win32", "Requires Unix shell integration")
+    @unittest.skipUnless(shutil.which("bash"), "Requires Bash to exercise the Omarchy update command")
+    def test_omarchy_update_restarts_shell_only_after_success_and_propagates_failures(self):
+        binary = self.home / "bin"
+        binary.mkdir()
+        log = self.home / "omarchy-commands"
+        executable = binary / "omarchy"
+        executable.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$AI_STATUS_TEST_LOG"\n'
+                              'if [ "$1" = plugin ]; then exit "$AI_STATUS_TEST_UPDATE_EXIT"; fi\n'
+                              'exit "$AI_STATUS_TEST_RESTART_EXIT"\n')
+        executable.chmod(0o755)
+        with patch.object(updates, "_installation", return_value=("omarchy", {})):
+            guide = updates.update_guide()
+        for update_status, restart_status, expected in ((0, 0, 0), (7, 0, 7), (0, 9, 9)):
+            with self.subTest(update=update_status, restart=restart_status):
+                log.write_text("")
+                env = dict(os.environ, PATH=str(binary) + os.pathsep + os.environ["PATH"],
+                           AI_STATUS_TEST_LOG=str(log), AI_STATUS_TEST_UPDATE_EXIT=str(update_status),
+                           AI_STATUS_TEST_RESTART_EXIT=str(restart_status))
+                result = subprocess.run(["bash", "-c", guide["command"]], env=env, capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, expected)
+                expected_commands = ["plugin update " + updates.PLUGIN_ID + " --yes"]
+                if update_status == 0:
+                    expected_commands.append("restart shell")
+                self.assertEqual(log.read_text().splitlines(), expected_commands)
 
     def test_source_and_portable_guides_never_replace_them_automatically(self):
         with patch.object(paths, "LIB_DIR", self.home / "checkout/packages/lib"), \

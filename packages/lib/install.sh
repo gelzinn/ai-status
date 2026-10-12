@@ -756,8 +756,10 @@ fi
 # ═══════════════════════════════════════════════════════════
 
 if [ "$BAR" = quickshell ]; then
+    PLUGIN_UPDATED=false
     if [ -d "$PLUGIN_DIR/.git" ]; then
         omarchy plugin update "$PLUGIN_ID" --yes
+        PLUGIN_UPDATED=true
     else
         # Local development installs the checkout being tested, rather than main.
         PLUGIN_SOURCE="$REPO_URL"
@@ -769,6 +771,10 @@ if [ "$BAR" = quickshell ]; then
         omarchy plugin enable "$PLUGIN_ID"
     else
         echo "Enable when ready: omarchy plugin enable $PLUGIN_ID"
+    fi
+    if [ "$PLUGIN_UPDATED" = true ]; then
+        echo -e "  ${C_DIM}> restarting Omarchy shell...${C_RESET}"
+        omarchy restart shell
     fi
 elif command -v waybar &>/dev/null; then
     echo ""
