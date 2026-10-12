@@ -504,6 +504,44 @@ class DesktopTests(IsolatedState):
             self.assertGreater(content.verticalScrollBar().value(), 0)
             self.assertEqual(bar.value(), tab_position)
 
+    def test_settings_viewports_reach_panel_edges_and_padding_scrolls_with_content(self):
+        with patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.configure()
+            self.app.processEvents()
+            settings = self.dashboard.settings_view
+            navigation = settings.navigation
+            viewport = navigation.viewport()
+            self.assertEqual(viewport.width(), self.dashboard.width() - 2)
+            self.assertEqual(viewport.mapTo(self.dashboard, tray.QPoint()).x(), 1)
+            tabs_scroll = navigation.horizontalScrollBar()
+            tabs_scroll.setValue(0)
+            first_tab = settings.section_buttons["general"]
+            self.assertEqual(first_tab.mapTo(viewport, tray.QPoint()).x(), 16)
+            tabs_scroll.setValue(tabs_scroll.maximum())
+            last_tab = settings.section_buttons["providers"]
+            last_edge = last_tab.mapTo(viewport, tray.QPoint()).x() + last_tab.width()
+            self.assertEqual(viewport.width() - last_edge, 16)
+            self.assertLess(first_tab.mapTo(viewport, tray.QPoint()).x(), 0)
+            settings.select_section("providers")
+            self.app.processEvents()
+            content = self.dashboard.settings_scroll
+            content_viewport = content.viewport()
+            viewport_top = content_viewport.mapTo(self.dashboard, tray.QPoint()).y()
+            self.assertEqual(viewport_top, self.dashboard.settings_navigation.y() + self.dashboard.settings_navigation.height())
+            self.assertEqual(viewport_top + content_viewport.height(), self.dashboard.settings_footer.y())
+            section = settings.sections["providers"]
+            scroll = content.verticalScrollBar()
+            scroll.setValue(0)
+            self.assertEqual(section.mapTo(content_viewport, tray.QPoint()).y(), 18)
+            scroll.setValue(scroll.maximum())
+            section_bottom = section.mapTo(content_viewport, tray.QPoint(0, section.height())).y()
+            self.assertEqual(content_viewport.height() - section_bottom, 18)
+            scroll.setValue(scroll.maximum() // 2)
+            self.assertLess(settings.mapTo(content_viewport, tray.QPoint()).y(), 0)
+            self.assertGreater(settings.mapTo(content_viewport, tray.QPoint(0, settings.height())).y(), content_viewport.height())
+            self.assertEqual(content_viewport.mapTo(self.dashboard, tray.QPoint()).y(), viewport_top)
+            self.assertEqual(viewport_top + content_viewport.height(), self.dashboard.settings_footer.y())
+
     def test_settings_escape_and_cancel_discard_only_unsaved_changes(self):
         self.dashboard.configure()
         settings = self.dashboard.settings_view

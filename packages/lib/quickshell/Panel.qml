@@ -183,7 +183,7 @@ Ui.Panel {
         open: root.opened
         focusTarget: keyCatcher
         contentWidth: panel.fittedContentWidth(Style.space(380))
-        contentHeight: panel.fittedContentHeight(header.height + panel.padding + Style.space(13) + content.implicitHeight + (settingsNavigation.visible ? settingsNavigation.height + Style.space(12) : 0) + (footer.visible ? footer.height + Style.space(12) : 0), Style.space(680))
+        contentHeight: panel.fittedContentHeight(header.height + panel.padding + Style.space(1) + scroller.contentHeight + (settingsNavigation.visible ? settingsNavigation.height : 0) + (footer.visible ? footer.height : -panel.padding), Style.space(680))
 
         Ui.PanelKeyCatcher {
             id: keyCatcher
@@ -291,10 +291,10 @@ Ui.Panel {
                 id: settingsNavigation
                 objectName: "settings-navigation"
                 anchors.top: divider.bottom
-                anchors.topMargin: Style.space(12)
-                width: parent.width
-                height: sectionTabs.height
-                contentWidth: sectionTabs.width
+                x: -panel.padding
+                width: parent.width + panel.padding * 2
+                height: sectionTabs.height + Style.space(12)
+                contentWidth: sectionTabs.width + panel.padding * 2
                 contentHeight: height
                 clip: true
                 flickableDirection: Flickable.HorizontalFlick
@@ -307,8 +307,10 @@ Ui.Panel {
                 function revealTab(button) {
                     if (!button) return
                     let nextX = contentX
-                    if (button.x < contentX) nextX = button.x
-                    else if (button.x + button.width > contentX + width) nextX = button.x + button.width - width
+                    const left = sectionTabs.x + button.x - panel.padding
+                    const right = sectionTabs.x + button.x + button.width + panel.padding
+                    if (left < contentX) nextX = left
+                    else if (right > contentX + width) nextX = right - width
                     contentX = Math.max(0, Math.min(nextX, Math.max(0, contentWidth - width)))
                 }
                 function moveFocus(index, offset) {
@@ -326,6 +328,8 @@ Ui.Panel {
                 }
                 Row {
                     id: sectionTabs
+                    x: panel.padding
+                    y: Style.space(12)
                     spacing: Style.space(6)
                     Repeater {
                         id: sectionButtons
@@ -356,19 +360,21 @@ Ui.Panel {
                 id: scroller
                 objectName: "panel-scroller"
                 anchors.top: settingsNavigation.visible ? settingsNavigation.bottom : divider.bottom
-                anchors.topMargin: Style.space(12)
                 anchors.bottom: footer.visible ? footer.top : parent.bottom
-                anchors.bottomMargin: footer.visible ? Style.space(12) : 0
-                width: parent.width
+                anchors.bottomMargin: footer.visible ? 0 : -panel.padding
+                x: -panel.padding
+                width: parent.width + panel.padding * 2
                 contentWidth: width
-                contentHeight: content.implicitHeight
+                contentHeight: content.implicitHeight + Style.space(24)
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
                 onContentYChanged: settings.closeSelectors()
 
                 Column {
                     id: content
-                    width: scroller.width
+                    x: panel.padding
+                    y: Style.space(12)
+                    width: scroller.width - panel.padding * 2
                     spacing: Style.space(20)
                     Text {
                         width: parent.width

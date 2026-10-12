@@ -8,14 +8,17 @@ Each interface has four sections: General, Appearance, Alerts and Providers.
 The tabs form one horizontal strip with widths determined by their labels.
 The strip scrolls horizontally when the tabs exceed the available width and
 reveals the selected tab. It remains above the scrolling section content;
-the panel header and Save/Cancel actions stay visible as well.
+the panel header and Save/Cancel actions stay visible as well. The scrolling
+viewports reach the panel edges and separators, with padding inside their content.
 
 - `quickshell-*.png` uses Qt Quick Test's offscreen software renderer and the
   unchanged dark shell fixtures in `packages/lib/tests/qml/`. The fixtures use a
   monospace font and square corners. A running Omarchy desktop supplies its own
-  theme, font and window behavior. The Providers capture uses twelve sample
+  theme, font and window behavior. The Providers capture uses sixteen sample
   connections, including the four enabled ones, and shows the tab strip scrolled
-  right to reveal the selected Providers tab.
+  right to reveal the selected Providers tab. `quickshell-providers-bottom.png`
+  shows the bottom of the same provider list, including the padding before the
+  footer separator and the content clipping at the top of the viewport.
 - `windows-*.png` uses the production Qt widget adapter with its Windows startup
   option enabled, an offscreen renderer on Linux and the Fusion widget style.
   Configuration and cache files are isolated by the desktop test fixture. This

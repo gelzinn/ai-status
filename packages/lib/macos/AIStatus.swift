@@ -1099,11 +1099,11 @@ struct SettingsNavigation: View {
                                                  focusChanged: { scroll.scrollTo(section.id, anchor: .center) })
                             .id(section.id)
                     }
-                }.padding(.vertical, 1)
-            }.frame(height: 36)
+                }.padding(.horizontal, 16).padding(.vertical, 11)
+            }.frame(height: 56)
                 .onAppear { scroll.scrollTo(model.settingsSection.id, anchor: .center) }
                 .onChange(of: model.settingsSection) { scroll.scrollTo($0.id, anchor: .center) }
-        }.padding(.horizontal, 16).padding(.vertical, 10).disabled(model.settingsSaving)
+        }.disabled(model.settingsSaving)
     }
 }
 

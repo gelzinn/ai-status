@@ -804,7 +804,7 @@ class SettingsNavigation(QScrollArea):
 
     def eventFilter(self, watched, event):
         if event.type() == QEvent.Type.FocusIn:
-            self.ensureWidgetVisible(watched, 4, 0)
+            self.ensureWidgetVisible(watched, 16, 0)
         return super().eventFilter(watched, event)
 
     def wheelEvent(self, event):
@@ -852,7 +852,7 @@ class ProviderSettings(QWidget):
         """.replace("CHECKMARK", '"' + (ASSETS / "checkmark.png").as_posix() + '"'))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 18, 16, 18)
-        layout.setSpacing(8)
+        layout.setSpacing(0)
         self.current_section = "general"
         self.section_positions = {}
         self.sections = {}
@@ -866,7 +866,7 @@ class ProviderSettings(QWidget):
         """)
         navigation_content = QWidget()
         navigation_layout = QHBoxLayout(navigation_content)
-        navigation_layout.setContentsMargins(0, 0, 0, 0)
+        navigation_layout.setContentsMargins(16, 12, 16, 0)
         navigation_layout.setSpacing(4)
         navigation_layout.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
         self.navigation.setWidget(navigation_content)
@@ -991,7 +991,7 @@ class ProviderSettings(QWidget):
     def select_section(self, key):
         if key not in self.sections:
             return
-        self.navigation.ensureWidgetVisible(self.section_buttons[key], 4, 0)
+        self.navigation.ensureWidgetVisible(self.section_buttons[key], 16, 0)
         if key == self.current_section:
             return
         scroll = getattr(self.dashboard, "settings_scroll", None)
@@ -1505,7 +1505,7 @@ class Dashboard(QWidget):
         self.pages.addWidget(self.settings_scroll)
         self.settings_navigation = QWidget()
         self.settings_navigation_layout = QVBoxLayout(self.settings_navigation)
-        self.settings_navigation_layout.setContentsMargins(16, 12, 16, 0)
+        self.settings_navigation_layout.setContentsMargins(0, 0, 0, 0)
         self.settings_navigation.hide()
         self.panel_layout.insertWidget(1, self.settings_navigation)
         self.about_scroll = QScrollArea()

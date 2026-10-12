@@ -14,12 +14,13 @@ PROJECT = LIB.parents[1]
 SECTIONS = ("general", "appearance", "alerts", "providers")
 PROVIDERS = ["codex", "claude", "cursor", "opencode", "copilot", "kiro",
              "openrouter", "anthropic-api", "openai-api", "google-cloud",
-             "grok-bot", "commandcode"]
+             "grok-bot", "commandcode", "deepinfra", "deepseek", "kimi", "minimax"]
 NAMES = {"codex": "Codex", "claude": "Claude", "cursor": "Cursor",
          "opencode": "OpenCode", "copilot": "Copilot", "kiro": "Kiro",
          "openrouter": "OpenRouter", "anthropic-api": "Anthropic API",
          "openai-api": "OpenAI API", "google-cloud": "Google Cloud",
-         "grok-bot": "Grok Bot", "commandcode": "Command Code"}
+         "grok-bot": "Grok Bot", "commandcode": "Command Code",
+         "deepinfra": "DeepInfra", "deepseek": "DeepSeek", "kimi": "Kimi", "minimax": "MiniMax"}
 
 
 def render_quickshell(output):
@@ -69,6 +70,10 @@ Item {
                 compare(settings.section, section)
                 grabImage(findChild(panel, "panel-surface")).save(OUTPUT + "/quickshell-" + section + ".png")
             }
+            const scroller = findChild(panel, "panel-scroller")
+            scroller.contentY = Math.max(0, scroller.contentHeight - scroller.height)
+            wait(150)
+            grabImage(findChild(panel, "panel-surface")).save(OUTPUT + "/quickshell-providers-bottom.png")
         }
     }
 }
@@ -80,7 +85,7 @@ Item {
         env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
                    QML_XHR_ALLOW_FILE_READ="1")
         subprocess.run([runner, "-input", str(root), "-import", str(root)], env=env, check=True)
-        for section in SECTIONS:
+        for section in (*SECTIONS, "providers-bottom"):
             if not (output / f"quickshell-{section}.png").is_file():
                 raise RuntimeError(f"Qt did not save the {section} preview.")
 
