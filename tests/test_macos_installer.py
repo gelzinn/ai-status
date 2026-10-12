@@ -52,6 +52,36 @@ class MacOSInstallerTests(unittest.TestCase):
         shutil.copytree(ROOT / "packages/lib", self.repo / "packages/lib",
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "tests", "windows", "quickshell", "fonts"))
         shutil.copytree(ROOT / "packages/shared", self.repo / "packages/shared")
+        # Fixtures include cross-platform/build payloads deliberately omitted
+        # from the fast source copy, plus real runtime fonts and their license.
+        shutil.copytree(ROOT / "packages/lib/assets/fonts", self.repo / "packages/lib/assets/fonts")
+        self.unneeded_payload = [
+            "packages/lib/tests/test_development_only.py",
+            "packages/lib/windows/build.ps1",
+            "packages/lib/quickshell/Panel.qml",
+            "packages/lib/src/core/__pycache__/cli.cpython-310.pyc",
+            "packages/lib/src/core/stale.pyc",
+            "packages/lib/assets/providers/stale.pyo",
+            "packages/lib/assets/.DS_Store",
+            "packages/lib/.pytest_cache/cache.json",
+            "packages/lib/src/.mypy_cache/cache.json",
+            "packages/lib/.ruff_cache/cache.json",
+            "packages/lib/node_modules/dependency/index.js",
+            "packages/lib/.venv/bin/python",
+            "packages/lib/venv/bin/python",
+            "packages/lib/build/AIStatus",
+            "packages/lib/dist/AIStatus",
+            "packages/shared/__pycache__/providers.pyc",
+            "packages/shared/providers/node_modules/dependency/index.js",
+            "packages/shared/providers/build/generated.json",
+            "packages/shared/providers/dist/generated.json",
+        ]
+        for name in self.unneeded_payload:
+            path = self.repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("development or other-platform payload\n")
+        shutil.copyfile(ROOT / "packages/lib/quickshell/LUCIDE-LICENSE",
+                        self.repo / "packages/lib/quickshell/LUCIDE-LICENSE")
         self.git("init", "-b", "main")
         for version in ("0.9.0", "0.10.0", "0.11.0"):
             lib = self.repo / "packages/lib"
@@ -70,7 +100,7 @@ class MacOSInstallerTests(unittest.TestCase):
         self.bootstrap = self.root / "bootstrap/install-macos.sh"
         self.bootstrap.parent.mkdir()
         shutil.copyfile(INSTALLER, self.bootstrap)
-        self.write_tool("uname", "import sys; print('arm64' if '-m' in sys.argv else 'Darwin')")
+        self.write_tool("uname", "import os, sys; print(os.environ.get('TEST_ARCH', 'arm64') if '-m' in sys.argv else 'Darwin')")
         self.write_tool("sw_vers", "print('13.0')")
         self.write_tool("id", "print('501')")
         self.write_tool("defaults", "import os, sys; value=os.environ.get('TEST_PLUGIN_DIR'); print(value or ''); sys.exit(0 if value else 1)")
@@ -86,6 +116,13 @@ output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text('#!/bin/bash\\nexit 0\\n')
 output.chmod(0o755)
 """)
+        self.write_tool("strip", """
+import json, os, sys
+with open(os.environ['TEST_LOG'], 'a') as log:
+    log.write(json.dumps(['strip', *sys.argv[1:]]) + '\\n')
+if os.environ.get('TEST_STRIP_FAIL'):
+    sys.exit(1)
+""")
         for name in ("launchctl", "open", "codesign", "plutil"):
             self.write_tool(name, """
 import json, os, pathlib, sys
@@ -96,6 +133,9 @@ with open(os.environ['TEST_LOG'], 'a') as log:
         root = pathlib.Path(os.environ['TEST_ACTIVE_ROOT'])
         manifest = root / 'package.json'
         version = json.loads(manifest.read_text())['version'] if manifest.exists() else (root / 'packages/lib/VERSION').read_text().strip()
+        if os.environ.get('TEST_LAUNCH_FAIL') == version:
+            log.write(json.dumps(['launch-failed-version', version]) + '\\n')
+            sys.exit(1)
         log.write(json.dumps(['started-version', version]) + '\\n')
 """)
         self.write_tool("git", """
@@ -152,10 +192,51 @@ sys.exit(0 if exists else 22)
         return subprocess.run([REAL_BASH, str(script), *flags, *arguments], cwd=self.root, env=self.env,
                               capture_output=True, text=True, timeout=30)
 
-    def tool_calls(self, name):
+    def tool_calls(self, name=None):
         path = self.root / "tools.jsonl"
         calls = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
-        return [call for call in calls if call[0] == name]
+        return [call for call in calls if name is None or call[0] == name]
+
+    def assert_runtime_payload(self):
+        self.assertFalse((self.installed / "packages/lib/tests").exists())
+        self.assertFalse((self.installed / "packages/lib/windows").exists())
+        self.assertEqual({path.name for path in (self.installed / "packages/lib/quickshell").iterdir()},
+                         {"LUCIDE-LICENSE"})
+        for name in self.unneeded_payload:
+            with self.subTest(pruned=name):
+                self.assertFalse((self.installed / name).exists())
+        for name in (
+            "packages/lib/macos/AIStatus.swift",
+            "packages/lib/macos/Info.plist",
+            "packages/lib/assets/app.png",
+            "packages/lib/assets/providers/codex.png",
+            "packages/lib/assets/providers/codex.svg",
+            "packages/lib/assets/fonts/GeistMono-Regular.ttf",
+            "packages/lib/assets/fonts/GeistMono-Medium.ttf",
+            "packages/lib/assets/fonts/OFL.txt",
+            "packages/lib/assets/panel-icons-LICENSE",
+            "packages/lib/quickshell/LUCIDE-LICENSE",
+            "packages/shared/providers/providers.json",
+        ):
+            with self.subTest(retained=name):
+                self.assertEqual((self.installed / name).read_bytes(), (self.repo / name).read_bytes())
+        for source in (self.repo / "packages/lib/src").rglob("*.py"):
+            name = source.relative_to(self.repo)
+            with self.subTest(runtime_source=str(name)):
+                self.assertEqual((self.installed / name).read_bytes(), source.read_bytes())
+        assets = self.repo / "packages/lib/assets"
+        for source in assets.rglob("*"):
+            name = source.relative_to(self.repo)
+            if source.is_file() and str(name) not in self.unneeded_payload:
+                with self.subTest(runtime_asset=str(name)):
+                    self.assertEqual((self.installed / name).read_bytes(), source.read_bytes())
+                    bundled = self.bundle / "Contents/Resources/assets" / source.relative_to(assets)
+                    self.assertEqual(bundled.read_bytes(), source.read_bytes())
+        cache_names = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+                       "node_modules", ".venv", "venv", "build", "dist", ".DS_Store"}
+        for path in self.installed.rglob("*"):
+            self.assertNotIn(path.name, cache_names, str(path))
+            self.assertNotIn(path.suffix, (".pyc", ".pyo"), str(path))
 
     def assert_success(self, result, version):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -230,10 +311,32 @@ sys.exit(0 if exists else 22)
         self.assertFalse(self.agent.exists())
         self.assertFalse(any("bootstrap" in call for call in self.tool_calls("launchctl")))
 
+    def test_native_build_optimizes_and_strips_before_signing_for_each_architecture(self):
+        for architecture in ("arm64", "x86_64"):
+            with self.subTest(architecture=architecture):
+                self.env["TEST_ARCH"] = architecture
+                self.assert_success(self.run_installer(), "0.10.0")
+                compiler = self.tool_calls("swiftc")[-1]
+                self.assertIn("-Osize", compiler)
+                self.assertIn("-whole-module-optimization", compiler)
+                self.assertEqual(compiler[compiler.index("-Xlinker") + 1], "-dead_strip")
+                self.assertEqual(compiler[compiler.index("-target") + 1], architecture + "-apple-macosx13.0")
+                self.assertNotIn("-O", compiler)
+                self.assertFalse(any("AI_STATUS_SMOKE" in argument for argument in compiler))
+                executable = compiler[compiler.index("-o") + 1]
+                self.assertEqual(self.tool_calls("strip")[-1], ["strip", "-u", "-r", executable])
+                calls = [call[0] for call in self.tool_calls() if call[0] in ("swiftc", "strip", "codesign")]
+                self.assertEqual(calls[-3:], ["swiftc", "strip", "codesign"])
+
+    def test_public_install_prunes_development_payload_and_preserves_runtime_resources(self):
+        self.assert_success(self.run_installer(), "0.10.0")
+        self.assert_runtime_payload()
+
     def test_local_checkout_keeps_branch_code_instead_of_published_main(self):
         result = self.run_installer(local=True)
         self.assert_success(result, "0.11.0")
         self.assertTrue(self.bundle.is_dir())
+        self.assert_runtime_payload()
 
     def test_legacy_local_checkout_omits_its_unversioned_workspace_manifest(self):
         self.git("checkout", "v0.9.0")
@@ -242,15 +345,22 @@ sys.exit(0 if exists else 22)
 
     def test_explicit_version_and_offline_rollback_restore_exact_versions(self):
         self.assert_success(self.run_installer("--version", "v0.9.0"), "0.9.0")
+        (self.bundle / "Contents/Resources/old-bundle-only").write_text("not needed for a source rollback")
         self.assert_success(self.run_installer(), "0.10.0")
+        previous = self.installed.with_name("ai-status.previous")
+        self.assertFalse((previous / "AI Status.app").exists())
+        self.assertTrue((previous / "packages/lib/macos/AIStatus.swift").is_file())
         self.env["TEST_CURL_EXIT"] = "22"
         self.assert_success(self.run_installer("--rollback"), "0.9.0")
-        previous = self.installed.with_name("ai-status.previous")
         self.assertEqual(self.installed_version(previous), "0.10.0")
         self.assertTrue((previous / "package.json").exists())
+        self.assertFalse((previous / "AI Status.app").exists())
         self.assertFalse((self.installed / "package.json").exists())
         self.assertEqual((self.home / "Applications/AI Status.app").resolve(), self.bundle.resolve())
         self.assertFalse((self.bundle / "AI Status.app").exists())
+        self.assertFalse((self.bundle / "Contents/Resources/old-bundle-only").exists())
+        self.assertEqual(len(self.tool_calls("swiftc")), 3)
+        self.assertEqual(len(self.tool_calls("strip")), 3)
 
     def test_start_loads_the_login_agent_or_opens_the_app_without_autostart(self):
         self.assert_success(self.run_installer(start=True), "0.10.0")
@@ -341,10 +451,62 @@ sys.exit(0 if exists else 22)
         self.assertFalse(self.tool_calls("swiftc"))
 
     def test_failed_native_build_preserves_the_existing_install(self):
-        self.seed_existing_install()
+        self.assert_success(self.run_installer("--version", "0.9.0"), "0.9.0")
+        (self.installed / "keep").write_text("existing install")
+        original_executable = (self.bundle / "Contents/MacOS/AIStatus").read_bytes()
+        original_agent = self.agent.read_bytes()
         self.env["TEST_SWIFTC_FAIL"] = "1"
         self.assert_preserved(self.run_installer())
-        self.assertFalse(self.agent.exists())
+        self.assertEqual(self.installed_version(self.installed), "0.9.0")
+        self.assertEqual((self.bundle / "Contents/MacOS/AIStatus").read_bytes(), original_executable)
+        self.assertEqual(self.agent.read_bytes(), original_agent)
+        self.assertEqual(len(self.tool_calls("strip")), 1)
+        self.assertEqual(len(self.tool_calls("codesign")), 1)
+
+    def test_failed_native_strip_preserves_the_existing_app_before_activation(self):
+        self.assert_success(self.run_installer("--version", "0.9.0"), "0.9.0")
+        (self.installed / "keep").write_text("existing install")
+        original_executable = (self.bundle / "Contents/MacOS/AIStatus").read_bytes()
+        original_runtime = (self.bundle / "Contents/Resources/runtime.json").read_bytes()
+        original_agent = self.agent.read_bytes()
+        self.env["TEST_STRIP_FAIL"] = "1"
+        self.assert_preserved(self.run_installer(start=True))
+        self.assertEqual(self.installed_version(self.installed), "0.9.0")
+        self.assertEqual((self.bundle / "Contents/MacOS/AIStatus").read_bytes(), original_executable)
+        self.assertEqual((self.bundle / "Contents/Resources/runtime.json").read_bytes(), original_runtime)
+        self.assertEqual(self.agent.read_bytes(), original_agent)
+        self.assertEqual(len(self.tool_calls("strip")), 2)
+        self.assertEqual(len(self.tool_calls("codesign")), 1)
+        self.assertFalse(self.tool_calls("launchctl"))
+        self.assertFalse(self.tool_calls("open"))
+        self.assertFalse(self.installed.with_name("ai-status.previous").exists())
+
+    def test_missing_strip_cannot_skip_native_binary_optimization(self):
+        self.seed_existing_install()
+        (self.bin / "strip").unlink()
+        self.assert_preserved(self.run_installer())
+        self.assertFalse(self.tool_calls("codesign"))
+
+    def test_failed_launch_restores_the_original_app_and_integrations(self):
+        self.assert_success(self.run_installer("--version", "0.9.0"), "0.9.0")
+        (self.installed / "keep").write_text("existing install")
+        marker = self.bundle / "Contents/Resources/original-app"
+        marker.write_text("keep this bundle for failure recovery")
+        original_runtime = (self.bundle / "Contents/Resources/runtime.json").read_bytes()
+        original_agent = self.agent.read_bytes()
+        self.env["TEST_LAUNCH_FAIL"] = "0.10.0"
+        for autostart in (True, False):
+            with self.subTest(autostart=autostart):
+                self.assert_preserved(self.run_installer(start=True, autostart=autostart))
+                self.assertEqual(self.installed_version(self.installed), "0.9.0")
+                self.assertEqual(marker.read_text(), "keep this bundle for failure recovery")
+                self.assertEqual((self.bundle / "Contents/Resources/runtime.json").read_bytes(), original_runtime)
+                self.assertEqual(self.agent.read_bytes(), original_agent)
+                self.assertEqual((self.home / "Applications/AI Status.app").resolve(), self.bundle.resolve())
+                self.assertFalse(self.installed.with_name("ai-status.previous").exists())
+                self.assertEqual(self.tool_calls("started-version")[-1], ["started-version", "0.9.0"])
+        self.assertTrue(self.tool_calls("launch-failed-version"))
+        self.assertTrue(all(call == ["started-version", "0.9.0"] for call in self.tool_calls("started-version")))
 
     def test_failed_running_app_quit_preserves_active_version_and_does_not_start_replacement(self):
         self.assert_success(self.run_installer("--version", "0.9.0"), "0.9.0")
