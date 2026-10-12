@@ -1,8 +1,7 @@
 name: Windows package
 
 on:
-  pull_request:
-    branches: [main]
+  # CI calls this workflow only for PRs that change Windows or shared inputs.
   workflow_dispatch:
   workflow_call:
     inputs:
