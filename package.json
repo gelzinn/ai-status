@@ -1,6 +1,6 @@
 {
   "name": "ai-status-monorepo",
-  "version": "0.13.3",
+  "version": "0.14.0",
   "private": true,
   "workspaces": [
     "apps/*",
