@@ -480,6 +480,51 @@ Item {
             tryCompare(panel, "resetProvider", null)
             verify(panel.opened)
         }
+        function prepareResetAction() {
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.providers[1].resetAction = {fingerprint: "panel-action-token"}
+            snapshot.providers[1].resetCredits.rows[0].actionId = "panel-credit-handle"
+            Plugin.Model.snapshot = snapshot
+            panel.showResetCredits("codex", 0)
+            wait(20)
+        }
+        function test_escape_cancels_reset_confirmation_before_leaving_page() {
+            prepareResetAction()
+            const apply = findChild(panel, "reset-apply")
+            const confirmation = findChild(panel, "reset-confirmation")
+            mouseClick(apply)
+            verify(confirmation.visible)
+            compare(Plugin.Model.resetRequests.length, 0)
+            tryVerify(() => findChild(panel, "reset-cancel").activeFocus)
+            keyClick(Qt.Key_Escape)
+            verify(!confirmation.visible)
+            compare(panel.resetProvider.id, "codex")
+            compare(Plugin.Model.resetRequests.length, 0)
+            tryVerify(() => apply.activeFocus)
+            keyClick(Qt.Key_Escape)
+            compare(panel.resetProvider, null)
+            verify(panel.opened)
+            compare(Plugin.Model.resetRequests.length, 0)
+        }
+        function test_closing_panel_discards_confirmation_and_keeps_confirmed_action_running() {
+            prepareResetAction()
+            mouseClick(findChild(panel, "reset-apply"))
+            verify(findChild(panel, "reset-confirmation").visible)
+            panel.close()
+            verify(!findChild(panel, "reset-confirmation").visible)
+            compare(Plugin.Model.resetRequests.length, 0)
+            panel.open()
+            panel.showResetCredits("codex", 0)
+            wait(20)
+            verify(!findChild(panel, "reset-confirmation").visible)
+            mouseClick(findChild(panel, "reset-apply"))
+            mouseClick(findChild(panel, "reset-confirm"))
+            compare(Plugin.Model.resetRequests.length, 1)
+            verify(Plugin.Model.resetApplying)
+            panel.close()
+            verify(Plugin.Model.resetApplying)
+            compare(Plugin.Model.resetRequests.length, 1)
+        }
         function test_settings_and_escape_return_to_usage() {
             panel.configure()
             verify(panel.configurationPage)

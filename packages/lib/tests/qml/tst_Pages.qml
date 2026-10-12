@@ -572,5 +572,143 @@ Item {
             verify(!timezone.visible)
             compare(Plugin.Model.snapshot.selected.provider, "claude")
         }
+        function prepareActionableReset(overrides) {
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.providers[1] = Object.assign({}, snapshot.providers[1], {
+                id: "account:work", providerId: "codex", idx: 2, name: "Codex (Plus) · Work",
+                logoPath: decodeURIComponent(Qt.resolvedUrl("assets/providers/codex.png").toString().replace(/^file:\/\//, "")),
+                resetAction: {fingerprint: "observed-account-token"},
+                resetCredits: {available: 2, undetailed: 0, rows: [
+                    {title: "Full reset", count: 2, expires: "Oct 22, 18:05", remaining: "12d left", actionId: "opaque-credit-handle"}
+                ]}
+            }, overrides || {})
+            Plugin.Model.snapshot = snapshot
+            settings.visible = false
+            credits.visible = true
+            wait(20)
+            return snapshot
+        }
+        function test_reset_apply_opens_confirmation_and_cancel_never_submits() {
+            prepareActionableReset()
+            const apply = findChild(credits, "reset-apply")
+            const confirmation = findChild(credits, "reset-confirmation")
+            const cancel = findChild(credits, "reset-cancel")
+            verify(apply.visible && apply.enabled)
+            verify(!confirmation.visible)
+            mouseClick(apply)
+            verify(confirmation.visible)
+            compare(Plugin.Model.resetRequests.length, 0)
+            const details = findChild(credits, "reset-confirmation-details")
+            verify(details.text.indexOf("Codex (Plus) · Work") !== -1)
+            verify(details.text.indexOf("Full reset") !== -1)
+            verify(details.text.indexOf("1 reset credit") !== -1)
+            tryVerify(() => cancel.activeFocus)
+            keyClick(Qt.Key_Return)
+            verify(!confirmation.visible)
+            compare(Plugin.Model.resetRequests.length, 0)
+            tryVerify(() => apply.activeFocus)
+            mouseClick(apply)
+            mouseClick(cancel)
+            verify(!confirmation.visible)
+            compare(Plugin.Model.resetRequests.length, 0)
+        }
+        function test_reset_confirm_submits_once_with_connection_identity() {
+            const snapshot = prepareActionableReset()
+            const apply = findChild(credits, "reset-apply")
+            mouseClick(apply)
+            compare(Plugin.Model.resetRequests.length, 0)
+            tryVerify(() => findChild(credits, "reset-cancel").activeFocus)
+            const confirm = findChild(credits, "reset-confirm")
+            confirm.forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Return)
+            compare(Plugin.Model.resetRequests.length, 1)
+            const request = Plugin.Model.resetRequests[0]
+            compare(request.provider, "account:work")
+            compare(request.idx, 2)
+            compare(request.fingerprint, "observed-account-token")
+            compare(request.credit, "opaque-credit-handle")
+            compare(request.confirmed, true)
+            verify(Plugin.Model.resetApplying)
+            verify(!findChild(credits, "reset-confirmation").visible)
+            verify(!apply.visible)
+            credits.confirmReset()
+            credits.requestReset(snapshot.providers[1].resetCredits.rows[0])
+            compare(Plugin.Model.resetRequests.length, 1)
+            compare(findChild(credits, "reset-status").text, "Applying reset…")
+            Plugin.Model.resetApplying = false
+            Plugin.Model.resetMessage = "Reset applied. Usage is refreshing."
+            compare(findChild(credits, "reset-status").text, Plugin.Model.resetMessage)
+            verify(!apply.visible)
+            snapshot.providers[1].resetAction.fingerprint = "fresh-observation-token"
+            Plugin.Model.snapshot = JSON.parse(JSON.stringify(snapshot))
+            verify(findChild(credits, "reset-apply").visible)
+            compare(Plugin.Model.resetRequests.length, 1)
+        }
+        function test_reset_apply_is_hidden_for_ineligible_inventory_data() {
+            return [
+                {tag: "cached", overrides: {cached: true}},
+                {tag: "loading", overrides: {loading: true}},
+                {tag: "no action context", overrides: {resetAction: null}},
+                {tag: "no credit handle", overrides: {resetCredits: {available: 1, undetailed: 0, rows: [
+                    {title: "Full reset", count: 1, expires: "Not provided", remaining: ""}
+                ]}}}
+            ]
+        }
+        function test_reset_apply_is_hidden_for_ineligible_inventory(data) {
+            const snapshot = prepareActionableReset(data.overrides)
+            verify(!findChild(credits, "reset-apply").visible)
+            credits.requestReset(snapshot.providers[1].resetCredits.rows[0])
+            compare(credits.confirmation, null)
+            credits.confirmReset()
+            compare(Plugin.Model.resetRequests.length, 0)
+        }
+        function test_reset_buttons_are_disabled_while_another_account_is_applying() {
+            const snapshot = prepareActionableReset()
+            Plugin.Model.resetTarget = {provider: "account:personal", idx: 0}
+            Plugin.Model.resetApplying = true
+            const apply = findChild(credits, "reset-apply")
+            verify(apply.visible)
+            verify(!apply.enabled)
+            credits.requestReset(snapshot.providers[1].resetCredits.rows[0])
+            compare(credits.confirmation, null)
+            compare(Plugin.Model.resetRequests.length, 0)
+        }
+        function test_reset_confirm_is_invalidated_when_account_details_change_data() {
+            return [
+                {tag: "account switched", field: "id", value: "account:personal"},
+                {tag: "new observation", field: "resetAction", value: {fingerprint: "new-token"}},
+                {tag: "cached", field: "cached", value: true},
+                {tag: "loading", field: "loading", value: true},
+                {tag: "credit disappeared", field: "resetCredits", value: {available: 1, undetailed: 1, rows: []}}
+            ]
+        }
+        function test_reset_confirm_is_invalidated_when_account_details_change(data) {
+            const snapshot = prepareActionableReset()
+            mouseClick(findChild(credits, "reset-apply"))
+            verify(credits.confirmation !== null)
+            snapshot.providers[1][data.field] = data.value
+            Plugin.Model.snapshot = JSON.parse(JSON.stringify(snapshot))
+            compare(credits.confirmation, null)
+            credits.confirmReset()
+            compare(Plugin.Model.resetRequests.length, 0)
+        }
+        function test_reset_hidden_page_discards_confirmation_and_error_does_not_retry() {
+            prepareActionableReset()
+            mouseClick(findChild(credits, "reset-apply"))
+            credits.visible = false
+            compare(credits.confirmation, null)
+            credits.confirmReset()
+            compare(Plugin.Model.resetRequests.length, 0)
+            credits.visible = true
+            mouseClick(findChild(credits, "reset-apply"))
+            mouseClick(findChild(credits, "reset-confirm"))
+            compare(Plugin.Model.resetRequests.length, 1)
+            Plugin.Model.resetApplying = false
+            Plugin.Model.resetError = "Result unknown. Refresh and check the account before applying another reset."
+            compare(findChild(credits, "reset-status").text, Plugin.Model.resetError)
+            verify(!findChild(credits, "reset-apply").visible)
+            credits.confirmReset()
+            compare(Plugin.Model.resetRequests.length, 1)
+        }
     }
 }

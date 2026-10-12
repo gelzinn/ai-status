@@ -1,4 +1,6 @@
-"""Read-only reset-credit metadata shared by provider parsers and desktop/Waybar."""
+"""Reset-credit metadata shared by provider parsers and desktop/Waybar."""
+import hashlib
+import re
 from datetime import datetime, timezone
 
 
@@ -21,11 +23,20 @@ def expiry(value):
         return None
 
 
-def credit(title, amount, expires_at):
-    # Redemption IDs are deliberately absent from the display/cache model.
+def action_id(value):
+    """An opaque handle; raw redemption IDs never enter snapshots or caches."""
+    if not isinstance(value, str) or not value or len(value) > 240:
+        return None
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def credit(title, amount, expires_at, handle=None):
     date = expiry(expires_at)
-    return {"title": " ".join(title.split())[:240] if isinstance(title, str) else None,
-            "count": amount, "expires_at": date.isoformat() if date else None}
+    result = {"title": " ".join(title.split())[:240] if isinstance(title, str) else None,
+              "count": amount, "expires_at": date.isoformat() if date else None}
+    if isinstance(handle, str) and re.fullmatch(r"[a-f0-9]{64}", handle):
+        result["action_id"] = handle
+    return result
 
 
 def from_claude(usage):
@@ -40,7 +51,8 @@ def from_claude(usage):
                 continue
             amount = count(grant.get("resets_left"))
             if amount:
-                credits.append(credit(grant.get("label"), amount, grant.get("ends_at")))
+                handle = action_id(grant.get("id")) if grant.get("id") == block.get("next_grant_id") else None
+                credits.append(credit(grant.get("label"), amount, grant.get("ends_at"), handle))
     return {"available": sum(item["count"] for item in credits), "credits": credits}
 
 
@@ -49,7 +61,7 @@ def from_codex(data):
     if not isinstance(block, dict):
         return None
     details = block.get("credits")
-    credits = [credit(item.get("title"), 1, item.get("expires_at"))
+    credits = [credit(item.get("title"), 1, item.get("expires_at"), item.get("action_id"))
                for item in details if isinstance(item, dict) and item.get("status") == "available"] if isinstance(details, list) else []
     return {"available": count(block.get("available_count")), "credits": credits}
 
@@ -73,8 +85,11 @@ def available_credits(block, now=None):
             available = max(0, available - amount)
         else:
             title = item.get("title")
-            live.append({"title": title if isinstance(title, str) and title.strip() else "Reset credit",
-                         "count": amount, "expires_at": date})
+            row = {"title": title if isinstance(title, str) and title.strip() else "Reset credit",
+                   "count": amount, "expires_at": date}
+            if isinstance(item.get("action_id"), str) and re.fullmatch(r"[a-f0-9]{64}", item["action_id"]):
+                row["action_id"] = item["action_id"]
+            live.append(row)
     remaining = available
     credits = []
     for item in live:
@@ -153,8 +168,11 @@ def presentation(block, now=None):
         date = item["expires_at"]
         stamp, remaining = format_expiry(date, now) if date else ("Not provided", "")
         zone = local_timezone(date) if date else ""
-        rows.append({"title": item["title"], "count": item["count"],
-                     "expires": stamp, "remaining": remaining, "timezone": zone})
+        row = {"title": item["title"], "count": item["count"],
+               "expires": stamp, "remaining": remaining, "timezone": zone}
+        if item.get("action_id"):
+            row["actionId"] = item["action_id"]
+        rows.append(row)
     available = data["available"]
     return {"available": available,
             "summary": f"{available} reset{'s' if available != 1 else ''} available",

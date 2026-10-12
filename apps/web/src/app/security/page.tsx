@@ -78,7 +78,7 @@ const NEVER = [
 	{
 		icon: Database,
 		title: "Store your tokens",
-		body: "Tokens are read at query time and used for that one request. Nothing is copied, logged, or persisted.",
+		body: "Tokens are read when needed and used in memory for provider requests. Nothing is copied, logged, or persisted.",
 	},
 ];
 
@@ -96,7 +96,7 @@ const STEPS = [
 	{
 		icon: Gauge,
 		title: "Show",
-		body: "Usage limits, reset times, costs and balances are rendered in your bar. Nothing is written back or sent anywhere else.",
+		body: "Usage limits, reset times, costs and balances are rendered in your bar. Usage collection is read-only; applying a reset sends a provider request only after explicit confirmation.",
 	},
 ];
 

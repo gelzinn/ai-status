@@ -93,6 +93,11 @@ struct CreditRow: Decodable {
     let expires: String
     let remaining: String
     let timezone: String
+    let actionId: String?
+}
+
+struct ResetAction: Decodable {
+    let fingerprint: String
 }
 
 struct ResetCredits: Decodable {
@@ -113,11 +118,12 @@ struct Provider: Decodable, Identifiable {
     let error: String
     let metrics: [Metric]
     let resetCredits: ResetCredits?
+    let resetAction: ResetAction?
     var id: String { "\(connectionID):\(idx)" }
     enum CodingKeys: String, CodingKey {
         case connectionID = "id"
         case providerID = "providerId"
-        case idx, name, logoPath, loading, cached, error, metrics, resetCredits
+        case idx, name, logoPath, loading, cached, error, metrics, resetCredits, resetAction
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -131,6 +137,7 @@ struct Provider: Decodable, Identifiable {
         error = try values.decode(String.self, forKey: .error)
         metrics = try values.decode([Metric].self, forKey: .metrics)
         resetCredits = try values.decodeIfPresent(ResetCredits.self, forKey: .resetCredits)
+        resetAction = try values.decodeIfPresent(ResetAction.self, forKey: .resetAction)
     }
     func selection(_ metric: Metric) -> Selection {
         Selection(provider: connectionID, idx: idx, metric: metric.key)
@@ -395,6 +402,12 @@ final class Model: ObservableObject {
     @Published var updateStarting = false
     @Published var updateError = ""
     @Published var updateMessage = ""
+    @Published var resetApplying = false
+    @Published var resetError = ""
+    @Published var resetMessage = ""
+    @Published var resetProviderID: String?
+    @Published var resetFingerprint: String?
+    private var resetAttempts = Set<String>()
     @Published var isPresented = false
     @Published var keyboardFocusVisible = false
     @Published var notificationPermission = ""
@@ -501,7 +514,7 @@ final class Model: ObservableObject {
         case .settings: return 680
         case .about: return 640
         case .update: return 600
-        case .credits: return min(680, CGFloat(310 + (creditProvider?.resetCredits?.rows.count ?? 0) * 82))
+        case .credits: return min(680, CGFloat(350 + (creditProvider?.resetCredits?.rows.count ?? 0) * 112))
         case .usage:
             guard let providers = snapshot?.providers, !providers.isEmpty else { return 210 }
             let height = providers.reduce(85) { total, provider in
@@ -647,6 +660,47 @@ final class Model: ObservableObject {
         page = .credits(provider.id)
         changed?()
     }
+    func canApplyReset(_ provider: Provider, row: CreditRow) -> Bool {
+        guard !resetApplying, snapshot?.loading == false, !provider.loading, !provider.cached,
+              provider.error.isEmpty, (provider.resetCredits?.available ?? 0) > 0,
+              row.count > 0, let credit = row.actionId, !credit.isEmpty,
+              let fingerprint = provider.resetAction?.fingerprint, !fingerprint.isEmpty else { return false }
+        return !resetAttempts.contains(provider.id + "\u{001f}" + fingerprint)
+    }
+    func applyReset(_ provider: Provider, row: CreditRow, fingerprint: String) {
+        guard !resetApplying else { return }
+        resetProviderID = provider.id
+        resetFingerprint = fingerprint
+        resetError = ""
+        resetMessage = ""
+        guard let current = snapshot?.providers.first(where: { $0.id == provider.id }),
+              current.resetAction?.fingerprint == fingerprint,
+              let credit = row.actionId,
+              let currentRow = current.resetCredits?.rows.first(where: { $0.actionId == credit }),
+              canApplyReset(current, row: currentRow) else {
+            resetError = "Reset details changed. Refresh usage and review the reset before confirming again."
+            changed?()
+            return
+        }
+        let payload: [String: Any] = ["provider": current.connectionID, "idx": current.idx,
+                                     "fingerprint": fingerprint, "credit": credit,
+                                     "requestId": UUID().uuidString, "confirmed": true]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8) else {
+            resetError = "Could not prepare this reset request."
+            return
+        }
+        resetApplying = true
+        resetAttempts.insert(current.id + "\u{001f}" + fingerprint)
+        enqueue(["apply-reset", "--request-json", json, "--frontend", "macos"]) { [weak self] error in
+            guard let self = self else { return }
+            self.resetApplying = false
+            self.resetError = error ?? ""
+            self.resetMessage = error == nil ? "Applied \(row.title) to \(provider.name). 1 reset credit used." : ""
+            self.changed?()
+        }
+        changed?()
+    }
     func showAbout() { page = .about; changed?() }
     func showUpdate() {
         updateError = ""
@@ -700,11 +754,15 @@ final class Model: ObservableObject {
                     guard let self = self, self.actionProcess === process, !self.stopping else { return }
                     self.actionProcess = nil
                     if process.terminationStatus == 0 { output?(message ?? "") }
-                    completion(process.terminationStatus == 0 ? nil : (message?.isEmpty == false ? message : "Could not apply this change. Try again."))
+                    let fallback = arguments.first == "apply-reset"
+                        ? "Could not confirm whether the reset was applied. Refresh usage and check the account before applying another reset."
+                        : "Could not apply this change. Try again."
+                    completion(process.terminationStatus == 0 ? nil : (message?.isEmpty == false ? message : fallback))
                     self.drain()
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            let timeout: Double = arguments.first == "apply-reset" ? 40 : 15
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
                 guard let self = self, self.actionProcess === process, process.isRunning else { return }
                 Self.stopProcess(process)
             }
@@ -1115,7 +1173,16 @@ struct NotificationSettingsView: View {
 }
 
 struct ResetCreditsPage: View {
+    @ObservedObject var model: Model
     let provider: Provider
+    @State private var pendingReset: CreditRow?
+    @State private var pendingFingerprint: String?
+
+    private func cancelConfirmation() {
+        pendingReset = nil
+        pendingFingerprint = nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 8) {
@@ -1139,6 +1206,17 @@ struct ResetCreditsPage: View {
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(row.title).foregroundColor(Palette.bright)
                                 Text("\(row.count) \(row.count == 1 ? "credit" : "credits")").font(.custom("GeistMono-Regular", size: 11))
+                                if row.actionId != nil, provider.resetAction != nil, !provider.cached, !provider.loading {
+                                    HoverButton(bordered: true, action: {
+                                        pendingReset = row
+                                        pendingFingerprint = provider.resetAction?.fingerprint
+                                    }) {
+                                        Text("Apply reset").font(.custom("GeistMono-Regular", size: 11)).foregroundColor(Palette.bright)
+                                    }
+                                    .disabled(!model.canApplyReset(provider, row: row) || pendingReset != nil)
+                                    .help("Review and confirm this reset. Applying consumes 1 reset credit.")
+                                    .accessibilityLabel("Apply \(row.title) to \(provider.name)")
+                                }
                             }.frame(maxWidth: .infinity, alignment: .leading)
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(row.expires).foregroundColor(Palette.bright)
@@ -1160,7 +1238,60 @@ struct ResetCreditsPage: View {
                 }
                 if credits.undetailed > 0 { Text("Some reset details haven't been provided yet.").font(.custom("GeistMono-Regular", size: 11)) }
             } else { Text("No reset credits available.") }
+
+            if let row = pendingReset, let fingerprint = pendingFingerprint {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Apply \(row.title)?").foregroundColor(Palette.bright)
+                    Text("Account: \(provider.name)\nThis consumes 1 reset credit and restores the eligible usage limits.")
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 10) {
+                        HoverButton(bordered: true, action: cancelConfirmation) { Text("Cancel") }
+                            .accessibilityLabel("Cancel reset confirmation")
+                        HoverButton(bordered: true, action: {
+                            cancelConfirmation()
+                            model.applyReset(provider, row: row, fingerprint: fingerprint)
+                        }) { Text("Confirm apply").foregroundColor(Palette.bright) }
+                            .disabled(!model.canApplyReset(provider, row: row))
+                            .accessibilityLabel("Confirm applying \(row.title) to \(provider.name), consuming 1 reset credit")
+                    }
+                }.padding(12)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.border))
+            }
+            if model.resetProviderID == provider.id {
+                if model.resetApplying { Text("Applying reset…").foregroundColor(Palette.bright) }
+                if !model.resetError.isEmpty {
+                    Text(model.resetError).foregroundColor(.orange).fixedSize(horizontal: false, vertical: true)
+                    Text("Refresh usage and check the account before applying another reset.")
+                        .font(.custom("GeistMono-Regular", size: 11)).fixedSize(horizontal: false, vertical: true)
+                }
+                if !model.resetMessage.isEmpty {
+                    Text(model.resetMessage).foregroundColor(Palette.bright).fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 8) {
+                        let refreshed = !provider.loading && !provider.cached && model.snapshot?.loading == false
+                            && provider.resetAction?.fingerprint != model.resetFingerprint
+                        Text(refreshed ? "Latest usage limits" : "Refreshing usage limits…")
+                            .foregroundColor(Palette.bright)
+                        if refreshed {
+                            ForEach(provider.metrics) { metric in
+                                HStack(spacing: 12) {
+                                    Text(metric.name)
+                                    Spacer()
+                                    Text(metric.displayValue).foregroundColor(Palette.bright)
+                                }.accessibilityElement(children: .combine)
+                            }
+                        }
+                    }.font(.custom("GeistMono-Regular", size: 11))
+                }
+            }
         }
+        .onChange(of: provider.id) { _ in cancelConfirmation() }
+        .onChange(of: provider.resetAction?.fingerprint) { _ in cancelConfirmation() }
+        .onChange(of: provider.loading) { loading in if loading { cancelConfirmation() } }
+        .onChange(of: provider.cached) { cached in if cached { cancelConfirmation() } }
+        .onChange(of: model.snapshot?.loading) { loading in if loading == true { cancelConfirmation() } }
+        .onChange(of: model.page) { _ in cancelConfirmation() }
+        .onChange(of: model.isPresented) { presented in if !presented { cancelConfirmation() } }
+        .onDisappear(perform: cancelConfirmation)
     }
 }
 
@@ -1304,7 +1435,7 @@ struct PanelView: View {
                         case .settings: SettingsPage(model: model)
                         case .about: if let info = model.snapshot?.about { AboutPage(info: info) }
                         case .update: UpdatePage(model: model)
-                        case .credits: if let provider = model.creditProvider { ResetCreditsPage(provider: provider) }
+                        case .credits: if let provider = model.creditProvider { ResetCreditsPage(model: model, provider: provider) }
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.vertical, 18)
                         .id("page-top")

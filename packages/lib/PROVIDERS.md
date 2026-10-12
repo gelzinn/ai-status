@@ -61,7 +61,9 @@ Reads the Claude Code OAuth credential store to query Anthropic's usage endpoint
 | **Endpoint** | `https://api.anthropic.com/api/oauth/usage?cedar_ember=1` |
 | **Metrics** | Session (5-hour rolling) and weekly usage with reset timers, including per-model weekly limits; shows the subscription plan (Pro/Max/Team) when available |
 
-Eligible Claude accounts also show **Reset credits** in the Quickshell panel and Waybar tooltip: available campaign resets, their labels, and expiration dates. Only unspent grants marked usable and not paused by the API are counted. The opt-in inventory requires a recognized Claude CLI user agent; the query uses published version `2.1.281`. If the service changes that requirement or reports no eligible grants, the credit section is hidden while usage remains available.
+Eligible Claude accounts also show **Reset credits** in the desktop panels and Waybar tooltip: available campaign resets, their labels, and expiration dates. Only unspent grants marked usable and not paused by the API are counted. The opt-in inventory requires a recognized Claude CLI user agent; the query uses published version `2.1.281`. If the service changes that requirement or reports no eligible grants, the credit section is hidden while usage remains available.
+
+Only the service's `next_grant_id` can be applied. AI Status verifies the OAuth profile's organization, current grant eligibility and any cooldown before sending the confirmed reset to `/api/organizations/{organization.uuid}/reset_rate_limits`.
 
 ### Codex
 
@@ -83,7 +85,11 @@ No balance, grant expiration, or dollar conversion is inferred from reset grants
 
 Codex also shows banked **Reset credits** when the usage response reports an available count. Only then does the query make an optional GET to `https://chatgpt.com/backend-api/wham/rate-limit-reset-credits` for titles and expirations. If that request fails, usage and the original count remain visible with **Expiration not reported**. Redeemed credits are excluded from the detail list. Counts come from the usage response, even if the detail endpoint reports a different count.
 
-These sections display the provider's inventory for manual resets, separately from automatic usage-window reset timers. AI Status only reads it; redemption remains in the provider's own client. Redemption IDs are excluded from parsed snapshots and caches. Known past deadlines are labeled **Expired** rather than showing a negative countdown; cached provider data retains its existing cached marker.
+Applying requires a ChatGPT `account_id` and the selected credit's ID. AI Status rechecks that credit is available for Codex rate limits before sending one confirmed request to `/backend-api/wham/rate-limit-reset-credits/consume`.
+
+**Apply reset** is available in the Quickshell, Windows and macOS panels for eligible credits from fresh account data. Confirmation shows the account, reset type and consumption of **one reset credit**; Cancel or Back dismisses confirmation without sending a reset. Details without a usable credit ID or verifiable account remain read-only, as does the Waybar tooltip. Raw redemption IDs are excluded from parsed snapshots and caches; rows use opaque handles instead. Expired credits are excluded, and cached provider data remains labeled.
+
+After a reset response, AI Status refreshes the account's usage and credit inventory. A request with an uncertain result is never retried automatically. Refresh and check the account before confirming another reset; the same confirmed observation cannot be submitted twice, including from another panel or after restarting the app.
 
 ### Copilot
 

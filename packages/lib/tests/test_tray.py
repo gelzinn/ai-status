@@ -878,6 +878,187 @@ class DesktopTests(IsolatedState):
         self.dashboard.show_reset_credits(("codex", 0))
         self.assertIsNone(self.dashboard.reset_provider)
 
+    def prepare_reset_action(self):
+        cache_directory = patch.object(paths, "CACHE_DIR", self.root / "reset-cache")
+        cache_directory.start()
+        self.addCleanup(cache_directory.stop)
+        mutation = patch.object(tray.reset_actions, "apply", return_value="Reset applied. Refreshing account usage…")
+        apply_reset = mutation.start()
+        self.addCleanup(mutation.stop)
+        entry = {
+            "provider": "Codex (Pro)", "_dir": "codex", "_idx": 0,
+            "_fingerprint": "a" * 64, "_observed_at": time.time(),
+            "metrics": [{"type": "weekly", "percentage": 23}],
+            "reset_credits": {"available": 2, "credits": [
+                {"title": "Full reset", "count": 2, "expires_at": "2099-10-22T16:00:00Z", "action_id": "b" * 64}
+            ]},
+        }
+        self.dashboard.on_result("codex", [entry])
+        self.dashboard.show_reset_credits(("codex", 0))
+        view = self.dashboard.credits_view
+        # Capture the UI contract without starting a thread, CLI or real mutation.
+        view.reset_requested.disconnect(self.dashboard.apply_reset)
+        requested = MagicMock()
+        view.reset_requested.connect(requested)
+        return entry, view, requested, apply_reset
+
+    def test_apply_reset_only_opens_confirmation_and_cancel_never_emits(self):
+        _, view, requested, apply_reset = self.prepare_reset_action()
+        button = view.action_buttons[0]
+        self.assertFalse(button.isHidden())
+        self.assertTrue(button.isEnabled())
+        self.assertTrue(view.confirmation.isHidden())
+        button.click()
+        self.assertFalse(view.confirmation.isHidden())
+        self.assertIn("Full reset", view.confirmation_text.text())
+        self.assertIn("Codex (Pro)", view.confirmation_text.text())
+        self.assertIn("1 reset credit", view.confirmation_text.text())
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+        view.cancel_button.click()
+        self.assertIsNone(view.target)
+        self.assertTrue(view.confirmation.isHidden())
+        view.confirm_button.click()
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_confirm_reset_emits_once_and_worker_calls_mocked_mutation_once(self):
+        _, view, requested, apply_reset = self.prepare_reset_action()
+        token = view.action["fingerprint"]
+        view.action_buttons[0].click()
+        view.confirm_button.click()
+        requested.assert_called_once_with({
+            "provider": "codex", "idx": 0, "fingerprint": token,
+            "credit": "b" * 64, "confirmed": True,
+        })
+        self.assertTrue(view.confirmation.isHidden())
+        self.assertIsNone(view.target)
+        view.confirm_button.click()
+        view.confirm_reset()
+        self.assertEqual(requested.call_count, 1)
+        apply_reset.assert_not_called()
+        worker = tray.ResetWorker(requested.call_args.args[0])
+        self.addCleanup(worker.deleteLater)
+        finished = MagicMock()
+        worker.finished.connect(finished)
+        worker.work()
+        apply_reset.assert_called_once_with(requested.call_args.args[0])
+        finished.assert_called_once_with("Reset applied. Refreshing account usage…", True)
+
+    def test_reset_actions_are_hidden_for_cached_pending_or_unidentified_credits(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        entry["_cached"] = True
+        self.dashboard.draw()
+        self.assertTrue(all(button.isHidden() for button in view.action_buttons))
+        view.action_buttons[0].click()
+        self.assertIsNone(view.target)
+        entry.pop("_cached")
+        self.dashboard.pending = {"copilot"}
+        self.dashboard.busy = True
+        self.dashboard.draw()
+        self.assertTrue(all(button.isHidden() for button in view.action_buttons))
+        self.assertIsNone(view.action)
+        self.dashboard.pending.clear()
+        self.dashboard.busy = False
+        entry["reset_credits"]["credits"][0].pop("action_id")
+        self.dashboard.draw()
+        self.assertEqual(view.action_buttons, [])
+        self.assertIsNone(view.action)
+        self.assertFalse(view.table.isHidden())
+        self.assertEqual(view.available.text(), "2")
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_reset_request_keeps_custom_connection_identity(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        entry = dict(entry, _connection_id="account:work", _account_label="Work")
+        view.update_provider("account:work", entry, "Codex (Pro) · Work")
+        token = view.action["fingerprint"]
+        view.action_buttons[0].click()
+        self.assertIn("Codex (Pro) · Work", view.confirmation_text.text())
+        view.confirm_button.click()
+        requested.assert_called_once_with({
+            "provider": "account:work", "idx": 0, "fingerprint": token,
+            "credit": "b" * 64, "confirmed": True,
+        })
+        apply_reset.assert_not_called()
+
+    def test_reset_actions_require_recent_identified_observation(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        entry.pop("_fingerprint")
+        self.dashboard.draw()
+        self.assertTrue(all(button.isHidden() for button in view.action_buttons))
+        entry["_fingerprint"] = "a" * 64
+        entry["_observed_at"] = time.time() - tray.reset_actions.MAX_SNAPSHOT_AGE - 1
+        self.dashboard.draw()
+        self.assertTrue(all(button.isHidden() for button in view.action_buttons))
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_reset_token_already_requested_stays_blocked_until_fresh_observation(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        token = view.action["fingerprint"]
+        view.attempts.add(token)
+        self.dashboard.draw()
+        self.assertFalse(view.action_buttons[0].isEnabled())
+        view.action_buttons[0].click()
+        view.begin_reset(tray.reset_credits.available_credits(entry["reset_credits"])["credits"][0])
+        self.assertIsNone(view.target)
+        entry["_fingerprint"] = "c" * 64
+        entry["_observed_at"] = time.time()
+        self.dashboard.draw()
+        self.assertNotEqual(view.action["fingerprint"], token)
+        self.assertTrue(view.action_buttons[0].isEnabled())
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_escape_cancels_reset_confirmation_before_leaving_submenu(self):
+        _, view, requested, apply_reset = self.prepare_reset_action()
+        self.dashboard.show()
+        self.app.processEvents()
+        view.action_buttons[0].click()
+        self.app.processEvents()
+        self.assertTrue(view.cancel_button.hasFocus())
+        QTest.keyClick(view.cancel_button, tray.Qt.Key.Key_Escape)
+        self.assertTrue(view.confirmation.isHidden())
+        self.assertIsNone(view.target)
+        self.assertEqual(self.dashboard.reset_provider, ("codex", 0))
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.credits_scroll)
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+        QTest.keyClick(self.dashboard.back_button, tray.Qt.Key.Key_Escape)
+        self.assertIsNone(self.dashboard.reset_provider)
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_hiding_dashboard_discards_unconfirmed_reset(self):
+        _, view, requested, apply_reset = self.prepare_reset_action()
+        self.dashboard.show()
+        self.app.processEvents()
+        view.action_buttons[0].click()
+        self.assertFalse(view.confirmation.isHidden())
+        self.dashboard.hide()
+        self.assertTrue(view.confirmation.isHidden())
+        self.assertIsNone(view.target)
+        view.confirm_reset()
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_reset_result_status_is_visible_only_for_its_account(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        message = "Reset applied. Refreshing account usage…"
+        view.show_action_status(message, provider=("codex", 0))
+        self.assertFalse(view.action_status.isHidden())
+        work = dict(entry, _connection_id="account:work", _account_label="Work")
+        view.update_provider("account:work", work, "Codex (Pro) · Work")
+        self.assertTrue(view.action_status.isHidden())
+        view.update_provider("codex", entry, "Codex (Pro)")
+        self.assertFalse(view.action_status.isHidden())
+        self.assertEqual(view.action_status.text(), message)
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
     def test_many_reset_rows_scroll_without_changing_tray_selection(self):
         self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
             {"type": "rolling", "percentage": 3}, {"type": "weekly", "percentage": 23}],

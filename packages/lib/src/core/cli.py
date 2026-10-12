@@ -643,7 +643,7 @@ def _run_accounts(args, parser):
 
 _FRONTEND_COMMANDS = (
     "daemon", "refresh", "config", "save-settings", "select-metric", "scroll-up",
-    "scroll-down", "cycle-metric", "logo", "revert",
+    "scroll-down", "cycle-metric", "logo", "revert", "apply-reset",
 )
 
 
@@ -674,7 +674,7 @@ def _build_parser():
             "  ai-status status                 Fetch usage as JSON\n\n"
             "Desktop integration commands:\n"
             "  daemon, tray, macos, swiftbar, swiftbar-stream, swiftbar-refresh,\n"
-            "  swiftbar-select, save-settings, select-metric, scroll-up, scroll-down,\n"
+            "  swiftbar-select, save-settings, select-metric, apply-reset, scroll-up, scroll-down,\n"
             "  cycle-metric, logo, revert\n\n"
             "Run ai-status COMMAND --help or ai-status help COMMAND for details.\n"
             "Without a command: show this help on Linux; open the app on Windows/macOS."
@@ -758,6 +758,7 @@ def _build_parser():
         ("daemon", "Stream usage for the desktop bar", ("--format",)),
         ("save-settings", "Save settings supplied by a native desktop interface", ("--frontend", "--settings-json")),
         ("select-metric", "Select a usage metric from a native desktop interface", ("--frontend", "--selection-json")),
+        ("apply-reset", "Consume one reset credit after explicit confirmation in the desktop interface", ("--frontend",)),
         ("scroll-up", "Select the previous provider with usage data", ("--frontend",)),
         ("scroll-down", "Select the next provider with usage data", ("--frontend",)),
         ("cycle-metric", "Select the next limit for the active provider", ("--frontend",)),
@@ -787,6 +788,8 @@ def _build_parser():
     selection.add_argument("idx", nargs="?", default="0", help="Provider result index (default: 0)")
     selection.add_argument("metric", nargs="?", help="Metric key (default: first available limit)")
     command_parsers["notification-ack"].add_argument("--id", required=True, action="append", help="Notification identifier")
+    command_parsers["apply-reset"].add_argument("--request-json", required=True, metavar="JSON",
+                                               help="Confirmed account, inventory fingerprint and reset-credit handle")
     return parser, command_parsers
 
 
@@ -920,6 +923,18 @@ def main(argv=None):
     if command == "notification-ack":
         from . import desktop_notifications
         desktop_notifications.ack(args.id)
+        return 0
+    if command == "apply-reset":
+        from . import reset_actions
+        try:
+            try:
+                payload = json.loads(args.request_json)
+            except ValueError:
+                raise ValueError("Invalid reset request JSON.") from None
+            print(reset_actions.apply(payload))
+        except (ValueError, OSError) as error:
+            print(str(error), file=sys.stderr)
+            return 1
         return 0
     if command == "config" and args.usage_display is not None:
         selected = state.load_selected() or {}

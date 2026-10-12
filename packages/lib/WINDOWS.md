@@ -46,7 +46,14 @@ settings/cache live in your user profile.
   the back arrow before the panel title or Escape returns to usage without
   changing your tray selection. Expired, paused or spent credits are excluded.
   If details are unavailable, the known credit count remains visible and missing
-  information is labeled. Use the provider's own app to redeem a reset.
+  information is labeled. **Apply reset** opens confirmation of the account,
+  reset type and consumption of **one reset credit**. Only confirming applies
+  it; Cancel, Back or Escape dismisses confirmation without sending a reset.
+  Details without a usable credit ID or verifiable account remain read-only.
+  Usage and credit inventory refresh
+  after the response. An uncertain result is never retried automatically;
+  refresh and check the account before confirming another reset. See
+  [provider eligibility](PROVIDERS.md#claude).
 - **Update available** is an optional blue link with a right arrow. Open it to
   see the installed/latest versions and instructions for your installation.
   The back arrow or Escape returns to usage, keeping your selection and position.

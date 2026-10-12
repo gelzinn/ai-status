@@ -21,13 +21,30 @@ if jq -e '.rate_limit_reset_credits.available_count | type == "number" and . > 0
   DETAILS=$(curl -fsS --max-time 5 \
     -H "Authorization: Bearer $ACCESS" \
     -H "ChatGPT-Account-Id: $ACCOUNT_ID" \
-    "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits" 2>/dev/null || true)
-  # Project display fields only; redemption IDs never enter the provider cache.
+    "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits" 2>/dev/null | python3 -c '
+import hashlib, json, sys
+try:
+    details = json.load(sys.stdin)
+    credits = details.get("credits") if isinstance(details, dict) else None
+    if not isinstance(credits, list):
+        sys.exit(1)
+    rows = []
+    for item in credits:
+        if not isinstance(item, dict):
+            continue
+        row = {key: item.get(key) for key in ("status", "title", "expires_at")}
+        credit_id = item.get("id")
+        if sys.argv[1].strip() and item.get("reset_type") == "codex_rate_limits" and isinstance(credit_id, str) and credit_id:
+            row["action_id"] = hashlib.sha256(credit_id.encode("utf-8")).hexdigest()
+        rows.append(row)
+    print(json.dumps({"credits": rows}))
+except (ValueError, UnicodeError):
+    sys.exit(1)
+' "$ACCOUNT_ID" 2>/dev/null || true)
+  # Keep only display fields and opaque handles; raw IDs never enter cache.
   ENRICHED=$(jq -c --argjson details "$DETAILS" '
     if ($details.credits | type) == "array" then
-      .rate_limit_reset_credits.credits = [
-        $details.credits[] | select(type == "object") | {status, title, expires_at}
-      ]
+      .rate_limit_reset_credits.credits = $details.credits
     else . end' <<< "$USAGE" 2>/dev/null) || ENRICHED=""
   if [[ -n "$ENRICHED" ]]; then USAGE="$ENRICHED"; fi
 fi

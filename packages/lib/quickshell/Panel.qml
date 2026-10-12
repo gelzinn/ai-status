@@ -66,6 +66,7 @@ Ui.Panel {
     }
 
     function goBack() {
+        if (resetProvider && credits.cancelConfirmation()) return
         if (aboutPage) {
             aboutPage = false
             Qt.callLater(() => {
@@ -138,7 +139,12 @@ Ui.Panel {
     onResetEntryChanged: if (resetProvider && !resetEntry) Qt.callLater(() => {
         if (resetProvider && !resetEntry) showUsage()
     })
-    onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; aboutPage = false; updatePage = false; resetProvider = null }
+    onOpenedChanged: {
+        if (!opened) {
+            credits.confirmation = null
+            if (!Plugin.Model.settingsSaving) { configurationPage = false; aboutPage = false; updatePage = false; resetProvider = null }
+        }
+    }
 
     Connections {
         target: keyCatcher.Window.window
@@ -170,7 +176,9 @@ Ui.Panel {
             onTabRequested: direction => {
                 if (root.aboutPage) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
                 else if (root.configurationPage) settings.focusFirstControl()
-                else if (root.resetProvider) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
+                else if (root.resetProvider) {
+                    if (!credits.focusFirstControl(direction)) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
+                }
                 else if (root.updatePage) updates.focusFirstControl()
                 else root.switchPanel(direction)
             }
@@ -325,6 +333,7 @@ Ui.Panel {
                         provider: root.resetEntry
                         foreground: root.barForeground
                         fontFamily: root.panelFont
+                        onBackFocusRequested: backButton.focusProgrammatically()
                     }
                     Plugin.SettingsPage {
                         id: settings

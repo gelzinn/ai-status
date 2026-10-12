@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -9,24 +10,34 @@ USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 
 
-def query():
-    if os.environ.get("AI_STATUS_ACCOUNT_ID") and not any(os.environ.get(key) for key in ("AI_STATUS_AUTH_FILE", "CODEX_HOME", "CODEX_ACCESS_TOKEN")):
+def authentication(env=None):
+    """Capture one account's credentials without changing the process environment."""
+    env = os.environ if env is None else env
+    if env.get("AI_STATUS_ACCOUNT_ID") and not any(env.get(key) for key in ("AI_STATUS_AUTH_FILE", "CODEX_HOME", "CODEX_ACCESS_TOKEN")):
         raise QueryError("Set auth_file, CODEX_HOME or CODEX_ACCESS_TOKEN for this Codex account.")
-    direct = os.environ.get("CODEX_ACCESS_TOKEN")
-    use_file = not direct or os.environ.get("AI_STATUS_AUTH_FILE") or os.environ.get("CODEX_HOME")
+    direct = env.get("CODEX_ACCESS_TOKEN")
+    use_file = not direct or env.get("AI_STATUS_AUTH_FILE") or env.get("CODEX_HOME")
     tokens = {}
     if use_file:
-        path = os.environ.get("AI_STATUS_AUTH_FILE")
+        path = env.get("AI_STATUS_AUTH_FILE")
         if not path:
-            configured_root = os.environ.get("CODEX_HOME")
-            root = Path(configured_root) if configured_root else Path.home() / ".codex"
+            configured_root = env.get("CODEX_HOME")
+            home = env.get("HOME") or env.get("USERPROFILE")
+            root = Path(configured_root) if configured_root else Path(home or Path.home()) / ".codex"
             path = root / "auth.json"
-        tokens = read_json(path).get("tokens") or {}
-    token = require_token(os.environ.get("CODEX_ACCESS_TOKEN") or tokens.get("access_token"), "Sign in to Codex with your ChatGPT account.")
+        stored = read_json(path)
+        tokens = stored.get("tokens") if isinstance(stored, dict) else None
+        tokens = tokens if isinstance(tokens, dict) else {}
+    token = require_token(direct or tokens.get("access_token"), "Sign in to Codex with your ChatGPT account.")
     headers = {"Authorization": f"Bearer {token}"}
-    account_id = os.environ.get("CODEX_ACCOUNT_ID") or tokens.get("account_id")
+    account_id = env.get("CODEX_ACCOUNT_ID") or tokens.get("account_id")
     if account_id:
         headers["ChatGPT-Account-Id"] = account_id
+    return headers
+
+
+def query():
+    headers = authentication()
     raw = request(USAGE_URL, headers, timeout=10)
     try:
         usage = json.loads(raw)
@@ -39,8 +50,18 @@ def query():
         details = json.loads(request(RESET_CREDITS_URL, headers, timeout=5))
         credits = details.get("credits") if isinstance(details, dict) else None
         if isinstance(credits, list):
-            block["credits"] = [{key: item.get(key) for key in ("status", "title", "expires_at")}
-                                for item in credits if isinstance(item, dict)]
+            projected = []
+            for item in credits:
+                if not isinstance(item, dict):
+                    continue
+                display = {key: item.get(key) for key in ("status", "title", "expires_at")}
+                credit_id = item.get("id")
+                account_id = headers.get("ChatGPT-Account-Id")
+                if (isinstance(account_id, str) and account_id.strip()
+                        and item.get("reset_type") == "codex_rate_limits" and isinstance(credit_id, str) and credit_id):
+                    display["action_id"] = hashlib.sha256(credit_id.encode("utf-8")).hexdigest()
+                projected.append(display)
+            block["credits"] = projected
     except (QueryError, ValueError):
         # Expiries are optional; a failed detail query must not hide usage/count.
         pass

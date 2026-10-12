@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
-from . import __version__, about, config, fetch, notifications, paths, render, reset_credits, state, updates
+from . import __version__, about, config, fetch, notifications, paths, render, reset_credits, reset_actions, state, updates
 
 RELEASE_URL = "https://github.com/gelzinn/ai-status/releases/latest"
 ASSETS = paths.LIB_DIR / "assets"
@@ -311,6 +311,9 @@ class ArrowIcon(QWidget):
 
 class ResetCreditsView(QWidget):
     """Provider-specific reset information inside the existing usage panel."""
+    reset_requested = Signal(dict)
+    confirmation_changed = Signal()
+
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
@@ -379,9 +382,71 @@ class ResetCreditsView(QWidget):
         self.notice = self.secondary_label("")
         self.notice.setWordWrap(True)
         layout.addWidget(self.notice)
+        self.confirmation = QWidget()
+        confirmation_layout = QVBoxLayout(self.confirmation)
+        confirmation_layout.setContentsMargins(0, 0, 0, 0)
+        self.confirmation_text = plain_label("", "#dddddd")
+        self.confirmation_text.setWordWrap(True)
+        confirmation_layout.addWidget(self.confirmation_text)
+        confirmation_buttons = QHBoxLayout()
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.cancel_confirmation)
+        confirmation_buttons.addWidget(self.cancel_button)
+        self.confirm_button = QPushButton("Confirm apply")
+        self.confirm_button.clicked.connect(self.confirm_reset)
+        confirmation_buttons.addWidget(self.confirm_button)
+        confirmation_layout.addLayout(confirmation_buttons)
+        self.confirmation.hide()
+        layout.addWidget(self.confirmation)
+        self.action_status = plain_label("")
+        self.action_status.setWordWrap(True)
+        self.action_status.hide()
+        layout.addWidget(self.action_status)
         layout.addStretch()
         self.rows = []
+        self.action_buttons = []
+        self.action = None
+        self.target = None
+        self.running = False
+        self.attempts = set()
+        self.current_provider = None
+        self.status_provider = None
         self.signature = None
+
+    def cancel_confirmation(self):
+        self.target = None
+        self.confirmation.hide()
+        self.confirmation_changed.emit()
+
+    def begin_reset(self, item):
+        if self.running or not self.action or not item.get("action_id"):
+            return
+        if self.action["fingerprint"] in self.attempts:
+            return
+        self.target = {**self.action, "credit": item["action_id"], "confirmed": True}
+        self.confirmation_text.setText(
+            f"Apply {item['title']} to {self.provider_label.text()}?\n"
+            "This consumes 1 reset credit and cannot be undone.")
+        self.confirmation.show()
+        self.cancel_button.setFocus()
+        self.confirmation_changed.emit()
+
+    def confirm_reset(self):
+        if self.running or not self.target or not self.action:
+            return
+        if self.target["fingerprint"] != self.action["fingerprint"]:
+            self.cancel_confirmation()
+            return
+        payload = dict(self.target)
+        self.cancel_confirmation()
+        self.reset_requested.emit(payload)
+
+    def show_action_status(self, message, error=False, provider=None):
+        if provider is not None:
+            self.status_provider = provider
+        self.action_status.setText(message)
+        self.action_status.setStyleSheet("color: #f5a3a3;" if error else "color: #89b4fa;")
+        self.action_status.setVisible(bool(message) and self.current_provider == self.status_provider)
 
     @staticmethod
     def secondary_label(text):
@@ -390,16 +455,23 @@ class ResetCreditsView(QWidget):
         return label
 
     def update_provider(self, name, entry, label):
+        self.current_provider = (name, entry.get("_idx", 0))
+        self.action_status.setVisible(bool(self.action_status.text()) and self.current_provider == self.status_provider)
         self.provider_label.setText(label)
-        self.logo.setPixmap(provider_icon(name).pixmap(16, 16))
+        self.logo.setPixmap(provider_icon(entry.get("_dir", name)).pixmap(16, 16))
         self.heading.setAccessibleName(label)
+        provider_id = entry.get("_dir", name)
         self.explanation.setText(
             "Restore your 5-hour or weekly limit,\nor both, depending on the reset type."
-            if name == "codex" else
+            if provider_id == "codex" else
             "Restore eligible usage limits.\nCredits expire on the dates below.")
         self.cached_label.setVisible(bool(entry.get("_cached")))
         self.cached_label.setToolTip(entry.get("_error", "Unable to refresh"))
         data = reset_credits.available_credits(entry.get("reset_credits"))
+        offered = reset_actions.presentation(entry) if not entry.get("_loading") else None
+        self.action = ({"provider": name, "idx": entry.get("_idx", 0), **offered} if offered else None)
+        if self.target and (not self.action or self.target["fingerprint"] != self.action["fingerprint"]):
+            self.cancel_confirmation()
         self.available.setText(str(data["available"]))
         self.table.setVisible(bool(data["available"]))
         timezone_note = reset_credits.local_timezone_summary(
@@ -411,7 +483,7 @@ class ResetCreditsView(QWidget):
         self.notice.setVisible(bool(data["undetailed"]))
         credits = data["credits"] + ([{"title": "Reset credit", "count": data["undetailed"], "expires_at": None}]
                                      if data["undetailed"] else [])
-        signature = tuple((item["title"], item["count"], item["expires_at"]) for item in credits)
+        signature = (name, label, tuple((item["title"], item["count"], item["expires_at"], item.get("action_id")) for item in credits))
         if signature != self.signature:
             self.signature = signature
             while self.rows_layout.count():
@@ -419,6 +491,7 @@ class ResetCreditsView(QWidget):
                 previous.hide()
                 previous.deleteLater()
             self.rows = []
+            self.action_buttons = []
             for item in credits:
                 row = QWidget()
                 row.setObjectName("creditRow")
@@ -435,6 +508,12 @@ class ResetCreditsView(QWidget):
                     secondary.setWordWrap(True)
                     cell.addWidget(primary)
                     cell.addWidget(secondary)
+                    if not cells and item.get("action_id"):
+                        button = QPushButton("Apply reset")
+                        button.setAccessibleName(f"Apply {item['title']} to {label}")
+                        button.clicked.connect(lambda checked=False, item=item: self.begin_reset(item))
+                        cell.addWidget(button)
+                        self.action_buttons.append(button)
                     cell.addStretch()
                     row_layout.addLayout(cell, 1)
                     cells.extend((primary, secondary))
@@ -452,6 +531,9 @@ class ResetCreditsView(QWidget):
             else:
                 expiry.setText("Not provided")
                 remaining.setText("")
+        for button in self.action_buttons:
+            button.setVisible(bool(self.action))
+            button.setEnabled(bool(self.action) and not self.running and self.action["fingerprint"] not in self.attempts)
         self.rows_layout.activate()
         self.table.layout().activate()
         self.layout().invalidate()
@@ -1043,6 +1125,24 @@ class AboutView(QWidget):
             layout.addWidget(label)
 
 
+class ResetWorker(QObject):
+    finished = Signal(str, bool)
+
+    def __init__(self, payload):
+        super().__init__()
+        self.payload = payload
+
+    def work(self):
+        try:
+            message = reset_actions.apply(self.payload)
+        except (ValueError, OSError) as error:
+            self.finished.emit(str(error), False)
+        except Exception:
+            self.finished.emit("Could not confirm the reset result. Refresh and check the account before applying another reset.", False)
+        else:
+            self.finished.emit(message, True)
+
+
 class UpdateWorker(QObject):
     progress = Signal(str)
     finished = Signal(str, bool)
@@ -1201,6 +1301,8 @@ class Dashboard(QWidget):
         self.metric_buttons = []
         self.provider_buttons = {}
         self.reset_provider = None
+        self.reset_applying = False
+        self.reset_thread = None
         self.settings_view = None
         self.settings_scroll_position = 0
         self.usage_scroll_position = 0
@@ -1252,6 +1354,8 @@ class Dashboard(QWidget):
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.credits_view = ResetCreditsView()
+        self.credits_view.reset_requested.connect(self.apply_reset)
+        self.credits_view.confirmation_changed.connect(self.fit_content)
         self.credits_scroll = QScrollArea()
         self.credits_scroll.setWidgetResizable(True)
         self.credits_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -1337,12 +1441,18 @@ class Dashboard(QWidget):
 
     def closeEvent(self, event):
         event.ignore()
+        self.credits_view.cancel_confirmation()
         self.hide()
+
+    def hideEvent(self, event):
+        self.credits_view.cancel_confirmation()
+        super().hideEvent(event)
 
     def changeEvent(self, event):
         super().changeEvent(event)
         if event.type() == event.Type.ActivationChange and not self.isActiveWindow():
             if not QApplication.activePopupWidget() and not self.menu.isVisible() and not self.findChildren(QDialog):
+                self.credits_view.cancel_confirmation()
                 self.hide()
 
     def keyPressEvent(self, event):
@@ -1374,7 +1484,8 @@ class Dashboard(QWidget):
         if entry is None or not reset_credits.available_credits(entry.get("reset_credits"))["available"]:
             return
         self.reset_provider = key
-        self.credits_view.update_provider(key[0], entry, self.entry_name(key[0], entry))
+        self.credits_view.cancel_confirmation()
+        self.credits_view.update_provider(key[0], dict(entry, _loading=self.busy), self.entry_name(key[0], entry))
         self.pages.setCurrentWidget(self.credits_scroll)
         self.credits_scroll.verticalScrollBar().setValue(0)
         self.update_header()
@@ -1382,6 +1493,7 @@ class Dashboard(QWidget):
         self.back_button.setFocus()
 
     def show_usage(self):
+        self.credits_view.cancel_confirmation()
         was_configuring = self.configuring()
         was_updating = self.viewing_updates()
         key = self.reset_provider
@@ -1398,6 +1510,43 @@ class Dashboard(QWidget):
             self.settings_button.setFocus()
         elif was_updating:
             (self.update_link if not self.update_link.isHidden() else self.settings_button).setFocus()
+
+    def apply_reset(self, payload):
+        if self.quitting or self.reset_applying or self.busy:
+            return
+        self.reset_applying = True
+        self.credits_view.running = True
+        self.credits_view.attempts.add(payload["fingerprint"])
+        self.reset_target = (payload["provider"], payload["idx"])
+        self.credits_view.show_action_status("Applying reset…", provider=self.reset_target)
+        self.draw()
+        self.fit_content()
+        self.reset_thread = QThread(self)
+        self.reset_worker = ResetWorker(payload)
+        self.reset_worker.moveToThread(self.reset_thread)
+        self.reset_thread.started.connect(self.reset_worker.work)
+        self.reset_worker.finished.connect(self.on_reset_finished)
+        self.reset_worker.finished.connect(self.reset_thread.quit)
+        self.reset_thread.finished.connect(self.reset_worker.deleteLater)
+        self.reset_thread.finished.connect(self.reset_thread.deleteLater)
+        self.reset_thread.finished.connect(self.reset_thread_finished)
+        self.reset_thread.start()
+
+    def on_reset_finished(self, message, successful):
+        self.credits_view.show_action_status(message, error=not successful, provider=self.reset_target)
+        self.fit_content()
+
+    def reset_thread_finished(self):
+        self.reset_applying = False
+        self.reset_thread = None
+        self.reset_worker = None
+        self.credits_view.running = False
+        self.draw()
+        if self.quitting and not self.busy and not self.updating:
+            self.app.quit()
+        elif not self.quitting:
+            self.queued = False
+            self.refresh()
 
     def configuring(self):
         return self.pages.currentWidget() is self.settings_scroll
@@ -1460,7 +1609,7 @@ class Dashboard(QWidget):
         self.update_worker = None
         self.update_view.running = False
         self.update_view.update_action()
-        if self.quitting and not self.busy:
+        if self.quitting and not self.busy and not self.reset_applying:
             self.app.quit()
 
     def show_about(self):
@@ -1472,6 +1621,10 @@ class Dashboard(QWidget):
         self.back_button.setFocus()
 
     def go_back(self):
+        if self.reset_provider is not None and self.credits_view.target:
+            self.credits_view.cancel_confirmation()
+            self.fit_content()
+            return
         if self.viewing_about():
             self.pages.setCurrentWidget(self.settings_scroll)
             self.update_header()
@@ -1510,12 +1663,13 @@ class Dashboard(QWidget):
         self.auto_refresh.stop()
         self.poll.stop()
         self.animation.stop()
-        if self.busy or self.updating:
+        if self.busy or self.updating or self.reset_applying:
             self.status.setText("Exiting after the current operation finishes…")
         else:
             self.app.quit()
 
     def configure(self):
+        self.credits_view.cancel_confirmation()
         if self.viewing_about():
             self.go_back()
         if not self.configuring():
@@ -1597,6 +1751,9 @@ class Dashboard(QWidget):
     def refresh(self):
         if self.quitting:
             return
+        if self.reset_applying:
+            self.queued = True
+            return
         if self.busy:
             self.queued = True
             return
@@ -1673,7 +1830,7 @@ class Dashboard(QWidget):
         if fetch.get_version_info()["has_update"]:
             self.status.setText(self.status.text() + " · update available")
         self.draw()
-        if self.quitting and not self.updating:
+        if self.quitting and not self.updating and not self.reset_applying:
             self.app.quit()
         elif self.queued:
             self.queued = False
@@ -1925,7 +2082,7 @@ class Dashboard(QWidget):
                 self.update_header()
             else:
                 name = self.reset_provider[0]
-                self.credits_view.update_provider(name, entry, self.entry_name(name, entry))
+                self.credits_view.update_provider(name, dict(entry, _loading=self.busy), self.entry_name(name, entry))
 
     def fit_content(self):
         content = self.pages.currentWidget().widget()
