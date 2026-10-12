@@ -12,6 +12,7 @@ from . import logos
 from . import render
 from . import config as cfgmod
 from . import quickshell, paths, fetch, accounts, __version__
+from . import notifications
 
 TERMINALS = ["foot", "alacritty", "kitty", "ghostty", "wezterm", "xterm"]
 
@@ -154,6 +155,8 @@ def _swiftbar_refresh():
         data = fetch.fetch_all_data(include_errors=True, check_updates=True)
         if data:
             state.save_cache(data)
+            from . import desktop_notifications
+            notifications.process(data, desktop_notifications.deliver)
     finally:
         state.release_lock()
 
@@ -687,6 +690,7 @@ def _build_parser():
         ("update", "Start an optional update using your installation method"),
         ("providers", "List installed provider IDs and default connection settings"),
         ("accounts", "List default connections and manage saved accounts"),
+        ("notifications", "Configure quota alerts, recovery notices and silence"),
         ("doctor", "Print version, paths and runtime diagnostics as JSON"),
         ("help", "Show help for a command, including nested commands"),
     )
@@ -694,6 +698,34 @@ def _build_parser():
     for name, description in descriptions:
         command_parsers[name] = commands.add_parser(name, help=description, description=description + ".")
     _configure_accounts_parser(command_parsers["accounts"])
+    alerts = command_parsers["notifications"]
+    alerts.add_argument("--json", action="store_true", help="Print saved preferences as JSON")
+    alerts.add_argument("--file", help="Read notification preferences from a JSON file, or - for stdin")
+    alerts.add_argument("--thresholds", help="Comma-separated consumption percentages, e.g. 80,95,100")
+    alerts.add_argument("--connection", help="Scope a threshold rule to a connection ID, e.g. account:personal")
+    alerts.add_argument("--metric", help="Scope a rule to a metric key, e.g. weekly or rolling")
+    switch = alerts.add_mutually_exclusive_group()
+    switch.add_argument("--enable", dest="enabled", action="store_true", default=None)
+    switch.add_argument("--disable", dest="enabled", action="store_false")
+    recovery = alerts.add_mutually_exclusive_group()
+    recovery.add_argument("--recovery", dest="recovery", action="store_true", default=None)
+    recovery.add_argument("--no-recovery", dest="recovery", action="store_false")
+    silence = alerts.add_mutually_exclusive_group()
+    silence.add_argument("--mute", type=int, metavar="MINUTES", help="Silence alerts temporarily")
+    silence.add_argument("--resume", action="store_true", help="End temporary silence")
+    alerts.add_argument("--quiet-hours", metavar="HH:MM-HH:MM", help="Silence during local hours; empty clears")
+    alerts.add_argument("--work-hours", metavar="HH:MM-HH:MM", help="Notify only during local hours; empty clears")
+    recent = alerts.add_mutually_exclusive_group()
+    recent.add_argument("--recent-only", dest="recent_only", action="store_true", default=None)
+    recent.add_argument("--all-accounts", dest="recent_only", action="store_false")
+    alerts.epilog = (
+        "Examples:\n"
+        "  ai-status notifications --thresholds 80,95,100\n"
+        "  ai-status notifications --connection account:personal --metric weekly --thresholds 95,100\n"
+        "  ai-status notifications --mute 60\n"
+        "  ai-status notifications --quiet-hours 22:00-08:00\n"
+        "Rules use consumed quota even when the panel displays Remaining."
+    )
     command_parsers["config"].epilog = (
         "Windows and macOS open native Settings by default. On Linux, this opens the\n"
         "terminal configuration UI. On macOS, --frontend selects the terminal UI.\n\n"
@@ -737,6 +769,7 @@ def _build_parser():
         ("swiftbar-stream", "Stream the animated SwiftBar menu", ()),
         ("swiftbar-refresh", "Fetch usage for SwiftBar and save the cache", ()),
         ("swiftbar-select", "Select a provider and metric from SwiftBar", ()),
+        ("notification-ack", "Acknowledge native macOS notification delivery", ()),
     )
     for name, description, visible in integrations:
         # Integration commands remain discoverable in the epilog without
@@ -753,6 +786,7 @@ def _build_parser():
     selection.add_argument("provider", help="Provider or saved account connection ID")
     selection.add_argument("idx", nargs="?", default="0", help="Provider result index (default: 0)")
     selection.add_argument("metric", nargs="?", help="Metric key (default: first available limit)")
+    command_parsers["notification-ack"].add_argument("--id", required=True, action="append", help="Notification identifier")
     return parser, command_parsers
 
 
@@ -786,6 +820,76 @@ def _providers_main(as_json=False):
     return 0
 
 
+def _notifications_main(args, parser):
+    try:
+        settings = notifications.load_settings()
+        changed = False
+        if args.file:
+            if args.file == "-":
+                settings = json.load(sys.stdin)
+            else:
+                with open(args.file, encoding="utf-8") as stream:
+                    settings = json.load(stream)
+            settings = notifications.validate_settings(settings)
+            changed = True
+        if bool(args.connection) != bool(args.metric):
+            parser.error("--connection and --metric must be supplied together")
+        if args.connection and args.thresholds is None and args.enabled is None:
+            parser.error("A scoped rule requires --thresholds, --enable or --disable")
+        thresholds = None
+        if args.thresholds is not None:
+            thresholds = [int(value.strip()) for value in args.thresholds.split(",")]
+        if args.connection:
+            if args.connection not in cfgmod.available_connections():
+                raise ValueError("Choose an available connection from ai-status accounts")
+            rules = settings["rules"]
+            rule = next((rule for rule in rules if rule["connection_id"] == args.connection and rule["metric"] == args.metric), None)
+            if rule is None:
+                rule = dict(connection_id=args.connection, metric=args.metric, thresholds=settings["thresholds"], enabled=True)
+                rules.append(rule)
+            if thresholds is not None:
+                rule["thresholds"] = thresholds
+            if args.enabled is not None:
+                rule["enabled"] = args.enabled
+            changed = True
+        else:
+            if thresholds is not None:
+                settings["thresholds"] = thresholds
+                changed = True
+            if args.enabled is not None:
+                settings["enabled"] = args.enabled
+                changed = True
+        for key in ("recovery", "recent_only"):
+            value = getattr(args, key)
+            if value is not None:
+                settings[key] = value
+                changed = True
+        if args.mute is not None:
+            if args.mute <= 0:
+                raise ValueError("Mute duration must be greater than zero")
+            settings["muted_until"] = time.time() + args.mute * 60
+            changed = True
+        if args.resume:
+            settings["muted_until"] = 0
+            changed = True
+        for key in ("quiet_hours", "work_hours"):
+            value = getattr(args, key)
+            if value is not None:
+                parts = value.split("-") if value else ["", ""]
+                if len(parts) != 2:
+                    raise ValueError("Hours must use HH:MM-HH:MM")
+                settings[key] = dict(zip(("start", "end"), parts))
+                changed = True
+        if changed:
+            notifications.save_settings(settings)
+            state.trigger_refresh()
+        print(json.dumps(notifications.load_settings(), ensure_ascii=False, indent=2))
+        return 0
+    except (ValueError, OSError, TypeError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+
 def main(argv=None):
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -811,6 +915,12 @@ def main(argv=None):
         return _run_accounts(args, command_parsers[command])
     if command == "providers":
         return _providers_main(args.json)
+    if command == "notifications":
+        return _notifications_main(args, command_parsers[command])
+    if command == "notification-ack":
+        from . import desktop_notifications
+        desktop_notifications.ack(args.id)
+        return 0
     if command == "config" and args.usage_display is not None:
         selected = state.load_selected() or {}
         selected["usage_display"] = args.usage_display

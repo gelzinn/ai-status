@@ -11,6 +11,7 @@ from . import logos
 from . import config as cfgmod
 from . import quickshell
 from . import paths
+from . import notifications, desktop_notifications
 
 should_update = True
 is_updating = False
@@ -49,10 +50,12 @@ def update_task(output_format="waybar"):
                         _results_by_dir[dir_name] = providers
                     elif output_format in ("quickshell", "macos"):
                         _results_by_dir.pop(dir_name, None)
-                    if output_format in ("quickshell", "macos"):
+                    if providers or output_format in ("quickshell", "macos"):
                         # Clicks must be able to select newly streamed metrics
                         # while another provider is still being queried.
                         state.save_cache(_ordered_merged(cfgmod.enabled_connection_order()))
+                    if providers:
+                        notifications.process(providers, lambda event: desktop_notifications.deliver(event, output_format))
                     _pending.discard(dir_name)
 
                 data = fetch.fetch_all_data(on_result=on_result, include_errors=output_format in ("quickshell", "macos"), check_updates=True)
@@ -113,6 +116,12 @@ def _run(output_format="waybar"):
             logo_paths = {name: logo_cache.get(name) for name in cfgmod.available_providers()}
             logo = logo_paths.get((cfgmod.connection_info(selected.get("provider", "")) or {}).get("provider", ""), "") if state.get_icon_mode(selected) == "logo" else ""
             output = quickshell.build_snapshot(data, selected, pending=_pending.copy(), logo_path=logo, logo_paths=logo_paths)
+            if output_format == "macos":
+                output["notifications"] = desktop_notifications.pending(data)
+            elif output_format == "quickshell":
+                activation = paths.read_json(paths.RUNTIME_DIR / "notification-activation.json")
+                stamp = activation.get("time") if isinstance(activation, dict) else None
+                output["notificationActivation"] = activation if type(stamp) in (float, int) and 0 <= time.time() - stamp < 60 else None
             if output["providers"] and any(selected.get(key) != output["selected"].get(key) for key in ("provider", "idx", "metric")):
                 selected.update(output["selected"])
                 state.save_selected(selected)
@@ -127,7 +136,7 @@ def _run(output_format="waybar"):
             logos.write_tooltip(output.get("tooltip", ""))
             logos.signal_waybar()
 
-    last_auto_update = time.time()
+    next_auto_update = time.time() + 300
     last_config_mtime = None
     last_selected_mtime = 0
     last_refresh = paths.read_json(state.REFRESH_FILE)
@@ -187,7 +196,7 @@ def _run(output_format="waybar"):
                     time.sleep(0.15)
 
                 emit(latest_data, selected)
-                last_auto_update = now
+                next_auto_update = time.time() + notifications.next_check_delay(latest_data)
                 last_selected_mtime = selected_mtime
 
             # Re-render on scroll (selected file changed, no re-fetch needed).
@@ -207,7 +216,7 @@ def _run(output_format="waybar"):
             # as fast as the logo (which updates instantly via its signal),
             # keeping the two in sync. The per-iteration work is tiny.
             time.sleep(0.15 if output_format in ("quickshell", "macos") else 0.02)
-            if now - last_auto_update >= 300:
+            if now >= next_auto_update:
                 should_update = True
                 
         except KeyboardInterrupt:

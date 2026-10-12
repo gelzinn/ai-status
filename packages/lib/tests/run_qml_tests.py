@@ -16,6 +16,7 @@ def main():
         for name in ("Panel.qml", "UsagePage.qml", "UsageBar.qml", "StableList.js", "ResetCreditsPage.qml", "SettingsPage.qml", "PanelButton.qml", "PanelSelect.qml", "PanelIcon.qml", "PanelIconButton.qml", "PanelIcons.qml", "AboutPage.qml", "UpdatePage.qml", "qmldir"):
             shutil.copy2(tests.parent / "quickshell" / name, plugin / name)
         shutil.copy2(root / "Model.qml", plugin / "Model.qml")
+        shutil.copy2(tests.parent / "quickshell/Model.qml", root / "modeltest/Model.qml")
         shutil.copytree(tests.parent / "assets/providers", root / "assets/providers")
         shutil.copy2(tests.parent / "assets/app.png", root / "assets/app.png")
         shutil.copy2(tests.parent / "assets/panel-icons.json", root / "assets/panel-icons.json")

@@ -26,6 +26,9 @@ class DesktopTests(IsolatedState):
 
     def setUp(self):
         super().setUp()
+        settings_directory = patch.object(paths, "CONFIG_DIR", self.root / "config")
+        settings_directory.start()
+        self.addCleanup(settings_directory.stop)
         config.save_config(["codex", "copilot"])
         with patch.object(tray.QTimer, "singleShot"), patch.object(tray.QSystemTrayIcon, "show"):
             self.dashboard = tray.Dashboard(self.app)
@@ -34,6 +37,68 @@ class DesktopTests(IsolatedState):
         self.dashboard.animation.stop()
         self.addCleanup(self.dashboard.tray.hide)
         self.addCleanup(self.dashboard.deleteLater)
+
+    def test_startup_cache_does_not_trigger_notifications(self):
+        cached = [{"provider": "Codex", "_dir": "codex", "_idx": 0,
+                   "_observed_at": time.time(), "metrics": [{"type": "weekly", "percentage": 100}]}]
+        with patch.object(state, "load_cache", return_value=cached), \
+             patch.object(tray.notifications, "process") as evaluate, \
+             patch.object(tray.QTimer, "singleShot"), patch.object(tray.QSystemTrayIcon, "show"):
+            dashboard = tray.Dashboard(self.app)
+        for timer in (dashboard.poll, dashboard.auto_refresh, dashboard.animation):
+            timer.stop()
+        self.addCleanup(dashboard.tray.hide)
+        self.addCleanup(dashboard.deleteLater)
+        evaluate.assert_not_called()
+
+    def test_fresh_result_is_evaluated_and_notification_click_opens_its_limit(self):
+        providers = [{"provider": "Codex", "_dir": "codex", "_idx": 0, "metrics": [
+            {"type": "rolling", "percentage": 23}, {"type": "weekly", "percentage": 95}]}]
+        event = {"id": "weekly-95", "provider": "codex", "idx": 0, "metric": "weekly",
+                 "kind": "threshold", "title": "AI Status", "body": "Codex: 95% of weekly quota used."}
+        with patch.object(tray.notifications, "process") as evaluate:
+            self.dashboard.on_result("codex", providers)
+        self.assertIs(evaluate.call_args.args[0], providers)
+        self.assertEqual(evaluate.call_args.kwargs["deliver"], self.dashboard.deliver_notification)
+        with patch.object(tray.QSystemTrayIcon, "supportsMessages", return_value=True), \
+             patch.object(self.dashboard.tray, "showMessage") as show:
+            self.assertTrue(self.dashboard.deliver_notification(event))
+        show.assert_called_once_with(event["title"], event["body"], tray.QSystemTrayIcon.MessageIcon.Warning, 10_000)
+        with patch.object(self.dashboard, "show_dashboard") as open_dashboard:
+            self.dashboard.tray.messageClicked.emit()
+        open_dashboard.assert_called_once()
+        self.assertEqual(state.load_selected()["metric"], "weekly")
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
+
+    def test_unsupported_or_failed_notification_is_not_accepted(self):
+        event = {"kind": "recovery", "title": "AI Status", "body": "Quota available."}
+        with patch.object(tray.QSystemTrayIcon, "supportsMessages", return_value=False), \
+             patch.object(self.dashboard.tray, "showMessage") as show:
+            self.assertFalse(self.dashboard.deliver_notification(event))
+        show.assert_not_called()
+        with patch.object(tray.QSystemTrayIcon, "supportsMessages", return_value=True), \
+             patch.object(self.dashboard.tray, "showMessage", side_effect=RuntimeError("Unavailable")), \
+             self.assertLogs(level="ERROR"):
+            self.assertFalse(self.dashboard.deliver_notification(event))
+        self.assertIsNone(self.dashboard.last_notification)
+
+    def test_recovery_notification_uses_information_icon(self):
+        for kind in ("recovery", "partial_recovery"):
+            event = {"kind": kind, "title": "AI Status", "body": "Quota available."}
+            with patch.object(tray.QSystemTrayIcon, "supportsMessages", return_value=True), \
+                 patch.object(self.dashboard.tray, "showMessage") as show:
+                self.assertTrue(self.dashboard.deliver_notification(event))
+            self.assertEqual(show.call_args.args[2], tray.QSystemTrayIcon.MessageIcon.Information)
+
+    def test_completed_collection_adjusts_timer_for_reset(self):
+        providers = [{"provider": "Codex", "_dir": "codex", "metrics": [{"type": "weekly", "percentage": 100}]}]
+        self.dashboard.data = {"codex": providers}
+        self.dashboard.worker = MagicMock()
+        with patch.object(tray.notifications, "next_check_delay", return_value=42) as delay, \
+             patch.object(tray.fetch, "get_version_info", return_value={"has_update": False}):
+            self.dashboard.on_finished(providers)
+        delay.assert_called_once_with(providers)
+        self.assertEqual(self.dashboard.auto_refresh.interval(), 42_000)
 
     def test_incremental_dashboard_selection_and_cache_warning(self):
         self.dashboard.on_result("codex", [{"provider": "Codex", "_dir": "codex", "_idx": 0,
@@ -328,6 +393,89 @@ class DesktopTests(IsolatedState):
         self.assertTrue(settings.display["show_metric"].isChecked())
         self.assertIn("Unable to save", settings.message.text())
         self.assertFalse((state.load_selected() or {}).get("show_metric", False))
+
+    def test_notification_settings_keep_account_limit_drafts_and_roundtrip_controls(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "rolling", "percentage": 2}, {"type": "weekly", "percentage": 23}]}])
+        self.dashboard.configure()
+        self.app.processEvents()
+        settings = self.dashboard.settings_view
+        self.assertLessEqual(settings.width(), self.dashboard.settings_scroll.viewport().width())
+        settings.notification_thresholds.setText("75, 90, 100")
+        settings.notifications_recovery.setChecked(False)
+        settings.notifications_recent_only.setChecked(True)
+        settings.notification_quiet_start.setText("22:00")
+        settings.notification_quiet_end.setText("07:00")
+        settings.notification_work_start.setText("09:00")
+        settings.notification_work_end.setText("18:00")
+        settings.notification_mute.setChecked(True)
+        settings.active.setCurrentIndex(settings.active.findData(["codex", 0, "weekly"]))
+        self.assertIn("Weekly", settings.notification_rule_label.text())
+        settings.notification_rule_custom.setChecked(True)
+        settings.notification_rule_thresholds.setText("85, 99")
+        settings.active.setCurrentIndex(settings.active.findData(["codex", 0, "rolling"]))
+        settings.notification_rule_custom.setChecked(True)
+        settings.notification_rule_enabled.setChecked(False)
+        settings.notification_rule_thresholds.setText("80")
+        settings.active.setCurrentIndex(settings.active.findData(["codex", 0, "weekly"]))
+        self.assertEqual(settings.notification_rule_thresholds.text(), "85, 99")
+        settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
+        self.assertEqual(settings.notification_rule_thresholds.text(), "85, 99")
+        with patch.object(self.dashboard, "refresh"), patch.object(tray.time, "time", return_value=1000):
+            settings.save()
+        self.assertEqual(settings.message.text(), "Saved")
+        saved = tray.notifications.load_settings()
+        self.assertEqual(saved["thresholds"], [75, 90, 100])
+        self.assertFalse(saved["recovery"])
+        self.assertTrue(saved["recent_only"])
+        self.assertEqual(saved["muted_until"], 4600)
+        self.assertEqual(saved["quiet_hours"], {"start": "22:00", "end": "07:00"})
+        self.assertEqual(saved["work_hours"], {"start": "09:00", "end": "18:00"})
+        rules = {(rule["connection_id"], rule["metric"]): rule for rule in saved["rules"]}
+        self.assertEqual(rules[("codex", "weekly")]["thresholds"], [85, 99])
+        self.assertFalse(rules[("codex", "rolling")]["enabled"])
+        settings.notification_mute.setChecked(False)
+        with patch.object(self.dashboard, "refresh"):
+            settings.save()
+        self.assertEqual(tray.notifications.load_settings()["muted_until"], 0)
+
+    def test_invalid_notification_settings_are_rejected_before_any_save(self):
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        for thresholds in ("eighty", "80, 101", "0", "80, 80"):
+            settings.notification_thresholds.setText(thresholds)
+            with patch.object(config, "save_connection_order") as save_order, \
+                 patch.object(state, "_save_json") as save_selection, \
+                 patch.object(tray.notifications, "save_settings") as save_notifications:
+                settings.save()
+            save_order.assert_not_called()
+            save_selection.assert_not_called()
+            save_notifications.assert_not_called()
+            self.assertTrue(settings.message.text())
+            self.assertNotEqual(settings.message.text(), "Saved")
+        settings.notification_thresholds.setText("80, 95, 100")
+        settings.notification_quiet_start.setText("25:00")
+        settings.notification_quiet_end.setText("07:00")
+        with patch.object(tray.notifications, "save_settings") as save_notifications:
+            settings.save()
+        save_notifications.assert_not_called()
+
+    def test_invalid_notification_override_draft_survives_selection_changes(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "rolling", "percentage": 2}, {"type": "weekly", "percentage": 23}]}])
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        settings.active.setCurrentIndex(settings.active.findData(["codex", 0, "weekly"]))
+        settings.notification_rule_custom.setChecked(True)
+        settings.notification_rule_thresholds.setText("unfinished")
+        settings.active.setCurrentIndex(settings.active.findData(["codex", 0, "rolling"]))
+        settings.active.setCurrentIndex(settings.active.findData(["codex", 0, "weekly"]))
+        self.assertTrue(settings.notification_rule_custom.isChecked())
+        self.assertEqual(settings.notification_rule_thresholds.text(), "unfinished")
+        with patch.object(tray.notifications, "save_settings") as save_notifications:
+            settings.save()
+        save_notifications.assert_not_called()
+        self.assertIn("threshold", settings.message.text())
 
     def test_provider_arrows_keyboard_and_native_move_preserve_checks_and_save_order(self):
         self.dashboard.configure()

@@ -69,6 +69,43 @@ Item {
             compare(settings.enabledProviders.length, 2)
             compare(settings.order[0], "claude")
         }
+        function test_quota_alert_draft_save_and_cancel_preserve_account_rules() {
+            settings.alertThresholds = "95,100"
+            settings.setAlert("muted_until", 1234567890)
+            settings.setAlert("quiet_hours", {start: "22:00", end: "08:00"})
+            settings.setRule("thresholds", [80,100])
+            settings.setRuleText("90,100")
+            settings.selected = {provider: "codex", idx: 0, metric: "weekly"}
+            settings.setRule("thresholds", [95,100])
+            settings.save()
+            compare(Plugin.Model.saved.notifications.thresholds.join(","), "95,100")
+            compare(Plugin.Model.saved.notifications.rules.length, 2)
+            compare(Plugin.Model.saved.notifications.rules[0].connection_id, "claude")
+            compare(Plugin.Model.saved.notifications.rules[0].thresholds.join(","), "90,100")
+            compare(Plugin.Model.saved.notifications.rules[1].connection_id, "codex")
+            compare(Plugin.Model.saved.notifications.muted_until, 1234567890)
+            compare(Plugin.Model.saved.notifications.quiet_hours.start, "22:00")
+            verify(Plugin.Model.snapshot.settings.notifications === undefined)
+            settings.begin()
+            compare(settings.alertThresholds, "80,95,100")
+            compare(settings.alertSettings.rules.length, 0)
+        }
+        function test_invalid_quota_threshold_drafts_block_save() {
+            settings.alertThresholds = "101"
+            verify(!settings.valid)
+            settings.save()
+            compare(Plugin.Model.saved, null)
+            settings.alertThresholds = "80,95,100"
+            settings.setRule("thresholds", [95,100])
+            settings.setRuleText("99.6")
+            verify(!settings.valid)
+            settings.save()
+            compare(Plugin.Model.saved, null)
+            settings.setRuleText("95,100")
+            verify(settings.valid)
+            settings.save()
+            compare(Plugin.Model.saved.notifications.rules[0].thresholds.join(","), "95,100")
+        }
         function test_amount_only_account_keeps_identity_and_hides_progress() {
             settings.visible = false
             const snapshot = Plugin.Model.snapshot

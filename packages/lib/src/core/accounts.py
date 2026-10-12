@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import sys
 import sqlite3
+import time
 from contextlib import closing
 
 from . import paths
@@ -426,3 +427,101 @@ def redact(value, secrets):
     if isinstance(value, list):
         return [redact(item, secrets) for item in value]
     return value
+
+
+def _notification_digest(provider, kind, *values):
+    return hashlib.sha256(json.dumps([provider, kind, *values], ensure_ascii=False,
+                                    separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _notification_document(filename):
+    document = paths.read_json(filename)
+    return document if isinstance(document, dict) else {}
+
+
+def _notification_jwt_identity(token):
+    """Read stable token claims for deduplication; never use them for auth."""
+    try:
+        pieces = token.split(".")
+        if len(pieces) != 3:
+            return None
+        payload = pieces[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        if not isinstance(claims, dict):
+            return None
+        subject = claims.get("sub")
+        auth = claims.get("https://api.openai.com/auth")
+        account = auth.get("chatgpt_account_id", "") if isinstance(auth, dict) else ""
+        if isinstance(subject, str) and subject and isinstance(account, str):
+            return subject, account
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return None
+
+
+def notification_identity(connection, env, fingerprint):
+    """Hash the selected login's stable identity independently of OAuth refresh.
+
+    Credential fingerprints remain strict for cache isolation. Notification
+    identities use account metadata only from the credential source selected
+    by the collector. Opaque sessions without an account ID use their actual
+    token; a routine token refresh can rearm those fallback sessions.
+    """
+    provider = connection["provider"]
+    home = Path(env.get("HOME") or env.get("USERPROFILE") or str(Path.home()))
+    auth_file = env.get("AI_STATUS_AUTH_FILE")
+    if provider == "codex":
+        direct = env.get("CODEX_ACCESS_TOKEN")
+        use_file = not direct or auth_file or env.get("CODEX_HOME")
+        document = _notification_document(auth_file or Path(env.get("CODEX_HOME") or home / ".codex") / "auth.json") if use_file else {}
+        tokens = document.get("tokens") if isinstance(document.get("tokens"), dict) else {}
+        token = direct or tokens.get("access_token")
+        account = env.get("CODEX_ACCOUNT_ID") or tokens.get("account_id")
+        if isinstance(token, str) and token:
+            if isinstance(account, str) and account:
+                return _notification_digest(provider, "account", account)
+            identity = _notification_jwt_identity(token)
+            return _notification_digest(provider, "jwt", *identity) if identity else _notification_digest(provider, "token", token)
+    elif provider == "claude":
+        direct = env.get("CLAUDE_ACCESS_TOKEN")
+        configured_root = env.get("CLAUDE_CONFIG_DIR")
+        root = Path(configured_root) if configured_root else home / ".claude"
+        document = _notification_document(auth_file or root / ".credentials.json")
+        credentials = document.get("claudeAiOauth") if isinstance(document.get("claudeAiOauth"), dict) else {}
+        if not auth_file and env.get("AI_STATUS_CLAUDE_CREDENTIALS") and not direct:
+            try:
+                prepared = json.loads(env["AI_STATUS_CLAUDE_CREDENTIALS"])
+                credentials = prepared if isinstance(prepared, dict) else {}
+            except (ValueError, TypeError):
+                credentials = {}
+        token = direct or credentials.get("accessToken")
+        try:
+            expires = 0 if direct else float(credentials.get("expiresAt") or 0)
+            expired = expires > 0 and expires <= time.time() * 1000
+        except (ValueError, TypeError):
+            expired = True
+        native = bool(token) and not expired and (not direct or direct == credentials.get("accessToken"))
+        if (not token or expired) and not connection.get("account_id"):
+            opencode = _notification_document(Path(env.get("XDG_DATA_HOME") or home / ".local/share") / "opencode/auth.json")
+            session = opencode.get("anthropic") or opencode.get("claude") or {}
+            token = session.get("access") if isinstance(session, dict) else None
+            native = False
+        if isinstance(token, str) and token:
+            if native:
+                metadata = [document]
+                if auth_file:
+                    metadata.append(_notification_document(Path(auth_file).parent / ".claude.json"))
+                elif configured_root:
+                    metadata.append(_notification_document(root / ".claude.json"))
+                else:
+                    metadata.extend([_notification_document(home / ".claude.json"),
+                                     _notification_document(root / ".claude.json")])
+                for candidate in metadata:
+                    account = candidate.get("oauthAccount")
+                    if not isinstance(account, dict):
+                        continue
+                    account_id, organization = account.get("accountUuid"), account.get("organizationUuid", "")
+                    if isinstance(account_id, str) and account_id and isinstance(organization, str):
+                        return _notification_digest(provider, "account", account_id, organization)
+            return _notification_digest(provider, "token", token)
+    return _notification_digest(provider, "context", fingerprint)
