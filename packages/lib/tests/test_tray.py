@@ -1,4 +1,5 @@
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1373,6 +1374,71 @@ class DesktopTests(IsolatedState):
             self.dashboard.update_view.copy_button.click()
             self.assertEqual(self.app.clipboard().text(), "ai-status update")
             self.assertEqual(self.dashboard.update_view.copy_button.text(), "Copied")
+
+    def test_live_update_progress_stays_in_footer_and_survives_navigation(self):
+        release = threading.Event()
+        version = {"current": "0.11.0", "latest": "0.12.1", "has_update": True}
+
+        def updating(progress=None):
+            progress({"stage": "downloading", "message": "Downloading update…",
+                      "downloadedBytes": 4_200_000, "totalBytes": 10_000_000, "percent": 42})
+            if not release.wait(5):
+                raise OSError("Fixture timed out")
+            return "Installer opened. Complete setup to restart AI Status."
+
+        with patch.object(tray.fetch, "get_version_info", return_value=version), \
+                patch.object(tray.updates, "update_guide", return_value=self.update_guide()), \
+                patch.object(tray.updates, "run_update", side_effect=updating):
+            self.dashboard.show_updates()
+            view = self.dashboard.update_view
+            view.action.click()
+            try:
+                deadline = time.monotonic() + 3
+                while view.percent.text() != "42%" and time.monotonic() < deadline:
+                    self.app.processEvents()
+                    time.sleep(0.01)
+                self.assertEqual(view.percent.text(), "42%")
+                self.assertEqual(view.progress_bar.value(), 42)
+                self.assertEqual(view.transferred.text(), "4.2 / 10.0 MB")
+                self.assertTrue(view.spinner.running)
+                self.assertIs(view.footer.parentWidget(), self.dashboard.pages.parentWidget())
+                self.assertGreaterEqual(view.footer.y(), self.dashboard.pages.geometry().bottom())
+                self.dashboard.go_back()
+                self.app.processEvents()
+                self.assertTrue(view.footer.isHidden())
+                self.dashboard.show_updates()
+                self.app.processEvents()
+                self.assertEqual(view.progress_bar.value(), 42)
+                self.assertEqual(view.percent.text(), "42%")
+                self.assertTrue(view.spinner.isVisible())
+                self.assertFalse(view.action.isEnabled())
+            finally:
+                release.set()
+                self.wait_for_update()
+            self.assertTrue(view.progress_bar.isHidden())
+            self.assertTrue(view.spinner.isHidden())
+            self.assertIn("Complete setup", view.status.text())
+
+    def test_unknown_download_size_and_verification_do_not_show_fake_percentage(self):
+        with patch.object(tray.fetch, "get_version_info", return_value={"has_update": True}), \
+                patch.object(tray.updates, "update_guide", return_value=self.update_guide()):
+            self.dashboard.show_updates()
+            view = self.dashboard.update_view
+            view.running = True
+            view.show_progress({"stage": "downloading", "message": "Downloading update…",
+                                "downloadedBytes": 2_500_000})
+            self.assertEqual(view.progress_bar.maximum(), 0)
+            self.assertTrue(view.percent.isHidden())
+            self.assertEqual(view.transferred.text(), "2.5 MB downloaded")
+            view.show_progress({"stage": "verifying", "message": "Verifying update…"})
+            self.assertEqual(view.progress_bar.maximum(), 0)
+            self.assertTrue(view.transferred.isHidden())
+            self.assertTrue(view.spinner.running)
+            self.dashboard.on_update_finished("Download failed. Retry.", False)
+            self.assertTrue(view.progress_bar.isHidden())
+            self.assertFalse(view.spinner.running)
+            self.assertEqual(view.action.text(), "Retry update")
+            self.assertTrue(view.action.isEnabled())
 
     def test_provider_settings_save_disabled_providers(self):
         settings = tray.ProviderSettings(self.dashboard)

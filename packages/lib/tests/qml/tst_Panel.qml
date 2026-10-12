@@ -26,6 +26,7 @@ Item {
         function init() {
             Plugin.Model.reset()
             Plugin.Model.settingsSaving = false
+            findChild(panel, "panel-update-page").commandExpanded = false
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
             snapshot.providers[1].resetCredits = {available: 2, timezone: "Local time · UTC+00:00", rows: [
                 {title: "Full reset", count: 2, expires: "Oct 22, 18:05", remaining: "12d 2h left", timezone: "UTC+00:00"}
@@ -306,6 +307,7 @@ Item {
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
             snapshot.version = {current: "0.11.0", latest: "0.12.1", has_update: true}
             snapshot.update = {
+                method: "omarchy",
                 title: "Update the Omarchy plugin", description: "Omarchy updates AI Status in place.",
                 steps: ["Start the update.", "Wait for the plugin to reload."],
                 command: "omarchy plugin update io.github.gelzinn.ai-status",
@@ -398,7 +400,9 @@ Item {
             Plugin.Model.updateError = "Terminal not found. Run the command above."
             Plugin.Model.updateRunning = false
             verify(action.enabled)
-            compare(findChild(panel, "update-status").text, Plugin.Model.updateError)
+            compare(findChild(panel, "update-status-detail").text, Plugin.Model.updateError)
+            compare(findChild(panel, "update-status-label").text, "Could not start")
+            verify(findChild(panel, "update-command-box").visible)
             mouseClick(action)
             compare(Plugin.Model.updateStarts, 2)
             compare(Plugin.Model.updateError, "")
@@ -419,6 +423,78 @@ Item {
             panel.configure()
             verify(!panel.updatePage)
             verify(!findChild(panel, "update-available").visible)
+        }
+        function test_update_footer_shows_real_handoff_and_preserves_manual_fallback() {
+            prepareUpdate(true)
+            panel.showUpdate()
+            wait(20)
+            const footer = findChild(panel, "update-footer")
+            const scroller = findChild(panel, "panel-scroller")
+            const separator = findChild(panel, "update-footer-divider")
+            const icon = findChild(panel, "update-status-icon")
+            const progress = findChild(panel, "update-progress")
+            const label = findChild(panel, "update-status-label")
+            const detail = findChild(panel, "update-status-detail")
+            const action = findChild(panel, "update-action")
+            const command = findChild(panel, "update-command-box")
+            verify(footer.visible)
+            verify(!findChild(panel, "settings-footer").visible)
+            verify(scroller.mapToItem(footer, 0, scroller.height).y < separator.y)
+            verify(!command.visible)
+            verify(!progress.visible)
+            compare(action.text, "Update")
+            verify(action.primary)
+            mouseClick(findChild(panel, "update-manual-command"))
+            wait(20)
+            verify(command.visible)
+            const footerBottom = footer.y + footer.height
+            compare(findChild(panel, "update-command").text, Plugin.Model.snapshot.update.command)
+            const copy = findChild(panel, "update-copy-command")
+            mouseClick(copy)
+            compare(copy.iconName, "check")
+            mouseClick(action)
+            compare(Plugin.Model.updateStarts, 1)
+            compare(icon.name, "loader-circle")
+            tryVerify(() => icon.rotation > 0)
+            compare(label.text, "Checking release…")
+            verify(progress.visible)
+            verify(progress.animating)
+            const phase = progress.phase
+            tryVerify(() => progress.phase !== phase)
+            verify(!action.enabled)
+            Plugin.Model.updateStage = "opening"
+            Plugin.Model.updateMessage = "Opening the updater in a terminal…"
+            compare(label.text, "Opening terminal…")
+            compare(footer.y + footer.height, footerBottom)
+            panel.showUsage()
+            tryCompare(icon, "rotation", 0)
+            verify(!progress.animating)
+            panel.showUpdate()
+            tryVerify(() => icon.rotation > 0)
+            Plugin.Model.updateMessage = "The updater is open in a terminal. Follow its progress there."
+            Plugin.Model.updateRunning = false
+            compare(label.text, "Terminal opened")
+            compare(icon.name, "check")
+            tryCompare(icon, "rotation", 0)
+            verify(!progress.visible)
+            verify(!progress.animating)
+            verify(detail.text.indexOf("in the terminal") !== -1)
+            verify(detail.text.indexOf("shell restarts") !== -1)
+            compare(action.text, "Done")
+            mouseClick(action)
+            verify(!panel.updatePage)
+            compare(Plugin.Model.updateStarts, 1)
+        }
+        function test_update_already_current_does_not_claim_terminal_opened() {
+            prepareUpdate(true)
+            panel.showUpdate()
+            wait(20)
+            mouseClick(findChild(panel, "update-action"))
+            Plugin.Model.updateMessage = "AI Status is already up to date."
+            Plugin.Model.updateRunning = false
+            compare(findChild(panel, "update-status-label").text, "Up to date")
+            compare(findChild(panel, "update-status-detail").text, "AI Status is already up to date.")
+            verify(!findChild(panel, "update-progress").visible)
         }
         function test_update_notice_does_not_replace_backend_error() {
             prepareUpdate(true)

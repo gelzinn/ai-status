@@ -1,6 +1,5 @@
 import QtQuick
 import qs.Commons
-import qs.Commons as Commons
 import "." as Plugin
 
 Column {
@@ -10,11 +9,15 @@ Column {
     readonly property color linkColor: "#89b4fa"
     readonly property var guide: Plugin.Model.snapshot.update || {}
     readonly property var version: Plugin.Model.snapshot.version || {}
+    property Item actionControl: null
+    property bool commandExpanded: false
+    readonly property bool showCommand: !guide.canUpdate || commandExpanded
     property bool commandCopied: false
     spacing: Style.space(16)
 
     function focusFirstControl() {
-        if (updateAction.visible && updateAction.enabled) updateAction.forceActiveFocus()
+        if (actionControl && actionControl.visible && actionControl.enabled) actionControl.forceActiveFocus()
+        else if (manualCommand.visible) manualCommand.forceActiveFocus()
         else releaseNotes.forceActiveFocus()
     }
 
@@ -33,32 +36,32 @@ Column {
         Label { text: root.guide.title || "A new version is available"; font.bold: true }
         Label {
             objectName: "update-versions"
-            text: "Installed: v" + (root.version.current || "—") + "\nAvailable: v" + (root.version.latest || "—")
+            text: "v" + (root.version.current || "—") + "  →  v" + (root.version.latest || "—")
             opacity: 0.7
         }
-        Label { text: root.guide.description || "Open the update guide for your installation." }
-    }
-
-    Column {
-        width: parent.width
-        spacing: Style.space(10)
-        Repeater {
-            model: root.guide.steps || []
-            delegate: Label {
-                required property int index
-                required property string modelData
-                text: (index + 1) + ". " + modelData
-            }
-        }
+        Label { text: root.guide.description || "See the update guide for your installation." }
     }
 
     Column {
         width: parent.width
         spacing: Style.space(6)
         visible: !!root.guide.command
-        Label { text: "Or run this command in a terminal:"; opacity: 0.7 }
-        Rectangle {
+        Plugin.PanelButton {
+            id: manualCommand
+            objectName: "update-manual-command"
             width: parent.width
+            visible: !!root.guide.canUpdate
+            text: root.showCommand ? "Hide terminal command" : "Terminal command"
+            trailingIconName: "chevron-down"
+            alignLeft: true
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: root.commandExpanded = !root.showCommand
+        }
+        Rectangle {
+            objectName: "update-command-box"
+            width: parent.width
+            visible: root.showCommand
             implicitHeight: Math.max(command.implicitHeight + Style.space(20), Style.space(50))
             radius: Style.cornerRadius
             color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.04)
@@ -109,29 +112,16 @@ Column {
         onTriggered: root.commandCopied = false
     }
 
+    Connections {
+        target: Plugin.Model
+        function onUpdateErrorChanged() {
+            if (Plugin.Model.updateError !== "") root.commandExpanded = true
+        }
+    }
+
     Column {
         width: parent.width
         spacing: Style.space(8)
-        Plugin.PanelButton {
-            id: updateAction
-            objectName: "update-action"
-            width: parent.width
-            visible: !!root.guide.canUpdate
-            enabled: !Plugin.Model.updateRunning
-            text: Plugin.Model.updateRunning ? "Starting update…" : root.guide.actionLabel || "Update"
-            trailingIconName: "arrow-right"
-            alignLeft: true
-            outlined: true
-            foreground: root.linkColor
-            fontFamily: root.fontFamily
-            onClicked: Plugin.Model.startUpdate()
-        }
-        Label {
-            objectName: "update-status"
-            visible: text !== ""
-            text: Plugin.Model.updateError || Plugin.Model.updateMessage
-            color: Plugin.Model.updateError ? Commons.Color.urgent : root.foreground
-        }
         Plugin.PanelButton {
             id: releaseNotes
             objectName: "update-release-notes"
@@ -146,7 +136,7 @@ Column {
         Plugin.PanelButton {
             objectName: "update-guide-link"
             width: parent.width
-            text: "Full update guide and rollback"
+            text: "Update help"
             trailingIconName: "arrow-right"
             alignLeft: true
             foreground: root.foreground

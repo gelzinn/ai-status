@@ -16,6 +16,7 @@ Item {
     property bool updateRunning: false
     property string updateError: ""
     property string updateMessage: ""
+    property string updateStage: "idle"
     signal settingsSaved()
     signal notificationActivated()
     property var consumerWidgets: []
@@ -88,8 +89,26 @@ Item {
         if (updateRunning || consumers === 0 || !snapshot.update || !snapshot.update.canUpdate) return
         updateError = ""
         updateMessage = ""
+        updateStage = "checking"
         updateRunning = true
-        updateProcess.exec(["python3", cliPath, "update"])
+        updateProcess.exec(["python3", cliPath, "update", "--json-progress"])
+    }
+
+    function acceptUpdateProgress(line) {
+        try {
+            const event = JSON.parse(line)
+            if (!event || ["checking", "opening", "complete", "error"].indexOf(event.stage) === -1 || typeof event.message !== "string") return
+            updateStage = event.stage
+            if (event.stage === "error") {
+                updateError = event.message
+                updateMessage = ""
+            } else {
+                updateMessage = event.message
+                updateError = ""
+            }
+        } catch (error) {
+            // A malformed line cannot claim that the terminal opened.
+        }
     }
 
     function drain() {
@@ -141,19 +160,26 @@ Item {
 
     Process {
         id: updateProcess
-        stdout: SplitParser { onRead: data => root.updateMessage = data }
+        objectName: "update-process"
+        stdout: SplitParser { onRead: data => root.acceptUpdateProgress(data) }
         stderr: SplitParser { onRead: data => root.updateError = data }
         onExited: (exitCode, exitStatus) => {
             root.updateRunning = false
             if (exitCode !== 0 || exitStatus !== 0) {
                 root.updateMessage = ""
-                root.updateError = root.updateError || "Could not start the update. Try again or use the command above."
+                root.updateStage = "error"
+                root.updateError = root.updateError || "Could not start the update. Try again or use the terminal command."
+            } else if (root.updateStage !== "complete") {
+                root.updateMessage = ""
+                root.updateStage = "error"
+                root.updateError = root.updateError || "The updater stopped before confirming the terminal opened. Try again."
             }
         }
         onRunningChanged: if (!running) Qt.callLater(() => {
             if (root.updateRunning) {
                 root.updateRunning = false
-                root.updateError = root.updateError || "Could not start the updater. Use the command above."
+                root.updateStage = "error"
+                root.updateError = root.updateError || "Could not start the updater. Use the terminal command."
             }
         })
     }

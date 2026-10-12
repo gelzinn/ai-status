@@ -289,6 +289,7 @@ struct UpdateGuide: Decodable {
     let canUpdate: Bool
     let releaseUrl: String
     let guideUrl: String
+    var updatesInTerminal: Bool { actionLabel.lowercased().contains("terminal") }
 
     // Older snapshots remain useful even before the shared core is updated.
     static let manualMacOS = UpdateGuide(
@@ -300,6 +301,44 @@ struct UpdateGuide: Decodable {
         actionLabel: "", canUpdate: false,
         releaseUrl: "https://github.com/gelzinn/ai-status/releases/latest",
         guideUrl: "https://ai-status.gelzin.com/macos")
+}
+
+struct UpdateProgress: Decodable {
+    let stage: String
+    let message: String
+    var downloadedBytes: Int64? = nil
+    var totalBytes: Int64? = nil
+    var percent: Double? = nil
+
+    var downloadPercent: Double? {
+        guard stage == "downloading" else { return nil }
+        if let downloaded = downloadedBytes, downloaded >= 0, let total = totalBytes, total > 0 {
+            return min(100, max(0, Double(downloaded) / Double(total) * 100))
+        }
+        return percent.flatMap { $0.isFinite ? min(100, max(0, $0)) : nil }
+    }
+    var transferred: String {
+        guard stage == "downloading", let downloaded = downloadedBytes, downloaded >= 0 else { return "" }
+        let value = ByteCountFormatter.string(fromByteCount: downloaded, countStyle: .file)
+        guard let total = totalBytes, total > 0 else { return value + " downloaded" }
+        return value + " / " + ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
+    }
+    var label: String {
+        switch stage {
+        case "checking": return "Checking for updates…"
+        case "downloading": return "Downloading…"
+        case "verifying": return "Verifying download…"
+        case "installing": return "Installing…"
+        case "opening": return "Opening installer…"
+        case "restarting": return "Restarting AI Status…"
+        case "complete": return "Update complete"
+        case "error": return "Update failed"
+        default: return "Updating…"
+        }
+    }
+    var valid: Bool {
+        ["checking", "downloading", "verifying", "installing", "opening", "restarting", "complete", "error"].contains(stage)
+    }
 }
 
 struct Snapshot: Decodable {
@@ -439,6 +478,9 @@ final class Model: ObservableObject {
     @Published var updateStarting = false
     @Published var updateError = ""
     @Published var updateMessage = ""
+    @Published var updateProgress: UpdateProgress?
+    @Published var updateManualVisible = false { didSet { changed?() } }
+    @Published private(set) var updateOpenedInTerminal = false
     @Published var isPresented = false
     @Published var keyboardFocusVisible = false
     @Published var notificationPermission = ""
@@ -446,6 +488,7 @@ final class Model: ObservableObject {
     private let runtime: RuntimeConfig?
     private var backend: Process?
     private var actionProcess: Process?
+    private var updateProcess: Process?
     private var actions: [([String], ((String) -> Void)?, (String?) -> Void)] = []
     private var reconnect: DispatchWorkItem?
     private var retryDelay = 1.0
@@ -551,11 +594,13 @@ final class Model: ObservableObject {
         return cloudCreditProvider?.monetaryCredits.first { $0.id == id }
     }
     var updateGuide: UpdateGuide { snapshot?.update ?? .manualMacOS }
+    var updateHandedOff: Bool { updateOpenedInTerminal && updateProgress?.stage == "complete" }
+    var updateCompletionLabel: String { updateHandedOff ? "Updater opened" : "Update complete" }
     var panelHeight: CGFloat {
         switch page {
         case .settings: return 680
         case .about: return 640
-        case .update: return 600
+        case .update: return updateGuide.canUpdate ? (updateManualVisible ? 550 : 390) : 470
         case .credits: return min(680, CGFloat(310 + (creditProvider?.resetCredits?.rows.count ?? 0) * 82))
         case .cloudCredits: return 660
         case .usage:
@@ -713,22 +758,111 @@ final class Model: ObservableObject {
     }
     func showAbout() { page = .about; changed?() }
     func showUpdate() {
-        updateError = ""
-        updateMessage = ""
         page = .update
         changed?()
     }
     func startUpdate() {
-        guard updateGuide.canUpdate, !updateStarting else { return }
+        guard !stopping, updateGuide.canUpdate, !updateStarting else { return }
         updateStarting = true
         updateError = ""
         updateMessage = ""
-        enqueue(["update"], output: { [weak self] message in
-            self?.updateMessage = message
-        }) { [weak self] error in
-            guard let self = self else { return }
-            self.updateStarting = false
-            self.updateError = error ?? ""
+        updateOpenedInTerminal = false
+        updateProgress = UpdateProgress(stage: "checking", message: "Checking for updates…")
+        guard let runtime = runtime else {
+            finishUpdate("The AI Status runtime is unavailable.")
+            return
+        }
+        let process = runtime.process(["update", "--json-progress"])
+        let output = Pipe()
+        let errors = Pipe()
+        process.standardOutput = output
+        process.standardError = errors
+        do {
+            updateProcess = process
+            try process.run()
+            let streams = DispatchGroup()
+            let result = UpdateCommandResult()
+            streams.enter()
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                let input = output.fileHandleForReading
+                defer { try? input.close(); streams.leave() }
+                var buffer = Data()
+                var droppingLine = false
+                while true {
+                    let chunk = input.availableData
+                    if chunk.isEmpty { break }
+                    buffer.append(chunk)
+                    while let end = buffer.firstIndex(of: 10) {
+                        let line = Data(buffer[..<end])
+                        buffer.removeSubrange(...end)
+                        if !droppingLine, line.count <= 64 * 1024 {
+                            DispatchQueue.main.async { [weak self] in
+                                guard let self = self, self.updateProcess === process, !self.stopping else { return }
+                                self.acceptUpdateProgress(line)
+                            }
+                        }
+                        droppingLine = false
+                    }
+                    // Ignore a malformed unbounded line while continuing to drain the pipe.
+                    if buffer.count > 64 * 1024 { buffer.removeAll(); droppingLine = true }
+                }
+                if !droppingLine, !buffer.isEmpty {
+                    let line = buffer
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self, self.updateProcess === process, !self.stopping else { return }
+                        self.acceptUpdateProgress(line)
+                    }
+                }
+            }
+            streams.enter()
+            DispatchQueue.global(qos: .utility).async {
+                let input = errors.fileHandleForReading
+                defer { try? input.close(); streams.leave() }
+                var captured = Data()
+                while true {
+                    let chunk = input.availableData
+                    if chunk.isEmpty { break }
+                    if captured.count < 2048 { captured.append(chunk.prefix(2048 - captured.count)) }
+                }
+                result.error = String(data: captured, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            }
+            streams.notify(queue: .global(qos: .utility)) { [weak self] in
+                process.waitUntilExit()
+                DispatchQueue.main.async {
+                    guard let self = self, self.updateProcess === process, !self.stopping else { return }
+                    self.updateProcess = nil
+                    let failure = process.terminationStatus == 0 ? nil :
+                        (result.error.isEmpty ? "The update could not finish. Try again." : result.error)
+                    self.finishUpdate(failure)
+                }
+            }
+        } catch {
+            updateProcess = nil
+            finishUpdate("Could not start the updater. Run the macOS installer again.")
+        }
+    }
+    func acceptUpdateProgress(_ data: Data) {
+        guard let progress = try? JSONDecoder().decode(UpdateProgress.self, from: data), progress.valid else { return }
+        updateProgress = progress
+        if progress.stage == "opening" && updateGuide.updatesInTerminal { updateOpenedInTerminal = true }
+        if progress.stage == "error" {
+            updateError = progress.message
+            updateMessage = ""
+        } else {
+            updateMessage = progress.message
+            updateError = ""
+        }
+    }
+    private func finishUpdate(_ failure: String?) {
+        updateStarting = false
+        if let failure = failure {
+            if updateError.isEmpty { updateError = failure }
+            updateMessage = ""
+            updateProgress = UpdateProgress(stage: "error", message: updateError)
+        } else if updateProgress?.stage != "complete" && updateProgress?.stage != "error" {
+            updateError = "The updater stopped before confirming the update. Try again."
+            updateMessage = ""
+            updateProgress = UpdateProgress(stage: "error", message: updateError)
         }
     }
     func back() {
@@ -799,7 +933,14 @@ final class Model: ObservableObject {
         if let process = actionProcess { Self.stopProcess(process) }
         backend = nil
         actionProcess = nil
+        // The installer asks this app to quit before replacing and reopening it.
+        // Its independent updater must remain alive to finish that transaction.
+        updateProcess = nil
     }
+}
+
+private final class UpdateCommandResult {
+    var error = ""
 }
 
 private enum Palette {
@@ -875,6 +1016,17 @@ struct PanelIcon: View {
                                        lineCap: .round, lineJoin: .round))
             .frame(width: icons.size, height: icons.size)
             .accessibilityHidden(true)
+    }
+}
+
+struct ActionSpinner: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.04, paused: reduceMotion)) { context in
+            PanelIcon(name: "loader-circle")
+                .rotationEffect(.degrees(reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: 1) * 360))
+        }.accessibilityHidden(true)
     }
 }
 
@@ -1324,38 +1476,36 @@ struct UpdatePage: View {
         let guide = model.updateGuide
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(guide.title).foregroundColor(Palette.bright)
+                Text(model.updateProgress?.stage == "complete" ?
+                     (model.updateHandedOff ? "Continue in Terminal" : "You're up to date") : "Latest stable version")
+                    .foregroundColor(Palette.bright)
                 if let version = model.snapshot?.version {
-                    Text("Installed: v\(version.current)" + (version.latest.map { "\nAvailable: v" + $0 } ?? ""))
+                    Text("v\(version.current)" + (version.latest.map { $0 == version.current ? "" : " → v" + $0 } ?? ""))
                         .font(.custom("GeistMono-Regular", size: 11))
                 }
-                Text(guide.description).fixedSize(horizontal: false, vertical: true)
+                Text(guide.canUpdate && guide.updatesInTerminal ?
+                     "The updater opens in Terminal. Follow its progress there; your menu bar refreshes after installation. Your settings and connections are kept." :
+                     guide.canUpdate ?
+                     "AI Status downloads and installs the update, then restarts automatically. Your settings and connections are kept." :
+                     guide.description)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            if guide.canUpdate {
-                HoverButton(bordered: true, hoverColor: Palette.update.opacity(0.10), action: model.startUpdate) {
-                    HStack {
-                        Text(model.updateStarting ? "Opening updater…" : guide.actionLabel)
-                        Spacer()
-                        PanelIcon(name: "arrow-right")
-                    }.foregroundColor(Palette.update)
-                }.disabled(model.updateStarting)
-            }
-            if !model.updateError.isEmpty {
-                Text(model.updateError + "\nUse the command below or open the installation guide to retry.")
-                    .foregroundColor(.orange).fixedSize(horizontal: false, vertical: true)
-            }
-            if !model.updateMessage.isEmpty {
+            if model.updateProgress?.stage == "complete" && !model.updateMessage.isEmpty {
                 Text(model.updateMessage).foregroundColor(Palette.bright).fixedSize(horizontal: false, vertical: true)
             }
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(Array(guide.steps.enumerated()), id: \.offset) { index, step in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text("\(index + 1).").foregroundColor(Palette.bright)
-                        Text(step).fixedSize(horizontal: false, vertical: true)
+            HoverButton(action: { open(guide.releaseUrl) }) {
+                HStack { Text("Release notes"); Spacer(); PanelIcon(name: "arrow-right") }
+            }
+            if guide.canUpdate && !guide.command.isEmpty {
+                HoverButton(action: { model.updateManualVisible.toggle() }) {
+                    HStack {
+                        Text(model.updateManualVisible ? "Hide manual update" : "Update manually…")
+                        Spacer()
+                        PanelIcon(name: model.updateManualVisible ? "arrow-up" : "arrow-down")
                     }
                 }
             }
-            if !guide.command.isEmpty {
+            if (!guide.canUpdate || model.updateManualVisible) && !guide.command.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Terminal command").foregroundColor(Palette.bright)
                     HStack(alignment: .top, spacing: 8) {
@@ -1369,19 +1519,67 @@ struct UpdatePage: View {
                         }).accessibilityLabel("Copy command")
                     }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.border))
+                    HoverButton(action: { open(guide.guideUrl) }) {
+                        HStack { Text("Installation guide"); Spacer(); PanelIcon(name: "arrow-right") }
+                    }
                 }
             }
-            VStack(spacing: 6) {
-                HoverButton(action: { open(guide.releaseUrl) }) {
-                    HStack { Text("Release notes"); Spacer(); PanelIcon(name: "arrow-right") }
-                }
+            if !guide.canUpdate && guide.command.isEmpty {
                 HoverButton(action: { open(guide.guideUrl) }) {
                     HStack { Text("Installation guide"); Spacer(); PanelIcon(name: "arrow-right") }
                 }
             }
-            Text("Updating is optional. You can return to usage and update later.")
-                .font(.custom("GeistMono-Regular", size: 11))
         }
+    }
+}
+
+struct UpdateActions: View {
+    @ObservedObject var model: Model
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if model.updateStarting {
+                HStack(spacing: 8) {
+                    ActionSpinner()
+                    Text(model.updateProgress?.stage == "complete" ? model.updateCompletionLabel :
+                         (model.updateProgress?.label ?? "Updating…"))
+                    Spacer(minLength: 0)
+                    if let percent = model.updateProgress?.downloadPercent {
+                        Text(String(format: "%.0f%%", percent)).monospacedDigit()
+                    }
+                }.foregroundColor(Palette.update)
+                if let percent = model.updateProgress?.downloadPercent {
+                    ProgressView(value: percent, total: 100).progressViewStyle(.linear).tint(Palette.update)
+                        .accessibilityLabel("Download progress")
+                } else {
+                    ProgressView().progressViewStyle(.linear).tint(Palette.update)
+                        .accessibilityLabel(model.updateProgress?.label ?? "Updating")
+                }
+                if let transferred = model.updateProgress?.transferred, !transferred.isEmpty {
+                    Text(transferred).font(.custom("GeistMono-Regular", size: 11)).monospacedDigit()
+                }
+            } else {
+                if !model.updateError.isEmpty {
+                    Text(model.updateError).font(.custom("GeistMono-Regular", size: 11))
+                        .foregroundColor(.orange).fixedSize(horizontal: false, vertical: true)
+                }
+                HStack(spacing: 8) {
+                    if model.updateProgress?.stage == "complete" {
+                        PanelIcon(name: "check")
+                        Text(model.updateCompletionLabel).font(.custom("GeistMono-Regular", size: 11))
+                    }
+                    Spacer(minLength: 0)
+                    Button(model.updateProgress?.stage == "complete" ? "Done" : "Later", action: model.back)
+                        .buttonStyle(.plain).padding(6)
+                    if model.updateGuide.canUpdate && model.updateProgress?.stage != "complete" {
+                        Button(model.updateError.isEmpty ?
+                               (model.updateGuide.updatesInTerminal ? model.updateGuide.actionLabel : "Update now") :
+                               "Retry update", action: model.startUpdate)
+                            .buttonStyle(.plain).padding(6).foregroundColor(Palette.update)
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.border))
+                    }
+                }
+            }
+        }.padding(.horizontal, 16).padding(.vertical, 12)
     }
 }
 
@@ -1405,7 +1603,7 @@ struct AboutPage: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Quick guide").foregroundColor(Palette.bright)
                 Text("Menu bar: click to show usage; right-click for settings and other actions.")
-                Text("Usage: click a limit to show it in the bar. Refresh checks now; Reset credits shows the available resets. Update available opens the update guide.")
+                Text("Usage: click a limit to show it in the bar. Refresh checks now; Reset credits shows the available resets. Update available opens the updater.")
                 Text("Settings: pick a limit, text and icon. Enable providers and reorder them with the arrows. Save applies changes and keeps settings open.")
                 Text("Keyboard: R refreshes, C opens settings, Esc goes back. Tab moves between controls.")
             }.font(.custom("GeistMono-Regular", size: 11))
@@ -1438,14 +1636,16 @@ struct PanelView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         if !model.error.isEmpty { Text(model.error).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(.orange) }
-                        if model.page == .usage && model.snapshot?.version.hasUpdate == true {
+                        if model.page == .usage && (model.snapshot?.version.hasUpdate == true || model.updateStarting) {
                             HoverButton(hoverColor: Palette.update.opacity(0.10), action: model.showUpdate) {
                                 HStack {
-                                    Text("Update available: v" + (model.snapshot?.version.latest ?? ""))
+                                    if model.updateStarting { ActionSpinner() }
+                                    Text(model.updateStarting ? (model.updateProgress?.label ?? "Updating…") :
+                                         "Update available: v" + (model.snapshot?.version.latest ?? ""))
                                     Spacer()
                                     PanelIcon(name: "arrow-right")
                                 }.foregroundColor(Palette.update)
-                            }.help("Show update instructions")
+                            }.help(model.updateStarting ? "Show update progress" : "Update AI Status")
                         }
                         switch model.page {
                         case .usage: UsagePage(model: model)
@@ -1469,10 +1669,18 @@ struct PanelView: View {
                     Spacer()
                     if model.draft.saved { Text("Saved").font(.custom("GeistMono-Regular", size: 11)) }
                     Button("Cancel", action: model.back).buttonStyle(.plain).padding(6).disabled(model.settingsSaving)
-                    Button(model.settingsSaving ? "Saving…" : "Save", action: model.saveSettings)
-                        .buttonStyle(.plain).padding(6).overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.border))
+                    Button(action: model.saveSettings) {
+                        HStack(spacing: 6) {
+                            if model.settingsSaving { ActionSpinner() }
+                            Text(model.settingsSaving ? "Saving…" : "Save")
+                        }
+                    }.buttonStyle(.plain).padding(6)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.border))
                         .disabled(!model.settingsValid || model.settingsSaving)
                 }.padding(.horizontal, 16).padding(.bottom, 12)
+            } else if model.page == .update {
+                Divider().overlay(Palette.border)
+                UpdateActions(model: model)
             }
         }
         .frame(width: 380).frame(maxHeight: .infinity)
@@ -1865,7 +2073,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             model.page = page
             try renderSmokePage(model, name: name, directory: previewDirectory)
         }
-        print("AI Status macOS smoke OK: usage, settings, quota notifications, reset credits, Cloud credits, update guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+        print("AI Status macOS smoke OK: usage, settings, quota notifications, reset credits, Cloud credits, live update progress, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
     }
 
     private static func smokeNotifications(sample: String) throws {
@@ -1928,13 +2136,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         guard var document = try JSONSerialization.jsonObject(with: Data(sample.utf8)) as? [String: Any] else {
             throw AppError.message("Update sample setup failed.")
         }
-        document["version"] = ["current": "0.10.0", "latest": "0.12.1", "has_update": true] as [String: Any]
+        document["version"] = ["current": "0.15.0", "latest": "0.16.0", "has_update": true] as [String: Any]
         document["update"] = [
             "method": "macos-installer", "title": "Update AI Status on macOS",
             "description": "Install the latest stable version. Your settings and provider connections are preserved.",
-            "steps": ["Open the updater in Terminal.", "Follow its progress. AI Status restarts after installation."],
+            "steps": ["Download and install the update.", "AI Status restarts automatically."],
             "command": "curl -fsSL https://ai-status.gelzin.com/install/macos | bash",
-            "actionLabel": "Open updater in Terminal", "canUpdate": true,
+            "actionLabel": "Update now", "canUpdate": true,
             "releaseUrl": "https://github.com/gelzinn/ai-status/releases/latest",
             "guideUrl": "https://ai-status.gelzin.com/macos",
         ] as [String: Any]
@@ -1942,7 +2150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         let model = Model()
         model.accept(try JSONSerialization.data(withJSONObject: document))
         guard let selection = model.snapshot?.selected, model.updateGuide.canUpdate,
-              model.updateGuide.steps.count == 2, model.snapshot?.version.latest == "0.12.1" else {
+              model.updateGuide.steps.count == 2, model.snapshot?.version.latest == "0.16.0" else {
             throw AppError.message("Update guide decoding failed.")
         }
         model.isPresented = true
@@ -1950,9 +2158,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         model.showUpdate()
         guard model.page == .update else { throw AppError.message("Update guide navigation failed.") }
         try renderSmokePage(model, name: "update-guide", directory: directory)
+        model.updateManualVisible = true
+        try renderSmokePage(model, name: "update-manual-alternative", directory: directory)
+        model.updateManualVisible = false
         model.startUpdate()
         guard !model.updateStarting, !model.updateError.isEmpty, model.updateMessage.isEmpty else {
-            throw AppError.message("Unavailable update runtime did not expose a retry guide.")
+            throw AppError.message("Unavailable update runtime did not expose retry feedback.")
         }
         try renderSmokePage(model, name: "update-error", directory: directory)
         try smokeUpdateResult(document: document, directory: directory)
@@ -1961,13 +2172,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             throw AppError.message("Returning from the update guide changed the selected metric.")
         }
         document.removeValue(forKey: "update")
-        model.accept(try JSONSerialization.data(withJSONObject: document))
-        model.showUpdate()
-        model.startUpdate()
-        guard !model.updateGuide.canUpdate, model.updateError.isEmpty, !model.updateStarting else {
+        let manualModel = Model()
+        manualModel.accept(try JSONSerialization.data(withJSONObject: document))
+        manualModel.showUpdate()
+        manualModel.startUpdate()
+        guard !manualModel.updateGuide.canUpdate, manualModel.updateError.isEmpty, !manualModel.updateStarting else {
             throw AppError.message("Manual update fallback attempted to run an updater.")
         }
-        try renderSmokePage(model, name: "update-manual", directory: directory)
+        try renderSmokePage(manualModel, name: "update-manual", directory: directory)
     }
 
     private static func smokeUpdateResult(document: [String: Any], directory: URL?) throws {
@@ -1977,10 +2189,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         let script = temporary.appendingPathComponent("fixture.sh")
         let model = Model(runtime: RuntimeConfig(python: "/bin/sh", cli: script.path))
         defer { model.shutdown() }
-        model.accept(try JSONSerialization.data(withJSONObject: document))
+        var currentDocument = document
+        currentDocument["version"] = ["current": "0.15.0", "latest": "0.15.0", "has_update": false] as [String: Any]
+        model.accept(try JSONSerialization.data(withJSONObject: currentDocument))
         model.showUpdate()
         // Only fixture output is executed; no installer or network request runs.
-        try "printf '%s\\n' 'AI Status is already up to date.'\n".write(to: script, atomically: true, encoding: .utf8)
+        try """
+        test "$1" = update && test "$2" = --json-progress || exit 2
+        printf '%s\\n' '{"stage":"complete","message":"AI Status is already up to date."}'
+
+        """.write(to: script, atomically: true, encoding: .utf8)
         model.startUpdate()
         try awaitSmokeUpdateResult(model)
         guard model.updateError.isEmpty, model.updateMessage == "AI Status is already up to date." else {
@@ -1988,11 +2206,159 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
         model.isPresented = true
         try renderSmokePage(model, name: "update-up-to-date", directory: directory)
-        try "printf '%s\\n' 'Could not open Terminal.' >&2\nexit 1\n".write(to: script, atomically: true, encoding: .utf8)
+        model.accept(try JSONSerialization.data(withJSONObject: document))
+        // Deliberately split JSON across writes and fill both pipes. Progress must
+        // be visible before exit, without losing partial lines or blocking stderr.
+        try """
+        test "$1" = update && test "$2" = --json-progress || exit 2
+        printf '%s\\n' '{"stage":"checking","message":"Checking the latest release…"}'
+        sleep 0.4
+        printf '%s' '{"stage":"downloading","message":"Downloading AI Status…",'
+        sleep 0.05
+        printf '%s\\n' '"downloadedBytes":5242880}'
+        sleep 0.5
+        printf '%s\\n' '{"stage":"downloading","message":"Downloading AI Status…","downloadedBytes":31457280,"totalBytes":83886080,"percent":37.5}'
+        sleep 0.5
+        printf '%s\\n' '{"stage":"verifying","message":"Checking the downloaded package…"}'
+        sleep 0.4
+        printf '%s\\n' '{"stage":"installing","message":"Installing AI Status…"}'
+        sleep 0.5
+        i=0
+        while test "$i" -lt 5000; do
+            printf '%s' 'invalid-progress'
+            printf '%s\\n' 'installer diagnostic output' >&2
+            i=$((i + 1))
+        done
+        printf '\\n'
+        printf '%s\\n' '{"stage":"restarting","message":"AI Status will reopen automatically…"}'
+        sleep 0.4
+        printf '%s' '{"stage":"complete","message":"AI Status was updated and reopened. Your settings were kept."}'
+
+        """.write(to: script, atomically: true, encoding: .utf8)
+        model.startUpdate()
+        try renderSmokePage(model, name: "update-checking", directory: directory)
+        try awaitSmokeUpdateStage(model) { $0?.stage == "downloading" && $0?.totalBytes == nil }
+        guard model.updateStarting, model.updateProgress?.downloadPercent == nil,
+              model.updateProgress?.transferred.isEmpty == false else {
+            throw AppError.message("Unknown-size download did not show active progress and transferred bytes.")
+        }
+        try renderSmokePage(model, name: "update-downloading-unknown", directory: directory)
+        model.back()
+        model.showUpdate()
+        guard model.updateStarting, model.updateProgress?.stage == "downloading", model.updateError.isEmpty else {
+            throw AppError.message("Navigating away erased an active update.")
+        }
+        try awaitSmokeUpdateStage(model) { $0?.downloadPercent == 37.5 }
+        guard model.updateStarting, model.updateProgress?.transferred.contains(" / ") == true else {
+            throw AppError.message("Known-size download did not report live percentage and bytes.")
+        }
+        try renderSmokePage(model, name: "update-downloading", directory: directory)
+        try awaitSmokeUpdateStage(model) { $0?.stage == "verifying" }
+        guard model.updateProgress?.downloadPercent == nil else {
+            throw AppError.message("Verification retained a completed download percentage.")
+        }
+        try renderSmokePage(model, name: "update-verifying", directory: directory)
+        try awaitSmokeUpdateStage(model) { $0?.stage == "installing" }
+        guard model.updateStarting else { throw AppError.message("The update became idle before installation finished.") }
+        try renderSmokePage(model, name: "update-installing", directory: directory)
+        try awaitSmokeUpdateStage(model) { $0?.stage == "restarting" }
+        try renderSmokePage(model, name: "update-restarting", directory: directory)
+        try awaitSmokeUpdateResult(model)
+        guard model.updateError.isEmpty, model.updateProgress?.stage == "complete",
+              model.updateMessage == "AI Status was updated and reopened. Your settings were kept." else {
+            throw AppError.message("The streamed update did not preserve its final unterminated result.")
+        }
+        var completedDocument = document
+        completedDocument["version"] = ["current": "0.16.0", "latest": "0.16.0", "has_update": false] as [String: Any]
+        model.accept(try JSONSerialization.data(withJSONObject: completedDocument))
+        try renderSmokePage(model, name: "update-complete", directory: directory)
+        model.accept(try JSONSerialization.data(withJSONObject: document))
+        try """
+        printf '%s\\n' '{"stage":"downloading","message":"Downloading…","downloadedBytes":1024,"totalBytes":4096}'
+        printf '%s\\n' '{"stage":"error","message":"The download was interrupted. Check your connection and retry."}'
+        printf '%s\\n' 'installer internal error' >&2
+        exit 1
+
+        """.write(to: script, atomically: true, encoding: .utf8)
         model.startUpdate()
         try awaitSmokeUpdateResult(model)
-        guard model.updateError == "Could not open Terminal.", model.updateMessage.isEmpty else {
+        guard model.updateError == "The download was interrupted. Check your connection and retry.",
+              model.updateProgress?.stage == "error", model.updateMessage.isEmpty else {
             throw AppError.message("A failed update command reported a successful handoff.")
+        }
+        model.back()
+        model.showUpdate()
+        guard !model.updateError.isEmpty else { throw AppError.message("Navigation erased the retry feedback.") }
+        try renderSmokePage(model, name: "update-download-error", directory: directory)
+        try """
+        printf '%s\\n' '{"stage":"checking","message":"Checking the latest release…"}'
+        sleep 0.4
+        printf '%s\\n' '{"stage":"complete","message":"AI Status is already up to date."}'
+
+        """.write(to: script, atomically: true, encoding: .utf8)
+        model.startUpdate()
+        guard model.updateError.isEmpty, model.updateStarting else { throw AppError.message("Retry did not reset the update state.") }
+        try renderSmokePage(model, name: "update-retry", directory: directory)
+        try awaitSmokeUpdateResult(model)
+        guard model.updateError.isEmpty, model.updateProgress?.stage == "complete" else {
+            throw AppError.message("Retry did not complete successfully.")
+        }
+        try "printf '%s\\n' 'The update could not finish.' >&2\nexit 1\n"
+            .write(to: script, atomically: true, encoding: .utf8)
+        model.startUpdate()
+        try awaitSmokeUpdateResult(model)
+        guard model.updateError == "The update could not finish.", model.updateMessage.isEmpty else {
+            throw AppError.message("A plain updater failure did not preserve stderr feedback.")
+        }
+        try "printf '%s\\n' 'incompatible progress'\n".write(to: script, atomically: true, encoding: .utf8)
+        model.startUpdate()
+        try awaitSmokeUpdateResult(model)
+        guard !model.updateError.isEmpty, model.updateProgress?.stage == "error" else {
+            throw AppError.message("Missing completion was reported as a successful update.")
+        }
+        let bounded = UpdateProgress(stage: "downloading", message: "", downloadedBytes: 12, totalBytes: 10)
+        guard bounded.downloadPercent == 100 else { throw AppError.message("Update percentage exceeded its progress bar.") }
+        var terminalDocument = document
+        guard var terminalGuide = terminalDocument["update"] as? [String: Any] else {
+            throw AppError.message("Terminal update fixture setup failed.")
+        }
+        terminalGuide["actionLabel"] = "Update in terminal"
+        terminalGuide["steps"] = ["The terminal shows progress, then refreshes your menu bar."]
+        terminalDocument["update"] = terminalGuide
+        let terminalModel = Model(runtime: RuntimeConfig(python: "/bin/sh", cli: script.path))
+        defer { terminalModel.shutdown() }
+        terminalModel.accept(try JSONSerialization.data(withJSONObject: terminalDocument))
+        terminalModel.showUpdate()
+        terminalModel.isPresented = true
+        try renderSmokePage(terminalModel, name: "update-terminal-guide", directory: directory)
+        try """
+        printf '%s\\n' '{"stage":"opening","message":"Opening the updater in a terminal…"}'
+        printf '%s\\n' '{"stage":"complete","message":"The updater is open in a terminal. Follow its progress there; your menu bar refreshes after installation."}'
+
+        """.write(to: script, atomically: true, encoding: .utf8)
+        terminalModel.startUpdate()
+        try awaitSmokeUpdateResult(terminalModel)
+        guard terminalModel.updateError.isEmpty, terminalModel.updateHandedOff,
+              terminalModel.updateCompletionLabel == "Updater opened" else {
+            throw AppError.message("Opening a terminal updater was reported as a completed installation.")
+        }
+        try renderSmokePage(terminalModel, name: "update-terminal-handoff", directory: directory)
+        try "printf '%s\\n' '{\"stage\":\"complete\",\"message\":\"AI Status is already up to date.\"}'\n"
+            .write(to: script, atomically: true, encoding: .utf8)
+        terminalModel.startUpdate()
+        try awaitSmokeUpdateResult(terminalModel)
+        guard !terminalModel.updateHandedOff else {
+            throw AppError.message("An up-to-date terminal installation retained a previous updater handoff.")
+        }
+    }
+
+    private static func awaitSmokeUpdateStage(_ model: Model, matching condition: (UpdateProgress?) -> Bool) throws {
+        let deadline = Date().addingTimeInterval(3)
+        while model.updateStarting && !condition(model.updateProgress) && Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        guard model.updateStarting, condition(model.updateProgress) else {
+            throw AppError.message("Live update fixture stage timed out.")
         }
     }
 

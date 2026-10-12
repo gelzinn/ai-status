@@ -13,7 +13,7 @@ from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabas
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout,
     QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
-    QPushButton, QScrollArea, QSizePolicy, QSpacerItem, QStackedWidget, QStyledItemDelegate, QStyle,
+    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSpacerItem, QStackedWidget, QStyledItemDelegate, QStyle,
     QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
@@ -1165,8 +1165,52 @@ class AboutView(QWidget):
             layout.addWidget(label)
 
 
+class OperationSpinner(QWidget):
+    """The shared footer loader, with the same one-second rotation as QML."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(16, 16)
+        self.running = False
+        self.rotation = 0.0
+        self.spin = QVariantAnimation(self)
+        self.spin.setStartValue(0.0)
+        self.spin.setEndValue(360.0)
+        self.spin.setDuration(1000)
+        self.spin.setLoopCount(-1)
+        self.spin.valueChanged.connect(self.rotate)
+
+    def rotate(self, angle):
+        self.rotation = angle
+        self.update()
+
+    def set_running(self, running):
+        self.running = running
+        self.setVisible(running)
+        if running and self.isVisible():
+            if self.spin.state() != QVariantAnimation.State.Running:
+                self.spin.start()
+        else:
+            self.spin.stop()
+            self.rotate(0.0)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.set_running(self.running)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.spin.stop()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.translate(self.rect().center())
+        painter.rotate(self.rotation)
+        painter.translate(-self.rect().center())
+        draw_control_icon(painter, QRectF(self.rect()), "loader-circle")
+
+
 class UpdateWorker(QObject):
-    progress = Signal(str)
+    progress = Signal(object)
     finished = Signal(str, bool)
 
     def work(self):
@@ -1200,15 +1244,16 @@ class UpdateView(QWidget):
         self.versions = plain_label("")
         self.versions.setWordWrap(True)
         layout.addWidget(self.versions)
-        optional = plain_label("You can keep using this version and update when you're ready.")
-        optional.setWordWrap(True)
-        layout.addWidget(optional)
         self.description = plain_label("")
         self.description.setWordWrap(True)
         layout.addWidget(self.description)
         self.steps = plain_label("")
         self.steps.setWordWrap(True)
         layout.addWidget(self.steps)
+        self.manual_toggle = QPushButton("Show terminal command")
+        self.manual_toggle.setCheckable(True)
+        self.manual_toggle.toggled.connect(self.toggle_command)
+        layout.addWidget(self.manual_toggle)
         self.command_box = QWidget()
         self.command_box.setObjectName("updateCommandBox")
         self.command_box.setStyleSheet("QWidget#updateCommandBox { background: #181818; border: 1px solid #303030; border-radius: 6px; }")
@@ -1229,16 +1274,7 @@ class UpdateView(QWidget):
         self.copy_feedback = QTimer(self)
         self.copy_feedback.setSingleShot(True)
         self.copy_feedback.timeout.connect(self.reset_copy_feedback)
-        self.action = QPushButton()
-        self.action.setObjectName("update-action")
-        self.action.setStyleSheet("color: #89b4fa; border: 1px solid #294666; border-radius: 6px; padding: 8px;")
-        self.action.clicked.connect(self.update_requested)
-        layout.addWidget(self.action)
-        self.status = plain_label("")
-        self.status.setWordWrap(True)
-        self.status.hide()
-        layout.addWidget(self.status)
-        for title, key in (("Downloads and release notes", "releaseUrl"), ("Manual update guide", "guideUrl")):
+        for title, key in (("Release notes", "releaseUrl"), ("Manual update guide", "guideUrl")):
             button = QPushButton(title)
             button.setObjectName("update-" + key)
             row = QHBoxLayout(button)
@@ -1249,6 +1285,48 @@ class UpdateView(QWidget):
             layout.addWidget(button)
         layout.addStretch()
 
+        # Dashboard reparents this into the fixed actions area below the scroll.
+        self.footer = QWidget()
+        self.footer.setObjectName("updateFooter")
+        self.footer.setStyleSheet("QWidget#updateFooter { border-top: 1px solid #202020; }")
+        footer = QVBoxLayout(self.footer)
+        footer.setContentsMargins(16, 12, 16, 12)
+        footer.setSpacing(8)
+        status_row = QHBoxLayout()
+        status_row.setSpacing(6)
+        self.spinner = OperationSpinner()
+        self.spinner.setObjectName("update-spinner")
+        self.spinner.hide()
+        status_row.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignTop)
+        self.status = plain_label("")
+        self.status.setWordWrap(True)
+        self.status.hide()
+        status_row.addWidget(self.status, 1)
+        self.percent = plain_label("", "#eeeeee")
+        self.percent.setObjectName("update-percent")
+        self.percent.hide()
+        status_row.addWidget(self.percent, 0, Qt.AlignmentFlag.AlignTop)
+        footer.addLayout(status_row)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("update-progress")
+        self.progress_bar.setAccessibleName("Update download progress")
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedHeight(5)
+        self.progress_bar.setStyleSheet(
+            "QProgressBar { background: #262626; border: none; border-radius: 2px; }"
+            "QProgressBar::chunk { background: #89b4fa; border-radius: 2px; }")
+        self.progress_bar.hide()
+        footer.addWidget(self.progress_bar)
+        self.transferred = plain_label("")
+        self.transferred.setObjectName("update-transferred")
+        self.transferred.hide()
+        footer.addWidget(self.transferred)
+        self.action = QPushButton()
+        self.action.setObjectName("update-action")
+        self.action.setStyleSheet("color: #89b4fa; border: 1px solid #294666; border-radius: 6px; padding: 8px;")
+        self.action.clicked.connect(self.update_requested)
+        footer.addWidget(self.action)
+
     def set_guide(self, guide, version):
         self.guide = guide
         self.version = version
@@ -1258,25 +1336,63 @@ class UpdateView(QWidget):
         self.versions.setText(f"Installed: v{current}\nLatest: v{latest}" if latest else
                               f"Installed: v{current}\nCheck for updates with Refresh.")
         self.description.setText(guide.get("description", ""))
-        self.steps.setText("\n\n".join(f"{index}. {step}" for index, step in enumerate(guide.get("steps", []), 1)))
+        self.steps.setText("\n".join(guide.get("steps", [])))
+        self.steps.setVisible(bool(self.steps.text()))
         command = guide.get("command", "")
         if self.command.text() != command:
             self.reset_copy_feedback()
+            self.manual_toggle.setChecked(not guide.get("canUpdate"))
         self.command.setText(command)
-        self.command_box.setVisible(bool(command))
+        self.manual_toggle.setVisible(bool(command) and bool(guide.get("canUpdate")))
+        self.toggle_command(self.manual_toggle.isChecked() or not guide.get("canUpdate"))
         self.update_action()
+
+    def toggle_command(self, expanded):
+        self.command_box.setVisible(bool(self.command.text()) and expanded)
+        self.manual_toggle.setText("Hide terminal command" if expanded else "Show terminal command")
+        dashboard = self.window()
+        if hasattr(dashboard, "fit_content") and dashboard.viewing_updates():
+            dashboard.fit_content()
 
     def update_action(self):
         available = bool(self.guide.get("canUpdate") and self.version.get("has_update"))
-        self.action.setVisible(available or self.running or self.completed or self.failed)
+        self.action.setVisible(available or self.running or self.failed)
         self.action.setEnabled(available and not self.running)
         self.action.setText("Updating…" if self.running else
                             "Retry update" if self.failed else self.guide.get("actionLabel", "Update now"))
+        self.spinner.set_running(self.running)
+        if not self.running:
+            self.progress_bar.hide()
+            self.percent.hide()
+            self.transferred.hide()
 
-    def show_progress(self, message):
+    def show_progress(self, event):
+        event = {"message": event} if isinstance(event, str) else event
+        message = event.get("message", "")
         self.status.setText(message)
         self.status.setStyleSheet("color: #89b4fa;")
         self.status.setVisible(bool(message))
+        self.spinner.set_running(self.running)
+        self.progress_bar.setVisible(self.running)
+        downloaded = event.get("downloadedBytes")
+        total = event.get("totalBytes")
+        downloading = self.running and event.get("stage") == "downloading"
+        known_total = downloading and isinstance(total, (int, float)) and total > 0
+        if known_total and isinstance(downloaded, (int, float)):
+            percent = min(100, max(0, int(downloaded * 100 / total)))
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(percent)
+            self.percent.setText(f"{percent}%")
+            self.transferred.setText(f"{downloaded / 1_000_000:.1f} / {total / 1_000_000:.1f} MB")
+        else:
+            self.progress_bar.setRange(0, 0)
+            self.transferred.setText(f"{downloaded / 1_000_000:.1f} MB downloaded"
+                                     if downloading and isinstance(downloaded, (int, float)) else "")
+        self.percent.setVisible(known_total and isinstance(downloaded, (int, float)))
+        self.transferred.setVisible(downloading and bool(self.transferred.text()))
+        dashboard = self.window()
+        if hasattr(dashboard, "fit_content") and dashboard.viewing_updates():
+            dashboard.fit_content()
 
     def copy_command(self):
         QApplication.clipboard().setText(self.guide.get("command", ""))
@@ -1411,6 +1527,8 @@ class Dashboard(QWidget):
         self.settings_footer_layout.setContentsMargins(16, 8, 16, 12)
         self.settings_footer.hide()
         self.panel_layout.addWidget(self.settings_footer)
+        self.panel_layout.addWidget(self.update_view.footer)
+        self.update_view.footer.hide()
         self.tray = QSystemTrayIcon(status_icon(), self)
         menu = QMenu(self)
         menu.setFont(panel_font())
@@ -1598,6 +1716,7 @@ class Dashboard(QWidget):
         self.updating = True
         self.update_view.running = True
         self.update_view.failed = False
+        self.update_view.completed = False
         self.update_view.update_action()
         self.update_view.show_progress("Preparing update…")
         self.update_thread = QThread(self)
@@ -1613,11 +1732,15 @@ class Dashboard(QWidget):
         self.update_thread.start()
 
     def on_update_finished(self, message, successful):
+        self.update_view.running = False
         self.update_view.completed = successful
         self.update_view.failed = not successful
         self.update_view.show_progress(message)
+        self.update_view.update_action()
         if not successful:
             self.update_view.status.setStyleSheet("color: #f5a3a3;")
+            if self.update_view.guide.get("command"):
+                self.update_view.manual_toggle.setChecked(True)
         self.fit_content()
 
     def update_thread_finished(self):
@@ -1662,6 +1785,7 @@ class Dashboard(QWidget):
         self.refresh_button.setVisible(not configuring and not about_page and not update_page)
         self.settings_button.setVisible(not configuring and not about_page and not update_page and not self.viewing_credit_details())
         self.settings_footer.setVisible(configuring)
+        self.update_view.footer.setVisible(update_page)
 
     def animate(self):
         self.animation_frame += 1
@@ -2126,7 +2250,9 @@ class Dashboard(QWidget):
         content.layout().activate()
         height = content.heightForWidth(self.width() - 2) if content.hasHeightForWidth() else content.sizeHint().height()
         height = max(height, content.minimumSizeHint().height())
-        natural_height = height + 57 + (self.settings_footer.sizeHint().height() if self.configuring() else 0)
+        footer_height = (self.settings_footer.sizeHint().height() if self.configuring() else
+                         self.update_view.footer.sizeHint().height() if self.viewing_updates() else 0)
+        natural_height = height + 57 + footer_height
         screen = self.screen().availableGeometry()
         bottom = self.geometry().bottom()
         self.resize(self.width(), min(max(180, natural_height), 720, max(180, screen.height() - 32)))

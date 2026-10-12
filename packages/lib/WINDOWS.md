@@ -52,8 +52,10 @@ settings/cache live in your user profile.
   The back arrow or Escape returns to usage, keeping your selection and position.
   For an installed app, **Download and open installer** downloads the new setup
   file, verifies its published SHA-256 checksum and opens the normal setup wizard.
-  Follow setup and leave **Launch AI Status** selected to restart. Downloads run
-  in the background with progress and a retry action if they fail. A portable
+  The fixed actions footer shows a spinner, download percentage and transferred
+  bytes, then verification and automatic setup opening. Follow setup and leave
+  **Launch AI Status** selected to restart. Progress survives closing the panel
+  or navigating away; errors offer **Retry update**. A portable
   app shows the steps to replace its folder, with links to downloads and the
   manual guide. Updates never start until you choose the update action.
 - Clicking outside the panel or closing it keeps the tray app running. Use **Exit** in its menu

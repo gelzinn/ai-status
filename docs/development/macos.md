@@ -7,16 +7,28 @@ selection commands as the other native panels.
 Run `bash packages/lib/install-macos.sh` from the repository root on a Mac
 to compile and launch the checkout's code, including local changes.
 Verify menu bar selection, popover open/close and Escape, manual and background
-refresh, settings Save/Cancel and reordering, reset-credit and update-guide navigation, About,
+refresh, settings Save/Cancel and reordering, reset-credit and update navigation, About,
 multiple displays, and launch at sign-in. Check both light and dark
 appearance, provider errors, missing credentials and cached results.
 
 The app's `--smoke --preview-directory /tmp/ai-status-previews` command renders
-the update notice, guide, current-version status, launch-error feedback and manual
-fallback alongside the other native pages. It validates guide decoding, CLI
-result handling and back navigation with a local fixture, without running an
-installer. On a supported installed build, manually verify the
-explicit updater action opens Terminal and preserves settings after updating.
+the update notice, compact update page, downloads with known and unknown sizes,
+verification, installation, automatic restart, completion, retry feedback and
+manual fallback alongside the other native pages. The local fixture validates
+live `update --json-progress` output before process exit, split JSON writes,
+unterminated final lines, large stdout/stderr output, navigation during a download,
+failure and retry. It never runs an installer or accesses the network.
+
+On a supported installed build, **Update now** downloads and installs inside
+the app. The actions footer uses the same spinner as Settings Save, shows real
+download percentage and transferred bytes when the server supplies a size, and
+keeps an indeterminate bar for other stages. The page explains that AI Status
+restarts automatically and keeps settings. Terminal commands are available
+under **Update manually…**. Verify that closing and reopening the panel or
+returning to usage preserves the running update, and that retry works after a
+network failure. The updater runs independently of short settings commands and
+survives the old app quitting so the installer can activate and reopen the new
+version.
 
 Quota notifications use `UserNotifications` under the AI Status app identity.
 The app requests permission on its first enabled snapshot; `--smoke` never

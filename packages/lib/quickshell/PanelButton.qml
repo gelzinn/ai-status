@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import "." as Plugin
 
 Rectangle {
@@ -22,7 +23,7 @@ Rectangle {
     implicitWidth: (iconName ? Style.space(16) : label.implicitWidth) + Style.space(hasLogo ? 44 : 20) + prefixWidth
     implicitHeight: multiline ? Math.max(Style.space(30), label.implicitHeight + Style.space(16)) : Style.space(30)
     radius: Style.cornerRadius
-    color: primary ? (mouse.containsMouse || activeFocus ? Qt.lighter(Color.accent, 1.12) : Color.accent)
+    color: primary ? (mouse.containsMouse || activeFocus ? Qt.lighter(Commons.Color.accent, 1.12) : Commons.Color.accent)
                    : mouse.containsMouse || activeFocus ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.09) : "transparent"
     border.width: outlined || activeFocus ? 1 : 0
     border.color: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.2)
