@@ -8,6 +8,7 @@ ICON_MODE_LABELS = {
     "bot": "Bot Icon (e.g. 󰚩)",
     "logo": "Provider Logo (image)",
 }
+USAGE_DISPLAY_LABELS = {"used": "Used", "remaining": "Remaining"}
 
 def get_selectable_items():
     cache = state.load_cache()
@@ -73,6 +74,7 @@ def run():
     show_metric = current_selected.get("show_metric", False)
     show_pct = current_selected.get("show_pct", True)
     icon_mode_idx = state.ICON_MODES.index(state.get_icon_mode(current_selected))
+    usage_display_idx = state.USAGE_DISPLAY_MODES.index(state.get_usage_display(current_selected))
 
     selected_idx = 0
     scroll_offset = 0
@@ -98,10 +100,10 @@ def run():
     def draw():
         nonlocal scroll_offset
         h, w = stdscr.getmaxyx()
-        list_height = max(1, h - 11)
+        list_height = max(1, h - 14)
 
-        if selected_idx >= 5:
-            prov_idx = selected_idx - 5
+        if selected_idx >= 7:
+            prov_idx = selected_idx - 7
             if prov_idx < scroll_offset:
                 scroll_offset = prov_idx
             if prov_idx >= scroll_offset + list_height:
@@ -161,25 +163,30 @@ def run():
         attr = curses.A_REVERSE if selected_idx == 5 else curses.A_NORMAL
         safe_addstr(9, 0, icon_text, attr)
 
+        usage_label = USAGE_DISPLAY_LABELS[state.USAGE_DISPLAY_MODES[usage_display_idx]]
+        usage_text = f"   Usage display: < {usage_label} >"
+        attr = curses.A_REVERSE if selected_idx == 6 else curses.A_NORMAL
+        safe_addstr(10, 0, usage_text[:w], attr)
+
         # Header for providers
         header_text = "--- Providers List (SPACE to toggle, Shift+J/K to reorder) ---"
         if len(header_text) > w:
             header_text = header_text[:w]
-        safe_addstr(11, 0, header_text, curses.A_DIM)
+        safe_addstr(12, 0, header_text, curses.A_DIM)
 
         # Draw providers list
         visible = order[scroll_offset:scroll_offset + list_height]
         for i, prov in enumerate(visible):
-            y = 12 + i
+            y = 13 + i
             if y >= h - 1:
                 break
             enabled_flag = prov in enabled_set
             checkbox = "[x]" if enabled_flag else "[ ]"
-            prefix = " > " if scroll_offset + i + 6 == selected_idx else "   "
+            prefix = " > " if scroll_offset + i + 7 == selected_idx else "   "
             text = f"{prefix}{checkbox} {prov}"
             if len(text) > w:
                 text = text[:w]
-            attr = curses.A_REVERSE if scroll_offset + i + 6 == selected_idx else curses.A_NORMAL
+            attr = curses.A_REVERSE if scroll_offset + i + 7 == selected_idx else curses.A_NORMAL
             safe_addstr(y, 0, text, attr)
 
         help_text = (
@@ -192,7 +199,7 @@ def run():
 
         stdscr.refresh()
 
-    max_idx = 6 + len(order) - 1 if order else 5
+    max_idx = 7 + len(order) - 1 if order else 6
 
     while True:
         draw()
@@ -216,6 +223,7 @@ def run():
                     final_show_pct = True
                     
                 new_selected = {
+                    **current_selected,
                     "provider": sel_item["provider"],
                     "idx": sel_item["idx"],
                     "metric": sel_item["metric"],
@@ -223,7 +231,8 @@ def run():
                     "show_model": show_model,
                     "show_metric": show_metric,
                     "show_pct": final_show_pct,
-                    "icon_mode": state.ICON_MODES[icon_mode_idx]
+                    "icon_mode": state.ICON_MODES[icon_mode_idx],
+                    "usage_display": state.USAGE_DISPLAY_MODES[usage_display_idx],
                 }
                 state.save_selected(new_selected)
                 
@@ -243,12 +252,18 @@ def run():
             elif selected_idx == 5:
                 icon_mode_idx = (icon_mode_idx - 1) % len(state.ICON_MODES)
                 selected_changed = True
+            elif selected_idx == 6:
+                usage_display_idx = (usage_display_idx - 1) % len(state.USAGE_DISPLAY_MODES)
+                selected_changed = True
         elif key in (curses.KEY_RIGHT,):
             if selected_idx == 0:
                 selected_item_idx = (selected_item_idx + 1) % len(selectable_items)
                 selected_changed = True
             elif selected_idx == 5:
                 icon_mode_idx = (icon_mode_idx + 1) % len(state.ICON_MODES)
+                selected_changed = True
+            elif selected_idx == 6:
+                usage_display_idx = (usage_display_idx + 1) % len(state.USAGE_DISPLAY_MODES)
                 selected_changed = True
         elif key == ord(" "):
             if selected_idx == 0:
@@ -269,33 +284,36 @@ def run():
             elif selected_idx == 5:
                 icon_mode_idx = (icon_mode_idx + 1) % len(state.ICON_MODES)
                 selected_changed = True
-            elif selected_idx >= 6:
-                prov = order[selected_idx - 6]
+            elif selected_idx == 6:
+                usage_display_idx = (usage_display_idx + 1) % len(state.USAGE_DISPLAY_MODES)
+                selected_changed = True
+            elif selected_idx >= 7:
+                prov = order[selected_idx - 7]
                 if prov in enabled_set:
                     enabled_set.remove(prov)
                 else:
                     enabled_set.add(prov)
                 config_changed = True
         elif key in (curses.KEY_PPAGE,):
-            if selected_idx >= 6:
-                selected_idx = max(6, selected_idx - 10)
+            if selected_idx >= 7:
+                selected_idx = max(7, selected_idx - 10)
             else:
                 selected_idx = 0
         elif key in (curses.KEY_NPAGE,):
-            if selected_idx >= 6:
+            if selected_idx >= 7:
                 selected_idx = min(max_idx, selected_idx + 10)
             else:
                 selected_idx = max_idx
         elif key == ord("K"):
-            if selected_idx > 6:
-                idx1 = selected_idx - 6
+            if selected_idx > 7:
+                idx1 = selected_idx - 7
                 idx2 = idx1 - 1
                 order[idx1], order[idx2] = order[idx2], order[idx1]
                 selected_idx -= 1
                 config_changed = True
         elif key == ord("J"):
-            if selected_idx >= 6 and selected_idx < max_idx:
-                idx1 = selected_idx - 6
+            if selected_idx >= 7 and selected_idx < max_idx:
+                idx1 = selected_idx - 7
                 idx2 = idx1 + 1
                 order[idx1], order[idx2] = order[idx2], order[idx1]
                 selected_idx += 1

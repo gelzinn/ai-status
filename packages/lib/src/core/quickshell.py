@@ -1,7 +1,6 @@
 """Structured snapshots for the Omarchy plugin; no Waybar/Pango side effects."""
 
 import json
-import math
 import os
 import threading
 import time
@@ -96,6 +95,7 @@ def settings_snapshot(selected):
             ("show_metric", False), ("show_pct", True),
         )},
         "iconMode": state.get_icon_mode(selected),
+        "usageDisplay": state.get_usage_display(selected),
     }
 
 
@@ -124,8 +124,11 @@ def save_settings(payload):
             or not isinstance(choice.get("metric"), str) or not choice["metric"]):
         raise ValueError("Choose an enabled provider and limit")
     selected = dict(state.load_selected() or {})
+    usage_display = payload.get("usageDisplay", state.get_usage_display(selected))
+    if usage_display not in state.USAGE_DISPLAY_MODES:
+        raise ValueError("Invalid usage display")
     selected.update({key: choice[key] for key in ("provider", "idx", "metric")})
-    selected.update({key: display[key] for key in fields}, icon_mode=icon_mode)
+    selected.update({key: display[key] for key in fields}, icon_mode=icon_mode, usage_display=usage_display)
     # Report I/O errors to the form instead of using the best-effort wrappers.
     config.save_connection_order(enabled)
     state._save_json(state.SELECTED_FILE, selected)
@@ -138,13 +141,11 @@ def usable_metrics(entry):
         return []
     metrics = []
     for metric in entry.get("metrics", []):
-        try:
-            percentage = float(metric["percentage"] if metric.get("percentage") is not None else metric["amount"])
-        except (KeyError, TypeError, ValueError):
-            if metric.get("percentage") is None and isinstance(metric.get("value"), str) and metric["value"]:
-                metrics.append(metric)
-            continue
-        if math.isfinite(percentage):
+        if metric.get("percentage") is not None:
+            usable = render.metric_percentage(metric) is not None
+        else:
+            usable = render.metric_is_amount(metric) or (isinstance(metric.get("value"), str) and bool(metric["value"]))
+        if usable:
             metrics.append(metric)
     return metrics
 
@@ -177,14 +178,14 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
         for entry in entries:
             metrics = []
             for metric in sorted(usable_metrics(entry), key=render.metric_sort_key):
-                percentage = render.metric_percentage(metric)
+                percentage = render.metric_percentage(metric, selected)
                 detail = render.metric_detail(metric)
                 metrics.append({
                     "key": render.metric_key(metric),
                     "type": metric.get("type", "generic"),
-                    "name": render.metric_title(metric),
+                    "name": render.metric_title(metric, selected),
                     "percentage": percentage,
-                    "value": render.metric_value(metric),
+                    "value": render.metric_value(metric, selected),
                     "hasPercentage": percentage is not None,
                     "isAmount": render.metric_is_amount(metric),
                     "amount": metric.get("amount"),
