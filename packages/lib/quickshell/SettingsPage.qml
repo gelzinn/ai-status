@@ -93,7 +93,7 @@ Column {
     readonly property var selectedChoice: choices.find(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) || null
     readonly property string selectedLabel: selectedChoice ? selectedChoice.groupLabel + " · " + selectedChoice.label : "Choose a provider and limit"
     readonly property bool valid: enabledProviders.length > 0 && Object.keys(display).some(key => display[key]) && ["used", "remaining"].indexOf(usageDisplay) !== -1 && choices.some(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) && validThresholds(alertThresholds) && (alertSettings.rules || []).every(rule => validThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] : rule.thresholds.join(",")))
-    spacing: Style.space(22)
+    spacing: Style.space(16)
     enabled: !Plugin.Model.settingsSaving
     onOrderChanged: saved = false
     onEnabledProvidersChanged: saved = false
@@ -221,6 +221,23 @@ Column {
         font.pixelSize: Style.font.body
         wrapMode: Text.WordWrap
     }
+    component SectionHeading: Column {
+        id: heading
+        property string title: ""
+        property string description: ""
+        width: parent.width
+        spacing: Style.space(4)
+        Label {
+            text: heading.title
+            font.bold: true
+        }
+        Label {
+            visible: text !== ""
+            text: heading.description
+            opacity: 0.5
+            font.pixelSize: Style.font.caption
+        }
+    }
     component Button: Plugin.PanelButton {
         foreground: root.foreground
         fontFamily: root.fontFamily
@@ -288,8 +305,10 @@ Column {
         visible: root.section === "general"
         width: parent.width
         spacing: Style.space(8)
-        Label { text: "Active provider & limit"; font.bold: true }
-        Label { text: "Choose the account and limit shown in the bar."; opacity: 0.5; font.pixelSize: Style.font.caption }
+        SectionHeading {
+            title: "Active provider & limit"
+            description: "Choose the account and limit shown in the bar."
+        }
         Plugin.PanelSelect {
             id: providerSelector
             objectName: "active-provider"
@@ -313,7 +332,7 @@ Column {
         visible: root.section === "appearance"
         width: parent.width
         spacing: Style.space(8)
-        Label { text: "Usage display"; font.bold: true }
+        SectionHeading { title: "Usage display" }
         Plugin.PanelSelect {
             id: usageDisplaySelector
             objectName: "usage-display"
@@ -332,7 +351,7 @@ Column {
         visible: root.section === "appearance"
         width: parent.width
         spacing: Style.space(4)
-        Label { text: "Bar display"; font.bold: true }
+        SectionHeading { title: "Bar display" }
         Repeater {
             model: [
                 {key: "show_provider", label: "Provider name"},
@@ -374,8 +393,10 @@ Column {
         visible: root.section === "alerts"
         width: parent.width
         spacing: Style.space(8)
-        Label { text: "Quota alerts"; font.bold: true }
-        Label { text: "Alerts use quota consumed. Recovery requires a successful fresh check of all applicable limits."; opacity: 0.5; font.pixelSize: Style.font.caption }
+        SectionHeading {
+            title: "Quota alerts"
+            description: "Alerts use quota consumed. Recovery requires a successful fresh check of all applicable limits."
+        }
         Label { text: "Selected account & limit: " + root.selectedLabel; font.pixelSize: Style.font.caption }
         Button {
             id: alertAccountButton
@@ -451,11 +472,9 @@ Column {
         visible: root.section === "providers"
         width: parent.width
         spacing: Style.space(6)
-        Label { text: "Providers"; font.bold: true }
-        Label {
-            text: "Enable providers and set their order in the usage page."
-            opacity: 0.5
-            font.pixelSize: Style.font.caption
+        SectionHeading {
+            title: "Providers"
+            description: "Enable providers and set their order in the usage page."
         }
         Repeater {
             id: providerRows

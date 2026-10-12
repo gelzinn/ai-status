@@ -10,6 +10,8 @@ The strip scrolls horizontally when the tabs exceed the available width and
 reveals the selected tab. It remains above the scrolling section content;
 the panel header and Save/Cancel actions stay visible as well. The scrolling
 viewports reach the panel edges and separators, with padding inside their content.
+The preview fixtures use 12 px above and between tabs, 4 px between section
+titles and descriptions, and 16 px between General's selector and About action.
 
 - `quickshell-*.png` uses Qt Quick Test's offscreen software renderer and the
   unchanged dark shell fixtures in `packages/lib/tests/qml/`. The fixtures use a

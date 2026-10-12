@@ -793,6 +793,23 @@ class UsageWorker(QObject):
             self.finished.emit(data)
 
 
+class SettingsHeading(QWidget):
+    """A compact title and optional description shared by Settings sections."""
+    def __init__(self, title, description=None, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        self.title = plain_label(title, "#eeeeee")
+        self.title.setWordWrap(True)
+        layout.addWidget(self.title)
+        self.description = None
+        if description is not None:
+            self.description = plain_label(description, "#666666")
+            self.description.setWordWrap(True)
+            layout.addWidget(self.description)
+
+
 class SettingsNavigation(QScrollArea):
     """A single row of tabs that scrolls independently from Settings content."""
     def __init__(self, parent=None):
@@ -867,7 +884,7 @@ class ProviderSettings(QWidget):
         navigation_content = QWidget()
         navigation_layout = QHBoxLayout(navigation_content)
         navigation_layout.setContentsMargins(16, 12, 16, 0)
-        navigation_layout.setSpacing(4)
+        navigation_layout.setSpacing(12)
         navigation_layout.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
         self.navigation.setWidget(navigation_content)
         self.section_group = QButtonGroup(self)
@@ -896,10 +913,7 @@ class ProviderSettings(QWidget):
         self.navigation.setFixedHeight(navigation_content.sizeHint().height())
         layout.addStretch()
         general = self.sections["general"].layout()
-        general.addWidget(plain_label("Active provider & limit", "#eeeeee"))
-        hint = plain_label("Choose the account and limit shown in the bar.", "#666666")
-        hint.setWordWrap(True)
-        general.addWidget(hint)
+        general.addWidget(SettingsHeading("Active provider & limit", "Choose the account and limit shown in the bar."))
         self.active = QComboBox()
         self.active.setIconSize(QSize(16, 16))
         self.active.setAccessibleName("Active provider and limit")
@@ -908,21 +922,21 @@ class ProviderSettings(QWidget):
         self.startup.setVisible(paths.IS_WINDOWS)
         self.startup.setChecked(startup_enabled())
         general.addWidget(self.startup)
-        general.addSpacing(14)
+        general.addSpacing(8)
         self.about_button = QPushButton("About AI Status")
         self.about_button.clicked.connect(self.about_requested)
         general.addWidget(self.about_button)
         appearance = self.sections["appearance"].layout()
         selected = state.load_selected() or {}
-        appearance.addWidget(plain_label("Usage display", "#eeeeee"))
+        appearance.addWidget(SettingsHeading("Usage display"))
         self.usage_display = QComboBox()
         self.usage_display.setAccessibleName("Usage display")
         for value, label in (("used", "Used"), ("remaining", "Remaining")):
             self.usage_display.addItem(label, value)
         self.usage_display.setCurrentIndex(self.usage_display.findData(state.get_usage_display(selected)))
         appearance.addWidget(self.usage_display)
-        appearance.addSpacing(14)
-        appearance.addWidget(plain_label("Bar display", "#eeeeee"))
+        appearance.addSpacing(8)
+        appearance.addWidget(SettingsHeading("Bar display"))
         self.display = {}
         for key, label, default in (("show_provider", "Provider name", True),
                                     ("show_model", "Model / plan", True),
@@ -939,10 +953,7 @@ class ProviderSettings(QWidget):
         self.icon_mode.setCurrentIndex(self.icon_mode.findData(state.get_icon_mode(selected)))
         appearance.addWidget(self.icon_mode)
         providers = self.sections["providers"].layout()
-        providers.addWidget(plain_label("Providers", "#eeeeee"))
-        hint = plain_label("Enable providers and set their order.", "#666666")
-        hint.setWordWrap(True)
-        providers.addWidget(hint)
+        providers.addWidget(SettingsHeading("Providers", "Enable providers and set their order."))
         self.providers = ProviderList()
         enabled = config.enabled_connection_order()
         available = config.available_connections()
@@ -1024,15 +1035,14 @@ class ProviderSettings(QWidget):
             }
             for rule in self.notification_settings.get("rules", [])
         }
-        layout.addWidget(plain_label("Active account & limit", "#eeeeee"))
-        self.notification_rule_label = plain_label("", "#666666")
-        self.notification_rule_label.setWordWrap(True)
-        layout.addWidget(self.notification_rule_label)
+        heading = SettingsHeading("Active account & limit", "")
+        self.notification_rule_label = heading.description
+        layout.addWidget(heading)
         self.notification_change_limit = QPushButton("Change in General")
         self.notification_change_limit.clicked.connect(self.change_active_limit)
         layout.addWidget(self.notification_change_limit)
-        layout.addSpacing(14)
-        layout.addWidget(plain_label("Quota notifications", "#eeeeee"))
+        layout.addSpacing(8)
+        layout.addWidget(SettingsHeading("Quota notifications"))
         self.notifications_enabled = QCheckBox("Notify before quota limits")
         self.notifications_enabled.setChecked(self.notification_settings["enabled"])
         layout.addWidget(self.notifications_enabled)
@@ -1077,8 +1087,8 @@ class ProviderSettings(QWidget):
         work_times.addWidget(self.notification_work_start)
         work_times.addWidget(self.notification_work_end)
         layout.addLayout(work_times)
-        layout.addSpacing(14)
-        layout.addWidget(plain_label("Account & limit override", "#eeeeee"))
+        layout.addSpacing(8)
+        layout.addWidget(SettingsHeading("Account & limit override"))
         self.notification_rule_custom = QCheckBox("Customize this account and limit")
         layout.addWidget(self.notification_rule_custom)
         self.notification_rule_enabled = QCheckBox("Notify for this account and limit")

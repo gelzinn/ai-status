@@ -23,6 +23,7 @@ Ui.Panel {
     readonly property var creditProvider: creditSelection ? Plugin.Model.snapshot.providers.find(entry => entry.id === creditSelection.id && entry.idx === creditSelection.idx) || null : null
     readonly property var creditEntry: creditSelection && creditProvider ? (creditProvider.monetaryCredits || []).find(entry => entry.id === creditSelection.creditId) || null : null
     readonly property string panelFont: bar ? bar.fontFamily : Style.font.family
+    readonly property real settingsTabGap: Style.space(12)
 
     component IconButton: Plugin.PanelIconButton {
         bar: root.bar
@@ -293,7 +294,7 @@ Ui.Panel {
                 anchors.top: divider.bottom
                 x: -panel.padding
                 width: parent.width + panel.padding * 2
-                height: sectionTabs.height + Style.space(12)
+                height: sectionTabs.height + root.settingsTabGap
                 contentWidth: sectionTabs.width + panel.padding * 2
                 contentHeight: height
                 clip: true
@@ -329,8 +330,8 @@ Ui.Panel {
                 Row {
                     id: sectionTabs
                     x: panel.padding
-                    y: Style.space(12)
-                    spacing: Style.space(6)
+                    y: root.settingsTabGap
+                    spacing: root.settingsTabGap
                     Repeater {
                         id: sectionButtons
                         model: settings.sections

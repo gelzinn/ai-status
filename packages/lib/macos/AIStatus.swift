@@ -1089,21 +1089,36 @@ struct SettingsNavigationButton: View {
 
 struct SettingsNavigation: View {
     @ObservedObject var model: Model
+    private let tabGap: CGFloat = 12
     var body: some View {
         ScrollViewReader { scroll in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
+                HStack(spacing: tabGap) {
                     ForEach(SettingsSection.allCases) { section in
                         SettingsNavigationButton(section: section, selected: model.settingsSection == section,
                                                  action: { model.showSettingsSection(section) },
                                                  focusChanged: { scroll.scrollTo(section.id, anchor: .center) })
                             .id(section.id)
                     }
-                }.padding(.horizontal, 16).padding(.vertical, 11)
-            }.frame(height: 56)
+                }.padding(.horizontal, 16).padding(.vertical, tabGap)
+            }.frame(height: 34 + tabGap * 2)
                 .onAppear { scroll.scrollTo(model.settingsSection.id, anchor: .center) }
                 .onChange(of: model.settingsSection) { scroll.scrollTo($0.id, anchor: .center) }
         }.disabled(model.settingsSaving)
+    }
+}
+
+struct SettingsHeading: View {
+    let title: String
+    var detail: String? = nil
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).foregroundColor(Palette.bright)
+            if let detail = detail {
+                Text(detail).font(.custom("GeistMono-Regular", size: 11))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 }
 
@@ -1112,11 +1127,9 @@ struct SettingsPage: View {
     private let fields = [("show_provider", "Provider name"), ("show_model", "Model / plan"),
                           ("show_metric", "Limit name"), ("show_pct", "Usage value")]
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(model.settingsSection.title).foregroundColor(Palette.bright)
-                Text(model.settingsSection.detail).font(.custom("GeistMono-Regular", size: 11))
-            }
+        VStack(alignment: .leading, spacing: 16) {
+            SettingsHeading(title: model.settingsSection.title,
+                            detail: model.settingsSection == .general ? nil : model.settingsSection.detail)
             switch model.settingsSection {
             case .general:
                 general
@@ -1124,8 +1137,7 @@ struct SettingsPage: View {
                 appearance
             case .alerts:
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Active account & limit").foregroundColor(Palette.bright)
-                    Text(model.settingsSelectionLabel).fixedSize(horizontal: false, vertical: true)
+                    SettingsHeading(title: "Active account & limit", detail: model.settingsSelectionLabel)
                     HoverButton(bordered: true, action: { model.showSettingsSection(.general) }) {
                         HStack { Text("Change in General"); Spacer(); PanelIcon(name: "arrow-right") }
                     }
@@ -1138,9 +1150,9 @@ struct SettingsPage: View {
     }
 
     private var general: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Active provider & limit").foregroundColor(Palette.bright)
+                SettingsHeading(title: "Active provider & limit", detail: SettingsSection.general.detail)
                 Picker("Active provider & limit", selection: Binding(get: { model.draft.selected }, set: {
                     model.draft.selected = $0; model.draft.saved = false
                 })) {
@@ -1158,9 +1170,9 @@ struct SettingsPage: View {
     }
 
     private var appearance: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Usage display").foregroundColor(Palette.bright)
+                SettingsHeading(title: "Usage display")
                 Picker("Usage display", selection: Binding(get: { model.draft.usageDisplay }, set: {
                     model.draft.usageDisplay = $0; model.draft.saved = false
                 })) {
@@ -1169,7 +1181,7 @@ struct SettingsPage: View {
                 }.labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
             }
             VStack(alignment: .leading, spacing: 8) {
-                Text("Bar display").foregroundColor(Palette.bright)
+                SettingsHeading(title: "Bar display")
                 ForEach(fields, id: \.0) { key, label in
                     Toggle(label, isOn: Binding(get: { model.draft.display[key] ?? false }, set: {
                         model.draft.display[key] = $0; model.draft.saved = false
@@ -1212,7 +1224,7 @@ struct NotificationSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Group {
-                Text("Quota notifications").foregroundColor(Palette.bright)
+                SettingsHeading(title: "Quota notifications")
                 Toggle("Enable quota alerts", isOn: Binding(get: { model.draft.notifications.enabled }, set: {
                     model.draft.notifications.enabled = $0; model.draft.saved = false
                 })).toggleStyle(.checkbox)
