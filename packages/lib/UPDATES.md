@@ -2,7 +2,14 @@
 
 Updates are optional. The **Update available** link opens an in-app guide for
 your installation. Opening the guide does not download or install anything.
-The guide includes release notes and an update action where supported.
+The page shows the new stable release's GitHub notes under **What's new**, using
+the same source as the web changelog. Long notes scroll above the fixed footer.
+**Release notes**, **Update manually…** and **Installation guide** use outlined
+controls. **Update now** starts the update; result notices appear on the left
+with a compact **Retry** or **Done** action on the right.
+Windows and the native macOS app show a spinner and progress bar in the fixed
+actions footer. Downloads show the percentage and transferred bytes when the
+server supplies a size; other stages use an indeterminate bar.
 
 You can also start that action explicitly from the command line:
 
@@ -16,14 +23,16 @@ ai-status update
 | Windows portable ZIP | Opens instructions for downloading and replacing the portable copy |
 | Omarchy plugin | Opens a terminal with `omarchy plugin update io.github.gelzinn.ai-status --yes && omarchy restart shell` |
 | Linux public installer | Opens a terminal with the public installer, preserving the desktop bar |
-| macOS public installer | Opens Terminal with the public installer, preserving native or SwiftBar mode |
+| macOS native public installer | Downloads and verifies the stable package inside the app, installs it, then reopens AI Status automatically |
+| macOS SwiftBar installer | Opens Terminal with the public installer, preserving stream or periodic mode |
 | Checkout or custom location | Shows manual instructions; does not replace the checkout |
 
-The command reports when the installer or terminal has opened. This means the
-update has started; installation still needs to finish in that window. Download,
-checksum, and launch failures are shown in the app, or on stderr with a nonzero
-exit status from the CLI. If no supported Linux terminal is available, run the
-command from the guide in your own terminal.
+Windows reports when setup opens; finish the installation in that window.
+Linux and SwiftBar report when the terminal opens; follow the download and
+installation there. The native macOS app follows the update through installation
+and briefly closes to reopen the new version. Errors offer a retry in the app,
+or appear on stderr with a nonzero CLI exit status. If no supported Linux terminal
+is available, expand **Update manually…** and run the command in your own terminal.
 
 Only newer stable versions trigger the notice. Drafts, prereleases, and older
 version numbers are excluded. There are no forced updates or support-expiration
@@ -37,10 +46,15 @@ is preserved. Checking for a release does not install it.
 
 ## Windows
 
-For an installed copy, **Download and open installer** downloads the exact
+For an installed copy, **Update now** downloads the exact
 stable release installer and its `SHA256SUMS` file from GitHub. The installer
 is opened only after its checksum matches. It remains a normal setup wizard;
 the app does not silently replace itself.
+
+The footer shows checking, download, verification and automatic setup opening.
+The progress remains available when you close the panel or navigate back to usage.
+Once setup opens, the footer shows **Updater opened** with **Done**. Installation
+continues in Setup; this handoff does not claim that installation has finished.
 
 Keep your existing installation folder. If setup asks to close AI Status,
 allow it to do so, and leave **Launch AI Status** selected at the end to start
@@ -62,10 +76,18 @@ The public installer handles fresh installs and upgrades:
 curl -fsSL https://ai-status.gelzin.com/install/macos | bash
 ```
 
-The in-app action preserves the detected native app, SwiftBar stream, or
-SwiftBar periodic mode. For the native app it also keeps login startup disabled
-when there is no existing AI Status LaunchAgent. The installer stages and
-validates the release before stopping the old app, then restarts AI Status.
+For a supported native installation, **Update now** downloads the versioned
+package and checks its SHA-256 checksum inside the app. The footer follows
+checking, downloading, verification, installation and automatic restart. You can
+navigate away and return without losing progress. **Update manually…** reveals
+the copyable Terminal command when needed.
+
+The action preserves native, SwiftBar stream or SwiftBar periodic mode; SwiftBar
+continues to use Terminal. Native updates keep login startup disabled when there
+is no existing AI Status LaunchAgent. The installer stages and validates the
+release before stopping the old app, then restarts AI Status. The independent
+updater continues through activation even after the old app closes. Failed
+installation restores the previous version and keeps settings.
 See [macOS installation](MACOS.md) for prerequisites and explicit mode flags.
 
 ## Linux update command

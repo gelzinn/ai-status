@@ -7,7 +7,9 @@ import subprocess
 import sys
 import time
 import threading
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import urlsplit
 
 from . import __version__
 from . import config as cfgmod
@@ -303,6 +305,7 @@ def run_provider(provider_dir, connection=None):
         return _cached_or_error(provider_dir, "Unable to read usage; check credentials and provider response format.", connection, fingerprint, secrets, use_cache)
 
 _latest_version = None
+_latest_release_notes = None
 
 
 def stable_version(value):
@@ -318,8 +321,52 @@ def newer_version(latest, current):
     return latest_parts is not None and current_parts is not None and latest_parts > current_parts
 
 
+def _release_notes(data, tag):
+    """Keep the GitHub body used by the website; malformed notes never leak out."""
+    body = data.get("body")
+    if body is None or isinstance(body, str) and not body.strip():
+        return None
+    name, url, published = data.get("name"), data.get("html_url"), data.get("published_at")
+    if (not isinstance(body, str) or name is not None and not isinstance(name, str)
+            or not isinstance(url, str) or any(ord(character) <= 32 or ord(character) == 127 for character in url)
+            or not isinstance(published, str)):
+        return None
+    try:
+        location = urlsplit(url)
+        if (location.scheme != "https" or location.hostname != "github.com" or location.username is not None
+                or location.port not in (None, 443) or location.query or location.fragment
+                or location.path != "/gelzinn/ai-status/releases/tag/" + tag):
+            return None
+        datetime.fromisoformat(published.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    # Match markdown.tsx's releaseHeading: only a redundant first H2 with a
+    # version link and the publication date is removed. Keep every other note,
+    # heading, link, image and code block as authored on GitHub.
+    version, date = tag[1:], published[:10]
+    heading = re.match(
+        r"\A(?:[ \t]*\r?\n)*[ ]{0,3}##[ \t]+\[" + re.escape(version)
+        + r"\]\(<?(?P<url>https://github\.com/[^\s)>]+)>?\)[ \t]+\(" + re.escape(date)
+        + r"\)[ \t]*(?:[ \t]+#+[ \t]*)?(?:\r?\n|$)", body)
+    if heading and ("/compare/" in heading["url"] or heading["url"].endswith("/commits/" + tag)):
+        body = body[heading.end():].lstrip("\r\n")
+    if not body.strip():
+        return None
+    return {"version": version, "title": name.strip() if name and name.strip() else tag,
+            "body": body, "url": url}
+
+
+def get_release_notes(latest):
+    """Read cached notes without I/O; never associate them with another release."""
+    notes = _latest_release_notes
+    if stable_version(latest) is None or not notes or notes["version"] != latest.removeprefix("v"):
+        return None
+    return dict(notes)
+
+
 def check_for_updates():
-    global _latest_version
+    global _latest_version, _latest_release_notes
     try:
         data = json.loads(request(
             "https://api.github.com/repos/gelzinn/ai-status/releases/latest",
@@ -329,11 +376,16 @@ def check_for_updates():
             },
             timeout=5,
         ))
-        tag = data.get("tag_name", "")
-        if (data.get("draft") or data.get("prerelease") or not isinstance(tag, str)
+        tag = data.get("tag_name", "") if isinstance(data, dict) else None
+        if (not isinstance(data, dict) or any(type(data.get(flag, False)) is not bool for flag in ("draft", "prerelease"))
+                or data.get("draft") or data.get("prerelease") or not isinstance(tag, str)
                 or not tag.startswith("v") or stable_version(tag) is None):
             _latest_version = None
+            _latest_release_notes = None
             return
+        # Notes are optional: a malformed body must not hide a valid version.
+        # A failed request/JSON read keeps the previous good response in memory.
+        _latest_release_notes = _release_notes(data, tag)
         _latest_version = tag[1:]
         return _latest_version
     except Exception:

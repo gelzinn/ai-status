@@ -24,14 +24,20 @@ AUTOSTART=true
 SKIP_CHECK=false
 ROLLBACK=false
 RELEASE_TAG=""
+PACKAGE_FILE=""
+CHECKSUMS_FILE=""
+JSON_PROGRESS=false
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --mode|--version) [ $# -ge 2 ] && [ -n "$2" ] || { echo "Missing value for $1" >&2; exit 1; } ;;
+        --mode|--version|--package|--checksums) [ $# -ge 2 ] && [ -n "$2" ] || { echo "Missing value for $1" >&2; exit 1; } ;;
     esac
     case "$1" in
         --mode) MODE="$2"; shift 2 ;;
         --version) RELEASE_TAG="v${2#v}"; shift 2 ;;
+        --package) PACKAGE_FILE="$2"; shift 2 ;;
+        --checksums) CHECKSUMS_FILE="$2"; shift 2 ;;
+        --json-progress) JSON_PROGRESS=true; shift ;;
         --rollback) ROLLBACK=true; shift ;;
         --no-start) NO_START=true; shift ;;
         --no-autostart) AUTOSTART=false; shift ;;
@@ -45,10 +51,32 @@ if [ -n "$RELEASE_TAG" ]; then
     [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid --version: expected a stable tag" >&2; exit 1; }
 fi
 [ "$ROLLBACK" = false ] || [ -z "$RELEASE_TAG" ] || { echo "Use either --rollback or --version" >&2; exit 1; }
+if [ -n "$PACKAGE_FILE" ] || [ -n "$CHECKSUMS_FILE" ]; then
+    [ -f "$PACKAGE_FILE" ] && [ -f "$CHECKSUMS_FILE" ] && [ -n "$RELEASE_TAG" ] && [ "$ROLLBACK" = false ] || {
+        echo "--package requires --checksums, --version, and an existing release archive" >&2; exit 1;
+    }
+fi
 [ "$(uname -s)" = Darwin ] || { echo "This installer requires macOS. On Linux use /install." >&2; exit 1; }
 command -v python3 >/dev/null || { echo "Python 3.10+ is required. Install it with: brew install python" >&2; exit 1; }
 PYTHON="$(python3 -c 'import sys; print(sys.executable)')"
 "$PYTHON" -c 'import sys; assert sys.version_info >= (3, 10), "Python 3.10+ is required"'
+# Keep stdout machine-readable when the native app consumes progress. All normal
+# installer/build output stays on stderr; descriptor 3 carries only JSON events.
+exec 3>&1
+if [ "$JSON_PROGRESS" = true ]; then exec 1>&2; fi
+progress() {
+    if [ "$JSON_PROGRESS" = true ]; then
+        "$PYTHON" - "$1" "$2" >&3 <<'PY'
+import json, os, sys
+try:
+    print(json.dumps({"stage": sys.argv[1], "message": sys.argv[2]}), flush=True)
+except BrokenPipeError:
+    # The previous app may close its progress reader during restart. Progress
+    # output must never interrupt activation or trigger an unnecessary rollback.
+    sys.stdout = open(os.devnull, "w")
+PY
+    fi
+}
 if [ "$MODE" = native ]; then
     command -v swiftc >/dev/null || { echo "Install Xcode Command Line Tools: xcode-select --install" >&2; exit 1; }
     if [ "$SKIP_CHECK" = false ]; then
@@ -65,7 +93,7 @@ if [ "$SCRIPT_IS_FILE" = true ]; then
         USE_LOCAL_LIB=true
     fi
 fi
-[ "$USE_LOCAL_LIB" = false ] || [ -z "$RELEASE_TAG" ] || { echo "--version requires the public installer, not a checkout" >&2; exit 1; }
+[ "$USE_LOCAL_LIB" = false ] || [ -z "$RELEASE_TAG" ] || [ -n "$PACKAGE_FILE" ] || { echo "--version requires the public installer, not a checkout" >&2; exit 1; }
 
 mkdir -p "$(dirname "$INSTALL_DIR")"
 LOCK_DIR="$(dirname "$INSTALL_DIR")/.ai-status-update.lock"
@@ -121,10 +149,10 @@ copy_library() {
 if [ "$ROLLBACK" = true ]; then
     [ -d "$PREVIOUS_DIR/packages/lib" ] || { echo "No previous installation is available" >&2; exit 1; }
     copy_library "$PREVIOUS_DIR"
-elif [ "$RUNNING_FROM_INSTALL" = true ]; then
+elif [ "$RUNNING_FROM_INSTALL" = true ] && [ -z "$PACKAGE_FILE" ]; then
     [ -z "$RELEASE_TAG" ] || { echo "Use the public installer to install a specific version" >&2; exit 1; }
     copy_library "$INSTALL_DIR"
-elif [ "$USE_LOCAL_LIB" = true ]; then
+elif [ "$USE_LOCAL_LIB" = true ] && [ -z "$PACKAGE_FILE" ]; then
     copy_library "$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
     git -C "$SCRIPT_DIR" rev-parse HEAD > "$STAGE_DIR/packages/lib/BUILD_COMMIT"
 else
@@ -132,7 +160,7 @@ else
     REPO_SLUG="${REPO_SLUG%/}"
     REPO_SLUG="${REPO_SLUG%.git}"
     [[ "$REPO_URL" == https://github.com/* && "$REPO_SLUG" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]] || { echo "Expected a GitHub repository URL" >&2; exit 1; }
-    command -v curl >/dev/null || { echo "curl is required to download a release" >&2; exit 1; }
+    if [ -z "$PACKAGE_FILE" ]; then command -v curl >/dev/null || { echo "curl is required to download a release" >&2; exit 1; }; fi
     if [ -z "$RELEASE_TAG" ]; then
         RELEASE_TAG="$(curl --fail --silent --show-error --location --max-time 15 \
             -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$REPO_SLUG/releases/latest" | "$PYTHON" -c '
@@ -146,11 +174,17 @@ print(tag)
     fi
     ASSET="ai-status-$RELEASE_TAG.tar.gz"
     ARCHIVE="$WORK_DIR/release.tar.gz"
-    echo "Downloading $RELEASE_TAG…"
-    curl --fail --silent --show-error --location --retry 2 --max-time 120 \
-        --output "$ARCHIVE" "https://github.com/$REPO_SLUG/releases/download/$RELEASE_TAG/$ASSET"
-    curl --fail --silent --show-error --location --retry 2 --max-time 30 \
-        --output "$WORK_DIR/SHA256SUMS" "https://github.com/$REPO_SLUG/releases/download/$RELEASE_TAG/SHA256SUMS"
+    if [ -n "$PACKAGE_FILE" ]; then
+        cp -- "$PACKAGE_FILE" "$ARCHIVE"
+        cp -- "$CHECKSUMS_FILE" "$WORK_DIR/SHA256SUMS"
+    else
+        echo "Downloading $RELEASE_TAG…"
+        curl --fail --silent --show-error --location --retry 2 --max-time 120 \
+            --output "$ARCHIVE" "https://github.com/$REPO_SLUG/releases/download/$RELEASE_TAG/$ASSET"
+        curl --fail --silent --show-error --location --retry 2 --max-time 30 \
+            --output "$WORK_DIR/SHA256SUMS" "https://github.com/$REPO_SLUG/releases/download/$RELEASE_TAG/SHA256SUMS"
+    fi
+    progress verifying "Verifying the downloaded release…"
     "$PYTHON" - "$ARCHIVE" "$WORK_DIR/SHA256SUMS" "$ASSET" "$STAGE_DIR" <<'PY'
 import hashlib, re, shutil, sys, tarfile
 from pathlib import Path, PurePosixPath
@@ -184,6 +218,7 @@ fi
 
 # Validate imported CLI and all sources without querying a provider or touching
 # credentials. Old releases without macOS sources fail before activation.
+progress installing "Preparing the verified update. Your settings are kept…"
 INSTALL_VERSION="$("$PYTHON" - "$STAGE_DIR" "${RELEASE_TAG#v}" "$MODE" <<'PY'
 import json, re, sys
 from pathlib import Path
@@ -299,6 +334,7 @@ if [ -n "$PLUGIN_DIR" ]; then
 fi
 
 if [ "$NO_START" = false ]; then
+    progress restarting "AI Status will close briefly and reopen automatically…"
     if launchctl bootout "gui/$(id -u)/com.gelzin.ai-status" >/dev/null 2>&1; then OLD_AGENT_STOPPED=true; fi
     if [ -x "$INSTALL_DIR/AI Status.app/Contents/MacOS/AIStatus" ]; then
         OLD_APP_STOPPED=true
@@ -358,4 +394,5 @@ else
     fi
     echo "Installed SwiftBar plugin: $PLUGIN_FILE ($MODE). Install SwiftBar with: brew install --cask swiftbar"
 fi
+progress complete "AI Status was updated. Your settings were kept."
 echo "Re-run to update. Use --rollback to restore the previous library version."

@@ -739,11 +739,14 @@ def _build_parser():
     )
     command_parsers["status"].epilog = "Output: a JSON object with providers and errors. Requires provider authentication."
     command_parsers["update"].epilog = (
-        "Windows opens a checksummed installer. Linux and macOS open the updater in\n"
-        "a terminal. Portable and custom installations use the update guide:\n"
+        "Windows opens a checksummed installer. Native macOS downloads, installs,\n"
+        "and reopens the app automatically. Linux and SwiftBar use a terminal.\n"
+        "Portable and custom installations use the update guide:\n"
         "https://github.com/gelzinn/ai-status/blob/main/packages/lib/UPDATES.md\n\n"
         "An opened updater still needs to finish; this command does not force updates."
     )
+    command_parsers["update"].add_argument("--json-progress", action="store_true",
+                                          help="Stream update stages and download progress as newline-delimited JSON")
     command_parsers["providers"].add_argument("--json", action="store_true", help="Print provider metadata as JSON")
     command_parsers["providers"].epilog = (
         "Enabled means the default connection is configured for collection, not that it is\n"
@@ -948,10 +951,24 @@ def main(argv=None):
         return 0
     if command == "update":
         from . import updates
+        def progress(event):
+            try:
+                print(json.dumps(event), flush=True)
+            except BrokenPipeError:
+                # Native macOS closes the old UI during restart. Its updater
+                # must finish activation even after the UI's pipe disappears.
+                sys.stdout = open(os.devnull, "w")
         try:
-            print(updates.run_update(), flush=True)
+            result = updates.run_update(progress=progress) if args.json_progress else updates.run_update()
+            if args.json_progress:
+                progress({"stage": "complete", "message": result})
+            else:
+                print(result, flush=True)
         except (ValueError, OSError) as error:
-            print(str(error), file=sys.stderr)
+            if args.json_progress:
+                progress({"stage": "error", "message": str(error)})
+            else:
+                print(str(error), file=sys.stderr)
             return 1
         return 0
     if command == "doctor":

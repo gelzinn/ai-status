@@ -78,6 +78,28 @@ Ui.Panel {
         showUsage()
     }
 
+    function updateFailureSummary(message) {
+        const lower = message.toLowerCase().replace(/\s+/g, " ")
+        if (lower.indexOf("checksum") !== -1) {
+            if (lower.indexOf("not match") !== -1 || lower.indexOf("mismatch") !== -1) return "Verification failed: checksum mismatch"
+            if (lower.indexOf("could not download") !== -1 || lower.indexOf("could not get") !== -1) return "Update failed: checksum unavailable"
+            if (lower.indexOf("no valid") !== -1 || lower.indexOf("missing") !== -1 || lower.indexOf("invalid") !== -1) return "Update failed: invalid release checksum"
+        }
+        if (lower.indexOf("powershell") !== -1 && lower.indexOf("unavailable") !== -1) return "Update failed: PowerShell unavailable"
+        if (lower.indexOf("runtime") !== -1 && lower.indexOf("unavailable") !== -1) return "Update failed: updater unavailable"
+        if (lower.indexOf("no supported terminal") !== -1 || lower.indexOf("terminal not found") !== -1) return "Update failed: Terminal unavailable"
+        if (lower.indexOf("terminal") !== -1 && lower.indexOf("did not respond") !== -1) return "Update failed: Terminal not responding"
+        if (lower.indexOf("could not open terminal") !== -1) return "Update failed: could not open Terminal"
+        if (lower.indexOf("timed out") !== -1) return "Update failed: updater timed out"
+        if (lower.indexOf("download") !== -1) {
+            if (lower.indexOf("interrupted") !== -1) return "Download failed: transfer interrupted"
+            if (lower.indexOf("failed") !== -1 || lower.indexOf("connection") !== -1) return "Download failed. Check your connection."
+        }
+        if (lower.indexOf("invalid") !== -1 && (lower.indexOf("progress") !== -1 || lower.indexOf("output") !== -1)) return "Update failed: invalid updater response"
+        if (lower.indexOf("without confirmation") !== -1 || lower.indexOf("missing completion") !== -1 || lower.indexOf("before confirming") !== -1) return "Update failed: completion not confirmed"
+        return message.split(/\r?\n/).map(line => line.trim()).find(line => line !== "") || "Update failed"
+    }
+
     function showResetCredits(provider, idx) {
         const entry = Plugin.Model.snapshot.providers.find(item => item.id === provider && item.idx === idx)
         if (!entry || !entry.resetCredits || entry.resetCredits.available === 0) return
@@ -183,7 +205,7 @@ Ui.Panel {
         contentWidth: panel.fittedContentWidth(Style.space(380))
         contentHeight: panel.fittedContentHeight(header.height + panel.padding + Style.space(1) + scroller.contentHeight
             + (settingsNavigation.visible && !scroller.supportsMask ? settingsNavigation.height : 0)
-            + (footer.visible ? footer.height : -panel.padding), Style.space(680))
+            + (footer.visible ? footer.height : updateFooter.visible ? updateFooter.height : -panel.padding), Style.space(680))
 
         Ui.PanelKeyCatcher {
             id: keyCatcher
@@ -376,8 +398,8 @@ Ui.Panel {
                 id: scroller
                 objectName: "panel-scroller"
                 anchors.top: settingsNavigation.visible && !supportsMask ? settingsNavigation.bottom : divider.bottom
-                anchors.bottom: footer.visible ? footer.top : parent.bottom
-                anchors.bottomMargin: footer.visible ? 0 : -panel.padding
+                anchors.bottom: footer.visible ? footer.top : updateFooter.visible ? updateFooter.top : parent.bottom
+                anchors.bottomMargin: footer.visible || updateFooter.visible ? 0 : -panel.padding
                 x: -panel.padding
                 width: parent.width + panel.padding * 2
                 contentWidth: width
@@ -439,6 +461,7 @@ Ui.Panel {
                         objectName: "panel-update-page"
                         width: parent.width
                         visible: root.updatePage
+                        actionControl: updateAction
                         foreground: root.barForeground
                         fontFamily: root.panelFont
                     }
@@ -480,6 +503,136 @@ Ui.Panel {
                                 const item = keyCatcher.Window.window ? keyCatcher.Window.window.activeFocusItem : null
                                 if (item && !item.visible) settingsNavigation.focusCurrentControl()
                             })
+                        }
+                    }
+                }
+            }
+            Item {
+                id: updateFooter
+                objectName: "update-footer"
+                anchors.bottom: parent.bottom
+                width: parent.width
+                height: updateDivider.height + Style.space(12) + updateActions.implicitHeight
+                visible: root.updatePage && (!!updates.guide.canUpdate || Plugin.Model.updateRunning || failed || finished)
+                readonly property bool failed: !Plugin.Model.updateRunning && Plugin.Model.updateError !== ""
+                readonly property bool finished: !Plugin.Model.updateRunning && !failed && Plugin.Model.updateMessage !== ""
+                readonly property bool current: finished && Plugin.Model.updateMessage.indexOf("already up to date") !== -1
+                Rectangle {
+                    id: updateDivider
+                    objectName: "update-footer-divider"
+                    x: -panel.padding
+                    width: parent.width + panel.padding * 2
+                    height: Style.space(1)
+                    color: divider.color
+                }
+                Column {
+                    id: updateActions
+                    y: updateDivider.height + Style.space(12)
+                    width: parent.width
+                    spacing: Style.space(8)
+                    Item {
+                        id: updateActionRow
+                        objectName: "update-action-row"
+                        width: parent.width
+                        readonly property bool compact: updateAction.visible && (updateFooter.failed || updateFooter.finished)
+                        height: Math.max(updateStatus.visible ? updateStatus.height : 0, updateAction.visible ? updateAction.height : 0)
+                        Item {
+                            id: updateStatus
+                            objectName: "update-status"
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: updateActionRow.compact ? Math.max(0, parent.width - updateAction.width - Style.space(8)) : parent.width
+                            height: updateFooter.failed ? Math.max(Style.space(16), updateStatusLabel.implicitHeight) : Style.space(16)
+                            visible: Plugin.Model.updateRunning || updateFooter.failed || updateFooter.finished
+                            Plugin.PanelIcon {
+                                id: updateStatusIcon
+                                objectName: "update-status-icon"
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: Style.space(16)
+                                height: width
+                                visible: Plugin.Model.updateRunning || updateFooter.failed || updateFooter.finished
+                                name: Plugin.Model.updateRunning ? "loader-circle" : updateFooter.failed ? "info" : "check"
+                                foreground: updateFooter.failed ? "#f5a3a3" : Commons.Color.accent
+                                Accessible.description: updateFooter.failed ? Plugin.Model.updateError : ""
+                                NumberAnimation on rotation {
+                                    from: 0
+                                    to: 360
+                                    duration: 1000
+                                    loops: Animation.Infinite
+                                    running: Plugin.Model.updateRunning && updateFooter.visible
+                                    onRunningChanged: if (!running) updateStatusIcon.rotation = 0
+                                }
+                            }
+                            Text {
+                                id: updateStatusLabel
+                                objectName: "update-status-label"
+                                anchors.left: parent.left
+                                anchors.leftMargin: updateStatusIcon.visible ? updateStatusIcon.width + Style.space(6) : 0
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: Plugin.Model.updateRunning ? (Plugin.Model.updateStage === "checking" ? "Checking for updates…" : "Opening updater…") : updateFooter.failed ? root.updateFailureSummary(Plugin.Model.updateError) : updateFooter.current ? "Up to date" : "Updater opened"
+                                textFormat: Text.PlainText
+                                wrapMode: updateFooter.failed ? Text.WordWrap : Text.NoWrap
+                                elide: updateFooter.failed ? Text.ElideNone : Text.ElideRight
+                                color: updateFooter.failed ? "#f5a3a3" : Commons.Color.accent
+                                font.family: root.panelFont
+                                font.pixelSize: Style.font.body
+                                Accessible.role: Accessible.StaticText
+                                Accessible.name: text
+                                Accessible.description: updateFooter.failed ? Plugin.Model.updateError : ""
+                            }
+                        }
+                        Plugin.PanelButton {
+                            id: updateAction
+                            objectName: "update-action"
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: updateActionRow.compact ? implicitWidth : parent.width
+                            implicitHeight: Style.space(34)
+                            visible: !!updates.guide.canUpdate && !Plugin.Model.updateRunning
+                            enabled: !Plugin.Model.updateRunning
+                            text: updateFooter.finished ? "Done" : updateFooter.failed ? "Retry" : "Update now"
+                            foreground: Commons.Color.accent
+                            fontFamily: root.panelFont
+                            alignLeft: true
+                            outlined: true
+                            Accessible.name: text
+                            onClicked: {
+                                if (updateFooter.finished) root.showUsage()
+                                else Plugin.Model.startUpdate()
+                            }
+                        }
+                    }
+                    Rectangle {
+                        id: updateProgress
+                        objectName: "update-progress"
+                        width: parent.width
+                        height: Style.space(3)
+                        radius: height / 2
+                        visible: Plugin.Model.updateRunning
+                        color: Qt.rgba(root.barForeground.r, root.barForeground.g, root.barForeground.b, 0.12)
+                        clip: true
+                        property real phase: 0
+                        readonly property bool animating: progressAnimation.running
+                        Accessible.role: Accessible.ProgressBar
+                        Accessible.name: Plugin.Model.updateStage === "checking" ? "Checking for updates" : "Opening updater"
+                        Rectangle {
+                            x: (parent.width + width) * updateProgress.phase - width
+                            width: parent.width * 0.3
+                            height: parent.height
+                            radius: parent.radius
+                            color: Commons.Color.accent
+                        }
+                        NumberAnimation {
+                            id: progressAnimation
+                            target: updateProgress
+                            property: "phase"
+                            from: 0
+                            to: 1
+                            duration: 1200
+                            loops: Animation.Infinite
+                            running: Plugin.Model.updateRunning && updateFooter.visible
                         }
                     }
                 }

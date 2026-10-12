@@ -11,7 +11,7 @@ Column {
     property color foreground: "white"
     property string fontFamily: Style.font.family
     readonly property var inventory: provider && provider.resetCredits ? provider.resetCredits : ({available: 0, rows: [], undetailed: 0})
-    readonly property bool canApply: !!provider && !!provider.resetAction && !provider.cached && !provider.loading
+    readonly property bool canApply: !!provider && !!provider.resetAction && !provider.cached && !provider.loading && !Plugin.Model.updateRunning
         && !Plugin.Model.resetAttempted(provider.id, provider.idx, provider.resetAction.fingerprint)
     readonly property bool ownReset: !!provider && !!Plugin.Model.resetTarget && provider.id === Plugin.Model.resetTarget.provider && provider.idx === Plugin.Model.resetTarget.idx
     property var confirmation: null

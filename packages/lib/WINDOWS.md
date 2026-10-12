@@ -55,14 +55,17 @@ settings/cache live in your user profile.
   refresh and check the account before confirming another reset. See
   [provider eligibility](PROVIDERS.md#claude).
 - **Update available** is an optional blue link with a right arrow. Open it to
-  see the installed/latest versions and instructions for your installation.
+  see the installed/latest versions and the new GitHub release's notes.
   The back arrow or Escape returns to usage, keeping your selection and position.
-  For an installed app, **Download and open installer** downloads the new setup
+  For an installed app, **Update now** downloads the new setup
   file, verifies its published SHA-256 checksum and opens the normal setup wizard.
-  Follow setup and leave **Launch AI Status** selected to restart. Downloads run
-  in the background with progress and a retry action if they fail. A portable
-  app shows the steps to replace its folder, with links to downloads and the
-  manual guide. Updates never start until you choose the update action.
+  The fixed actions footer shows a spinner, download percentage and transferred
+  bytes, then verification and automatic setup opening. Follow setup and leave
+  **Launch AI Status** selected to restart. Progress survives closing the panel
+  or navigating away. Results show a notice on the left and a compact **Retry**
+  or **Done** button on the right. The release notes and installation guide use
+  outlined controls. A portable app links to the manual guide for replacing its
+  folder. Updates never start until you choose the update action.
 - Clicking outside the panel or closing it keeps the tray app running. Use **Exit** in its menu
   to stop it. An active query finishes before exit so child processes close.
 - **Update AI Status** in the tray menu opens the same guide. Running the new

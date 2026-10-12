@@ -12,6 +12,7 @@ Item {
     property bool updateRunning: false
     property string updateError: ""
     property string updateMessage: ""
+    property string updateStage: "idle"
     property int updateStarts: 0
     property bool resetApplying: false
     property string resetError: ""
@@ -38,6 +39,7 @@ Item {
         updateRunning = true
         updateError = ""
         updateMessage = ""
+        updateStage = "checking"
     }
     property string spinner: "⠋"
     property var snapshot: ({})
@@ -52,6 +54,7 @@ Item {
         updateRunning = false
         updateError = ""
         updateMessage = ""
+        updateStage = "idle"
         updateStarts = 0
         resetApplying = false
         resetError = ""
