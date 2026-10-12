@@ -18,7 +18,7 @@ def get_selectable_items():
             dir_name = render.connection_key(p)
             idx = p.get("_idx", 0)
             p_name = render.entry_name(p)
-            metrics = p.get("metrics", [])
+            metrics = render.entry_metrics(p)
             for m in sorted(metrics, key=render.metric_sort_key):
                 mtype = render.metric_key(m)
                 title = render.metric_title(m)

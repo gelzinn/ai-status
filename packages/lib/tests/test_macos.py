@@ -7,6 +7,7 @@ from pathlib import Path
 import signal
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -145,6 +146,65 @@ class MacOSFrontendTests(unittest.TestCase):
         snapshot = quickshell.build_snapshot(DATA[1:], dict(SELECTED, provider="codex", idx=1, metric="weekly"))
         self.assertEqual(snapshot["text"], "Codex 40%")
         self.assertEqual(snapshot["selected"]["idx"], 1)
+
+    def test_cloud_credit_only_snapshots_preserve_zero_and_unavailable_states(self):
+        selected = dict(SELECTED, metric="credits:claude-cloud")
+        for balance, available, expires, overrides, value in (
+                (75.25, True, "2099-11-05T07:59:00Z", {}, "$75.25"),
+                (0, True, "2099-11-05T07:59:00Z", {}, "$0.00"),
+                (75.25, True, "2000-11-05T07:59:00Z", {}, "Expired"),
+                (75.25, False, "2099-11-05T07:59:00Z", {}, "Unavailable"),
+                (75.25, True, "2099-11-05T07:59:00Z", {"_cached": True, "_error": "Offline"}, "Unavailable"),
+                (75.25, True, "2099-11-05T07:59:00Z", {"_observed_at": time.time() - 601}, "Unavailable")):
+            with self.subTest(balance=balance, value=value, overrides=overrides):
+                entry = {"_dir": "claude", "_idx": 0, "provider": "Claude (Max)", "metrics": [],
+                         "_observed_at": time.time(), "reset_credits": {"available": 1},
+                         "monetary_credits": [{"id": "claude-cloud", "title": "Cloud credits", "currency": "USD",
+                             "balance": balance, "limit": 100, "used": 100 - balance,
+                             "expires_at": expires, "available": available}], **overrides}
+                snapshot = quickshell.build_snapshot([entry], selected)
+                self.assertEqual(len(snapshot["providers"]), 1)
+                provider = snapshot["providers"][0]
+                self.assertEqual(provider["resetCredits"]["available"], 1)
+                metric = provider["metrics"][0]
+                self.assertEqual(metric["key"], "credits:claude-cloud")
+                self.assertEqual(metric["value"], value)
+                self.assertIsNone(metric["percentage"])
+                self.assertFalse(metric["hasPercentage"])
+                self.assertIn(expires, metric["detail"])
+                self.assertEqual(snapshot["selected"]["metric"], "credits:claude-cloud")
+                self.assertIn(value, snapshot["text"])
+                if value in ("Expired", "Unavailable"):
+                    self.assertIsNone(metric["amount"])
+                    self.assertIn("Last observed $75.25", metric["detail"])
+
+    def test_cloud_selection_preserves_account_identity_and_quota_and_reset_credits(self):
+        accounts.save_document({"version": 1, "accounts": [
+            {"id": "cloud-work", "provider": "claude", "label": "Work"},
+            {"id": "cloud-personal", "provider": "claude", "label": "Personal"},
+        ]}, config.accounts_file())
+        data = [dict(_dir="claude", _connection_id="account:cloud-" + identity,
+                     _account_label=label, _idx=0, provider="Claude (Max)", _observed_at=time.time(),
+                     reset_credits={"available": 1}, metrics=[{"type": "rolling", "percentage": 9}],
+                     monetary_credits=[{"id": "claude-cloud", "title": "Cloud credits", "currency": "USD",
+                                       "balance": balance, "expires_at": "2099-11-05T07:59:00Z", "available": True}])
+                for identity, label, balance in (("work", "Work", 75.25), ("personal", "Personal", 8.5))]
+        selected = dict(SELECTED, provider="account:cloud-work", metric="credits:claude-cloud")
+        with patch.object(config, "enabled_order", return_value=[]), \
+                patch.object(state, "load_cache", return_value=data), \
+                patch.object(state, "load_selected", return_value=SELECTED.copy()), \
+                patch.object(state, "save_selected") as save:
+            result, errors = self.invoke(["select-metric", "--frontend", "macos",
+                                          "--selection-json", json.dumps(selected)])
+            snapshot = quickshell.build_snapshot(data, selected)
+        self.assertIn(result, (0, None), errors)
+        save.assert_called_once_with(selected)
+        self.assertEqual(snapshot["selected"]["provider"], "account:cloud-work")
+        self.assertEqual(snapshot["text"], "Claude (Max) · Work $75.25")
+        self.assertEqual(len(snapshot["providers"]), 2)
+        for provider in snapshot["providers"]:
+            self.assertEqual([metric["key"] for metric in provider["metrics"]], ["rolling", "credits:claude-cloud"])
+            self.assertEqual(provider["resetCredits"]["available"], 1)
 
     def test_bundled_provider_logos_are_local_pngs_and_missing_logo_is_optional(self):
         with patch.object(quickshell.urllib.request, "urlopen") as network:

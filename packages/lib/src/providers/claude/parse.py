@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timezone
 from core.reset_credits import from_claude
+from core.usage_credits import from_claude as cloud_credits_from_claude
 from core.metered import number
 
 GROUP_TYPES = {
@@ -152,4 +153,7 @@ def parse(raw_output):
     credits = from_claude(usage)
     if credits is not None:
         result["reset_credits"] = credits
+    cloud = cloud_credits_from_claude(usage)
+    if cloud is not None:
+        result["monetary_credits"] = [cloud]
     return result

@@ -13,6 +13,7 @@ from . import __version__
 from . import config as cfgmod
 from . import paths
 from . import accounts
+from . import usage_credits
 from .provider_http import request
 
 CACHE_DIR = str(paths.CACHE_DIR / "providers")
@@ -145,9 +146,10 @@ def _is_error_result(result):
     if isinstance(result, dict):
         if "error" in result or result.get("_error") and not result.get("_cached"):
             return True
-        metrics = result.get("metrics", [])
+        source = result.get("metrics")
+        metrics = [metric for metric in source if isinstance(metric, dict)] if isinstance(source, list) else []
         if not metrics:
-            return True
+            return not usage_credits.has_credit_data(result)
         if all(m.get("percentage", 0) == 0 for m in metrics):
             error_kw = ["rate limit", "unreachable", "failed", "auth"]
             for m in metrics:

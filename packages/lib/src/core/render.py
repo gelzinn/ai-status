@@ -3,6 +3,7 @@ import math
 from html import escape
 from . import fetch
 from . import state
+from . import usage_credits
 from .reset_credits import display_lines as reset_credit_lines
 
 TYPE_NAMES = {
@@ -34,6 +35,17 @@ def entry_name(entry):
     name = entry.get("provider", "AI Provider")
     label = entry.get("_account_label")
     return f"{name} · {label}" if label else name
+
+
+def entry_metrics(entry):
+    """Project live monetary-credit states into the existing selectable rows."""
+    source = entry.get("metrics")
+    metrics = [metric for metric in source if isinstance(metric, dict)] if isinstance(source, list) else []
+    credits = usage_credits.metrics(entry)
+    keys = {metric_key(metric) for metric in credits}
+    # Snapshot adapters may already have projected these rows. Recompute their
+    # states from the original observation instead of duplicating stale rows.
+    return [metric for metric in metrics if metric_key(metric) not in keys] + credits
 
 
 def metric_percentage(metric, selected=None):
@@ -190,7 +202,7 @@ def get_selected_metric_text(latest_data, selected, spinner=None):
 
     provider_full_name = entry_name(p)
     selected_key = selected.get("metric", "rolling")
-    metrics = p.get("metrics", [])
+    metrics = entry_metrics(p)
 
     show_provider = selected.get("show_provider", True)
     show_model = selected.get("show_model", True)
@@ -316,7 +328,7 @@ def format_provider_block(
     provider_data, selected_dir=None, selected_idx=None, selected_metric=None, selected=None
 ):
     provider = escape(entry_name(provider_data))
-    metrics = provider_data.get("metrics", [])
+    metrics = entry_metrics(provider_data)
     if not metrics:
         return ""
 
@@ -369,7 +381,7 @@ def format_loading_provider_block(
     provider_data, frame_index, selected_dir=None, selected_idx=None, selected_metric=None, selected=None
 ):
     provider = escape(entry_name(provider_data))
-    metrics = provider_data.get("metrics", [])
+    metrics = entry_metrics(provider_data)
     if not metrics:
         return ""
 

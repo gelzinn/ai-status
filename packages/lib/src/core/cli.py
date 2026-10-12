@@ -24,7 +24,7 @@ def _provider_metric_keys(cache, dir_name, idx):
     for p in cache:
         if (p.get("_connection_id") or p.get("_dir")) == dir_name and p.get("_idx", 0) == idx:
             metrics = sorted(
-                p.get("metrics", []),
+                render.entry_metrics(p),
                 key=render.metric_sort_key,
             )
             return [render.metric_key(m) for m in metrics]
@@ -47,7 +47,7 @@ def _scroll(direction, frontend="waybar"):
     seen = set()
     for p in cache:
         identity = p.get("_connection_id") or p.get("_dir")
-        if p.get("metrics") and identity in providers:
+        if render.entry_metrics(p) and identity in providers:
             key = (identity, p.get("_idx", 0))
             if key not in seen:
                 seen.add(key)

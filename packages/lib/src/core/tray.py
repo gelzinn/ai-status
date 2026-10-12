@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
-from . import __version__, about, config, fetch, notifications, paths, render, reset_credits, state, updates
+from . import __version__, about, config, fetch, notifications, paths, render, reset_credits, state, updates, usage_credits
 
 RELEASE_URL = "https://github.com/gelzinn/ai-status/releases/latest"
 ASSETS = paths.LIB_DIR / "assets"
@@ -942,7 +942,7 @@ class ProviderSettings(QWidget):
             name = item.data(Qt.ItemDataRole.UserRole)
             entries = data.get(name) or [{"provider": provider_name(name), "metrics": []}]
             for entry in entries:
-                metrics = entry.get("metrics") or [{"type": "rolling"}]
+                metrics = render.entry_metrics(entry) or [{"type": "rolling"}]
                 for metric in metrics:
                     key = render.metric_key(metric)
                     title = render.metric_title(metric, {"usage_display": self.usage_display.currentData()})
@@ -1576,6 +1576,14 @@ class Dashboard(QWidget):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(paths.LOG_FILE.parent)))
 
     def poll_state(self):
+        # Credits can expire or become stale while collection is offline. Only
+        # redraw when their display state changes, retaining the selected row.
+        credit_states = tuple((name, entry.get("_idx", 0), row["id"], row["status"], row["balance"], row["detail"])
+                              for name, entries in self.data.items() for entry in entries
+                              for row in usage_credits.presentation(entry))
+        if credit_states != getattr(self, "credit_states", ()):
+            self.credit_states = credit_states
+            self.draw()
         activation = paths.read_json(paths.RUNTIME_DIR / "desktop-request.json")
         if activation != self.last_activation:
             self.last_activation = activation
@@ -1719,7 +1727,7 @@ class Dashboard(QWidget):
         self.visible_metrics = []
         for name in config.enabled_connection_order():
             for entry in self.data.get(name) or []:
-                for metric in sorted(entry.get("metrics", []), key=render.metric_sort_key):
+                for metric in sorted(render.entry_metrics(entry), key=render.metric_sort_key):
                     value = (name, entry.get("_idx", 0), render.metric_key(metric))
                     self.visible_metrics.append((name, entry, metric, value))
         self.metric_values = [value for _, _, _, value in self.visible_metrics]
@@ -1755,7 +1763,7 @@ class Dashboard(QWidget):
         layout.addWidget(self.update_link)
         for name in config.enabled_connection_order():
             for entry in self.data.get(name) or []:
-                metrics = sorted(entry.get("metrics", []), key=render.metric_sort_key)
+                metrics = sorted(render.entry_metrics(entry), key=render.metric_sort_key)
                 if not metrics:
                     continue
                 group = QWidget()

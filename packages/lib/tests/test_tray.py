@@ -1,5 +1,6 @@
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import unittest
 from unittest.mock import MagicMock, patch
@@ -532,6 +533,98 @@ class DesktopTests(IsolatedState):
         self.assertIn("Work $42.50", self.dashboard.tray.toolTip())
         button.click()
         self.assertEqual(state.load_selected()["provider"], "account:work")
+
+    def test_cloud_credit_states_coexist_with_quota_and_reset_inventory_without_progress(self):
+        config.save_config(["claude"])
+        for balance, available, expires, overrides, value in (
+                (75.25, True, "2099-11-05T07:59:00Z", {}, "$75.25"),
+                (0, True, "2099-11-05T07:59:00Z", {}, "$0.00"),
+                (75.25, True, "2000-11-05T07:59:00Z", {}, "Expired"),
+                (75.25, False, "2099-11-05T07:59:00Z", {}, "Unavailable"),
+                (75.25, True, "2099-11-05T07:59:00Z", {"_cached": True, "_error": "Offline"}, "Unavailable"),
+                (75.25, True, "2099-11-05T07:59:00Z", {"_observed_at": time.time() - 601}, "Unavailable")):
+            with self.subTest(balance=balance, value=value, overrides=overrides):
+                entry = {"provider": "Claude (Max)", "_dir": "claude", "_idx": 0,
+                         "_observed_at": time.time(), "metrics": [{"type": "rolling", "percentage": 9}],
+                         "reset_credits": {"available": 1},
+                         "monetary_credits": [{"id": "claude-cloud", "title": "Cloud credits", "currency": "USD",
+                             "balance": balance, "limit": 100, "used": 100 - balance,
+                             "expires_at": expires, "available": available}], **overrides}
+                self.dashboard.on_result("claude", [entry])
+                self.assertEqual(len(self.dashboard.metric_buttons), 2)
+                row = next(button for button in self.dashboard.metric_buttons if button.value[2] == "credits:claude-cloud")
+                self.assertEqual(row.percentage.text(), value)
+                self.assertTrue(row.bar.isHidden())
+                self.assertTrue(row.bar_container.isHidden())
+                self.assertIn(expires, row.description.text())
+                heading = self.dashboard.provider_buttons[("claude", 0)]
+                self.assertFalse(heading.credits.isHidden())
+                row.click()
+                self.assertEqual(state.load_selected()["metric"], "credits:claude-cloud")
+                self.assertIn(value, self.dashboard.tray.toolTip())
+                heading.credits.click()
+                self.assertEqual(self.dashboard.reset_provider, ("claude", 0))
+                self.assertEqual(state.load_selected()["metric"], "credits:claude-cloud")
+                self.dashboard.show_usage()
+
+    def test_cloud_credit_only_accounts_are_visible_and_selectable_in_native_settings(self):
+        from core import accounts
+        accounts.save_document({"version": 1, "accounts": [
+            {"id": "cloud-personal", "provider": "claude", "label": "Personal"},
+            {"id": "cloud-work", "provider": "claude", "label": "Work"},
+        ]}, config.accounts_file())
+        config.save_config([])
+        for identity, label, balance in (("personal", "Personal", 8.5), ("work", "Work", 75.25)):
+            self.dashboard.on_result("account:cloud-" + identity, [{"provider": "Claude (Max)",
+                "_dir": "claude", "_connection_id": "account:cloud-" + identity, "_account_label": label,
+                "_idx": 0, "_observed_at": time.time(), "metrics": [],
+                "monetary_credits": [{"id": "claude-cloud", "title": "Cloud credits", "currency": "USD",
+                    "balance": balance, "expires_at": "2099-11-05T07:59:00Z", "available": True}]}])
+        self.assertEqual(len(self.dashboard.metric_buttons), 2)
+        self.assertEqual([row.percentage.text() for row in self.dashboard.metric_buttons], ["$8.50", "$75.25"])
+        self.dashboard.metric_buttons[-1].click()
+        self.assertEqual(state.load_selected()["provider"], "account:cloud-work")
+        self.assertEqual(state.load_selected()["metric"], "credits:claude-cloud")
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        self.assertEqual(settings.active.count(), 2)
+        choices = [settings.active.itemData(index) for index in range(settings.active.count())]
+        self.assertIn(["account:cloud-work", 0, "credits:claude-cloud"], choices)
+
+    def test_cloud_display_expires_and_becomes_stale_without_collecting_again(self):
+        from core import usage_credits
+
+        class Clock(datetime):
+            current = datetime.now(timezone.utc)
+
+            @classmethod
+            def now(cls, tz=None):
+                return cls.current.astimezone(tz) if tz else cls.current.replace(tzinfo=None)
+
+        config.save_config(["claude"])
+        self.dashboard.last_config = config.load_config()
+        self.dashboard.last_refresh = paths.read_json(state.REFRESH_FILE)
+        for seconds, expiry_delay, value in ((2, 1, "Expired"), (601, 3600, "Unavailable")):
+            with self.subTest(value=value), patch.object(usage_credits, "datetime", Clock), \
+                    patch.object(self.dashboard, "refresh") as refresh:
+                Clock.current = datetime.now(timezone.utc)
+                entry = {"provider": "Claude (Max)", "_dir": "claude", "_idx": 0, "metrics": [],
+                         "_observed_at": Clock.current.timestamp(), "monetary_credits": [
+                             {"id": "claude-cloud", "title": "Cloud credits", "currency": "USD",
+                              "balance": 75.25, "available": True,
+                              "expires_at": (Clock.current + timedelta(seconds=expiry_delay)).isoformat()}]}
+                self.dashboard.on_result("claude", [entry])
+                self.dashboard.metric_buttons[0].click()
+                self.dashboard.poll_state()
+                self.assertEqual(self.dashboard.metric_buttons[0].percentage.text(), "$75.25")
+                Clock.current += timedelta(seconds=seconds)
+                self.dashboard.poll_state()
+                row = self.dashboard.metric_buttons[0]
+                self.assertEqual(row.percentage.text(), value)
+                self.assertTrue(row.bar_container.isHidden())
+                self.assertEqual(state.load_selected()["metric"], "credits:claude-cloud")
+                self.assertIn(value, self.dashboard.tray.toolTip())
+                refresh.assert_not_called()
 
     def test_long_metric_names_keep_percentages_and_amounts_in_the_viewport(self):
         config.save_config(["openai-api"])

@@ -147,6 +147,49 @@ Item {
             compare(value.text, Plugin.Model.spinner)
             compare(title.parent.parent.implicitHeight, title.parent.height)
         }
+        function test_cloud_credit_states_keep_account_selection_without_quota_progress() {
+            settings.visible = false
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            const identity = "account:cloud-work"
+            const states = [
+                {value: "$75.25", detail: "Available · Expires Nov 5, 2099", isAmount: true},
+                {value: "$0.00", detail: "Exhausted · Expires Nov 5, 2099", isAmount: true},
+                {value: "Expired", detail: "Expired Nov 5, 2000", isAmount: false},
+                {value: "Unavailable", detail: "Balance could not be confirmed", isAmount: false}
+            ]
+            snapshot.selected = {provider: identity, idx: 0, metric: "credits:claude-cloud"}
+            snapshot.providers = [{id: identity, providerId: "claude", idx: 0,
+                name: "Claude (Max) · Work", logoPath: "", loading: false, cached: false, error: "",
+                resetCredits: {available: 1, rows: []}, metrics: []}]
+            usage.visible = true
+            for (const state of states) {
+                snapshot.providers[0].metrics = [
+                    {key: "rolling", name: "Rolling Usage", percentage: 9, hasPercentage: true, value: "9%", detail: "Resets in 34m"},
+                    {key: "credits:claude-cloud", name: "Cloud credits", percentage: null, hasPercentage: false,
+                        isAmount: state.isAmount, value: state.value, detail: state.detail}
+                ]
+                Plugin.Model.snapshot = JSON.parse(JSON.stringify(snapshot))
+                wait(20)
+                const suffix = identity + "-0-credits:claude-cloud"
+                const value = findChild(usage, "usage-value-" + suffix)
+                compare(value.text, state.value)
+                verify(value.visible)
+                const progress = findChild(usage, "usage-bar-" + suffix)
+                verify(!progress.visible)
+                verify(!progress.parent.visible)
+                compare(findChild(usage, "usage-detail-" + suffix).text, state.detail)
+                verify(findChild(usage, "usage-bar-" + identity + "-0-rolling").visible)
+                const reset = findChild(usage, "reset-credits-" + identity + "-0")
+                verify(reset.visible)
+                mouseClick(value)
+                compare(Plugin.Model.chosen.provider, identity)
+                compare(Plugin.Model.chosen.metric, "credits:claude-cloud")
+                mouseClick(reset)
+                compare(openedReset.provider, identity)
+                compare(Plugin.Model.chosen.metric, "credits:claude-cloud")
+                verifyMetricAlignment(snapshot.providers[0])
+            }
+        }
         function test_reorder_and_save() {
             settings.moveProvider(1, -1)
             settings.selected = {provider: "claude", idx: 0, metric: "weekly:Fable"}

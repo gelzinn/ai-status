@@ -432,7 +432,10 @@ final class Model: ObservableObject {
             }
             return providers.flatMap { provider in
                 provider.metrics.map { metric in
-                    let suffix = metric.key.split(separator: ":", maxSplits: 1).dropFirst().first.map { " (\($0))" } ?? ""
+                    let parts = metric.key.split(separator: ":", maxSplits: 1)
+                    let periodName = ["rolling": "Rolling Usage", "daily": "Daily Usage", "weekly": "Weekly Usage", "monthly": "Monthly Usage"][String(parts.first ?? "")]
+                    let remainingName = periodName?.replacingOccurrences(of: "Usage", with: "Remaining")
+                    let suffix = parts.count == 2 && (periodName == metric.name || remainingName == metric.name) && String(parts[1]) != metric.name ? " (\(parts[1]))" : ""
                     return Choice(selection: provider.selection(metric), label: provider.name + " · " + metric.name + suffix,
                                   provider: provider.providerID, logoPath: provider.logoPath)
                 }
@@ -1701,6 +1704,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         model.accept(malformed)
         guard model.snapshot?.schemaVersion == 1 else { throw AppError.message("Invalid snapshot replaced usable data.") }
         try smokeAccounts(sample: sample, directory: previewDirectory)
+        try smokeCloudCredits(sample: sample, directory: previewDirectory)
         try smokeNotifications(sample: sample)
         try smokeUpdate(sample: sample, directory: previewDirectory)
         model.isPresented = true
@@ -1710,7 +1714,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             model.page = page
             try renderSmokePage(model, name: name, directory: previewDirectory)
         }
-        print("AI Status macOS smoke OK: usage, settings, quota notifications, reset credits, update guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+        print("AI Status macOS smoke OK: usage, settings, quota notifications, reset credits, Cloud credits, update guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
     }
 
     private static func smokeNotifications(sample: String) throws {
@@ -1875,6 +1879,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         guard model.keyboardFocusVisible else { throw AppError.message("Shift-Tab navigation did not enable a focus outline.") }
         model.page = .settings
         guard !model.keyboardFocusVisible else { throw AppError.message("A new page inherited a keyboard focus outline.") }
+    }
+
+    private static func smokeCloudCredits(sample: String, directory: URL?) throws {
+        guard var document = try JSONSerialization.jsonObject(with: Data(sample.utf8)) as? [String: Any],
+              var settings = document["settings"] as? [String: Any],
+              let providers = document["providers"] as? [[String: Any]],
+              var provider = providers.last else { throw AppError.message("Cloud credits sample setup failed.") }
+        let identity = "account:cloud-work"
+        provider["id"] = identity
+        provider["providerId"] = "claude"
+        provider["name"] = "Claude (Max) · Work"
+        settings["available"] = [identity]
+        settings["enabled"] = [identity]
+        settings["order"] = [identity]
+        settings["names"] = [identity: "Claude · Work"]
+        settings["providerIds"] = [identity: "claude"]
+        document["settings"] = settings
+        document["selected"] = ["provider": identity, "idx": 0, "metric": "credits:claude-cloud"] as [String: Any]
+        let states = [("available", "$42.50", "Expires Oct 22, 18:05"),
+                      ("exhausted", "$0.00", "Exhausted · Expires Oct 22, 18:05"),
+                      ("expired", "Expired", "Expired Oct 10, 18:05"),
+                      ("unavailable", "Unavailable", "Balance could not be confirmed")]
+        for (state, value, detail) in states {
+            provider["metrics"] = [
+                ["key": "rolling", "name": "Rolling Usage", "percentage": 9,
+                 "detail": "Resets in 34m"] as [String: Any],
+                ["key": "credits:claude-cloud", "name": "Cloud credits", "percentage": NSNull(),
+                 "hasPercentage": false, "value": value, "isAmount": state == "available" || state == "exhausted",
+                 "detail": detail] as [String: Any],
+            ]
+            document["providers"] = [provider]
+            document["text"] = "Claude (Max) · Work " + value
+            let model = Model()
+            model.accept(try JSONSerialization.data(withJSONObject: document))
+            guard let current = model.selectedProvider, current.providerID == "claude",
+                  current.metrics.count == 2, current.metrics[0].percentage == 9,
+                  current.metrics[1].percentage == nil, current.metrics[1].usable,
+                  current.metrics[1].displayValue == value, current.metrics[1].detail == detail,
+                  current.resetCredits?.available == 1 else {
+                throw AppError.message("Cloud credits state or coexistence with quota and reset credits failed.")
+            }
+            let selection = current.selection(current.metrics[1])
+            guard selection.provider == identity, selection.metric == "credits:claude-cloud" else {
+                throw AppError.message("Cloud credits selection lost its account identity.")
+            }
+            model.isPresented = true
+            try renderSmokePage(model, name: "cloud-" + state, directory: directory)
+            model.showSettings()
+            guard model.settingsValid, model.choices.count == 2,
+                  model.choices.first(where: { $0.selection == selection })?.label == "Claude (Max) · Work · Cloud credits" else {
+                throw AppError.message("Cloud credits account settings label exposes an internal identity or omits the metric.")
+            }
+        }
     }
 
     private static func smokeAccounts(sample: String, directory: URL?) throws {
