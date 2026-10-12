@@ -101,6 +101,7 @@ def main():
                     dashboard.on_update_finished(
                         "Setup is open. Finish installation and leave Launch AI Status selected to reopen the app.", True)
                     capture("windows-installer")
+                    view.set_guide(guide_module.update_guide(), fetch.get_version_info())
                     dashboard.on_update_finished("Download failed. Check your connection and retry.", False)
                     capture("windows-error")
                     view.running = True

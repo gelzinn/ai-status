@@ -1960,6 +1960,19 @@ class OperationSpinner(QWidget):
         draw_control_icon(painter, rect, "loader-circle", color="#89b4fa")
 
 
+class UpdateResultIcon(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(16, 16)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.icon_name = "check"
+        self.color = "#89b4fa"
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        draw_control_icon(painter, QRectF(self.rect()), self.icon_name, color=self.color)
+
+
 class UpdateWorker(QObject):
     progress = Signal(object)
     finished = Signal(str, bool)
@@ -1987,7 +2000,6 @@ class UpdateView(QWidget):
         self.running = False
         self.completed = False
         self.failed = False
-        self.download_known = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 18, 16, 18)
         layout.setSpacing(14)
@@ -2027,7 +2039,7 @@ class UpdateView(QWidget):
         self.copy_feedback = QTimer(self)
         self.copy_feedback.setSingleShot(True)
         self.copy_feedback.timeout.connect(self.reset_copy_feedback)
-        for title, key in (("Release notes", "releaseUrl"), ("Manual update guide", "guideUrl")):
+        for title, key in (("Release notes", "releaseUrl"), ("Installation guide", "guideUrl")):
             button = QPushButton(title)
             button.setObjectName("update-" + key)
             row = QHBoxLayout(button)
@@ -2051,6 +2063,10 @@ class UpdateView(QWidget):
         self.spinner.setObjectName("update-spinner")
         self.spinner.hide()
         status_row.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignTop)
+        self.result_icon = UpdateResultIcon()
+        self.result_icon.setObjectName("update-result-icon")
+        self.result_icon.hide()
+        status_row.addWidget(self.result_icon, 0, Qt.AlignmentFlag.AlignTop)
         self.status = plain_label("")
         self.status.setWordWrap(True)
         self.status.hide()
@@ -2084,6 +2100,12 @@ class UpdateView(QWidget):
         transfer_layout.addWidget(self.remaining)
         self.transfer_row.hide()
         footer.addWidget(self.transfer_row)
+        self.detail = plain_label("")
+        self.detail.setObjectName("update-detail")
+        self.detail.setWordWrap(True)
+        self.detail.setStyleSheet("color: #888888; font-size: 11px;")
+        self.detail.hide()
+        footer.addWidget(self.detail)
         self.action = QPushButton()
         self.action.setObjectName("update-action")
         self.action.setStyleSheet("color: #89b4fa; border: 1px solid #294666; border-radius: 6px; padding: 8px;")
@@ -2093,13 +2115,14 @@ class UpdateView(QWidget):
     def set_guide(self, guide, version):
         self.guide = guide
         self.version = version
-        self.heading.setText(guide.get("title") or "Update AI Status")
+        self.heading.setText("Latest stable version")
         current = version.get("current") or __version__
         latest = version.get("latest")
-        self.versions.setText(f"Installed: v{current}\nLatest: v{latest}" if latest else
-                              f"Installed: v{current}\nCheck for updates with Refresh.")
-        self.description.setText(guide.get("description", ""))
-        self.steps.setText("\n".join(guide.get("steps", [])))
+        self.versions.setText(f"v{current}" + (f" → v{latest}" if latest and latest != current else ""))
+        current_release = bool(version.get("current") and version.get("latest") == version.get("current")
+                               and not version.get("has_update"))
+        self.description.setText("Your settings are kept." if current_release else guide.get("description", ""))
+        self.steps.setText("" if current_release else "\n".join(guide.get("steps", [])))
         self.steps.setVisible(bool(self.steps.text()))
         command = guide.get("command", "")
         if self.command.text() != command:
@@ -2112,18 +2135,22 @@ class UpdateView(QWidget):
 
     def toggle_command(self, expanded):
         self.command_box.setVisible(bool(self.command.text()) and expanded)
-        self.manual_toggle.setText("Hide terminal command" if expanded else "Show terminal command")
+        self.manual_toggle.setText("Hide manual update" if expanded else "Update manually…")
         dashboard = self.window()
         if hasattr(dashboard, "fit_content") and dashboard.viewing_updates():
             dashboard.fit_content()
 
     def update_action(self):
         available = bool(self.guide.get("canUpdate") and self.version.get("has_update"))
-        self.action.setVisible(not self.running and (available or self.failed))
-        self.action.setEnabled(available and not self.running)
+        self.action.setVisible(not self.running and (available or self.failed or self.completed))
+        self.action.setEnabled(not self.running and (available or self.completed))
         self.action.setText("Retry update" if self.failed else "Done" if self.completed else
                             self.guide.get("actionLabel", "Update now"))
-        self.spinner.set_running(self.running and not self.download_known)
+        self.spinner.set_running(self.running)
+        self.result_icon.icon_name = "info" if self.failed else "check"
+        self.result_icon.color = "#f5a3a3" if self.failed else "#89b4fa"
+        self.result_icon.setVisible((self.completed or self.failed) and not self.running)
+        self.result_icon.update()
         if not self.running:
             self.progress_bar.hide()
             self.percent.hide()
@@ -2140,23 +2167,49 @@ class UpdateView(QWidget):
     def show_progress(self, event):
         event = {"message": event} if isinstance(event, str) else event
         message = event.get("message", "")
+        self.detail.clear()
+        self.detail.hide()
+        self.detail.setStyleSheet("color: #aaaaaa; font-size: 12px;" if self.failed else
+                                 "color: #888888; font-size: 11px;")
         label = {
             "checking": "Checking for updates…", "downloading": "Downloading…",
             "verifying": "Verifying download…", "installing": "Installing…",
-            "opening": "Opening installer…", "restarting": "Restarting AI Status…",
+            "opening": "Opening updater…", "restarting": "Restarting AI Status…",
         }.get(event.get("stage"), message)
+        if self.failed and not self.running:
+            label = "Update failed"
+            detail = message
+            for prefix in ("Download failed.", "The download was interrupted.",
+                           "Update download failed.", "Installer download failed."):
+                if message.startswith(prefix):
+                    detail = message[len(prefix):].strip() or "Check your connection and retry."
+                    break
+            self.detail.setText(detail)
+            self.detail.setToolTip(message)
+            self.detail.setVisible(bool(message))
+        elif self.completed and not self.running:
+            current = "already up to date" in message.lower()
+            label = "Up to date" if current else "Updater opened"
+            self.description.setText("Your settings are kept.")
+            self.steps.clear()
+            self.steps.hide()
+            if not current:
+                destination = "Setup" if self.guide.get("method") == "windows-installer" else "Terminal"
+                self.detail.setText(f"Finish the update in {destination}.")
+                self.detail.setToolTip(message)
+                self.detail.show()
         self.status.setText(label)
         self.status.setToolTip(message)
-        self.status.setStyleSheet("color: #89b4fa;")
+        self.status.setStyleSheet("color: #f5a3a3;" if self.failed else "color: #89b4fa;")
         self.status.setVisible(bool(message))
         self.progress_bar.setVisible(self.running)
         downloaded = event.get("downloadedBytes")
         total = event.get("totalBytes")
         downloading = self.running and event.get("stage") == "downloading"
         known_total = downloading and isinstance(total, (int, float)) and total > 0
-        self.download_known = bool(known_total and isinstance(downloaded, (int, float)) and downloaded >= 0)
-        self.spinner.set_running(self.running and not self.download_known)
-        if self.download_known:
+        download_known = bool(known_total and isinstance(downloaded, (int, float)) and downloaded >= 0)
+        self.spinner.set_running(self.running)
+        if download_known:
             percent = min(100, max(0, int(downloaded * 100 / total)))
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(percent)
@@ -2168,8 +2221,8 @@ class UpdateView(QWidget):
             self.transferred.setText(f"{downloaded / 1_000_000:.1f} MB downloaded"
                                      if downloading and isinstance(downloaded, (int, float)) else "")
             self.remaining.clear()
-        self.percent.setVisible(self.download_known)
-        self.remaining.setVisible(self.download_known)
+        self.percent.setVisible(download_known)
+        self.remaining.setVisible(download_known)
         self.transferred.setVisible(downloading and bool(self.transferred.text()))
         self.transfer_row.setVisible(downloading and bool(self.transferred.text()))
         dashboard = self.window()
@@ -2475,6 +2528,8 @@ class Dashboard(QWidget):
                 self.update_view.completed = False
                 self.update_view.status.clear()
                 self.update_view.status.hide()
+                self.update_view.detail.clear()
+                self.update_view.detail.hide()
         self.reset_provider = None
         self.monetary_credit = None
         self.update_view.set_guide(updates.update_guide(), fetch.get_version_info())
@@ -2499,7 +2554,7 @@ class Dashboard(QWidget):
         self.update_view.failed = False
         self.update_view.completed = False
         self.update_view.update_action()
-        self.update_view.show_progress("Preparing update…")
+        self.update_view.show_progress({"stage": "checking", "message": "Checking for updates…"})
         self.update_thread = QThread(self)
         self.update_worker = UpdateWorker()
         self.update_worker.moveToThread(self.update_thread)

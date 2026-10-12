@@ -9,6 +9,7 @@ Column {
     readonly property color linkColor: "#89b4fa"
     readonly property var guide: Plugin.Model.snapshot.update || {}
     readonly property var version: Plugin.Model.snapshot.version || {}
+    readonly property bool alreadyCurrent: version.has_update === false || (!Plugin.Model.updateRunning && Plugin.Model.updateError === "" && Plugin.Model.updateMessage.indexOf("already up to date") !== -1)
     property Item actionControl: null
     property bool commandExpanded: false
     readonly property bool showCommand: !guide.canUpdate || commandExpanded
@@ -33,14 +34,17 @@ Column {
     Column {
         width: parent.width
         spacing: Style.space(10)
-        Label { text: root.guide.title || "A new version is available"; font.bold: true }
+        Label { text: "Latest stable version"; font.bold: true }
         Label {
             objectName: "update-versions"
             text: "v" + (root.version.current || "—") +
-                  (root.version.latest && root.version.latest !== root.version.current ? "  →  v" + root.version.latest : "")
+                  (!root.alreadyCurrent && root.version.latest && root.version.latest !== root.version.current ? "  →  v" + root.version.latest : "")
             opacity: 0.7
         }
-        Label { text: root.guide.description || "See the update guide for your installation." }
+        Label {
+            objectName: "update-description"
+            text: root.alreadyCurrent ? "Your settings are kept." : root.guide.description || "See the update guide for your installation."
+        }
     }
 
     Column {
@@ -52,7 +56,7 @@ Column {
             objectName: "update-manual-command"
             width: parent.width
             visible: !!root.guide.canUpdate
-            text: root.showCommand ? "Hide terminal command" : "Terminal command"
+            text: root.showCommand ? "Hide manual update" : "Update manually…"
             trailingIconName: "chevron-down"
             alignLeft: true
             foreground: root.foreground
@@ -137,7 +141,7 @@ Column {
         Plugin.PanelButton {
             objectName: "update-guide-link"
             width: parent.width
-            text: "Update help"
+            text: "Installation guide"
             trailingIconName: "arrow-right"
             alignLeft: true
             foreground: root.foreground

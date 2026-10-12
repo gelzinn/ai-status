@@ -1769,7 +1769,7 @@ class DesktopTests(IsolatedState):
         return {"method": "windows-installer" if can_update else "windows-portable",
                 "title": "Update AI Status", "description": "Update this installation.",
                 "steps": ["Download the latest installer.", "Run setup to keep your settings."],
-                "command": "", "actionLabel": "Download and open installer", "canUpdate": can_update,
+                "command": "", "actionLabel": "Update now", "canUpdate": can_update,
                 "releaseUrl": "https://github.com/gelzinn/ai-status/releases/latest",
                 "guideUrl": "https://github.com/gelzinn/ai-status/blob/main/packages/lib/WINDOWS.md"}
 
@@ -1802,8 +1802,7 @@ class DesktopTests(IsolatedState):
             self.assertTrue(self.dashboard.viewing_updates())
             self.assertEqual(self.dashboard.brand.text(), "Updates")
             self.assertIs(self.dashboard.focusWidget(), self.dashboard.back_button)
-            self.assertIn("Installed: v0.11.0", self.dashboard.update_view.versions.text())
-            self.assertIn("Latest: v0.12.1", self.dashboard.update_view.versions.text())
+            self.assertEqual(self.dashboard.update_view.versions.text(), "v0.11.0 → v0.12.1")
             self.assertTrue(self.dashboard.update_view.action.isEnabled())
             QTest.keyClick(self.dashboard.back_button, tray.Qt.Key.Key_Down)
             self.assertEqual(state.load_selected(), selected)
@@ -1846,7 +1845,8 @@ class DesktopTests(IsolatedState):
             self.dashboard.start_update()
             self.wait_for_update()
             updater.assert_called_once()
-            self.assertIn("Check your connection", self.dashboard.update_view.status.text())
+            self.assertEqual(self.dashboard.update_view.status.text(), "Update failed")
+            self.assertIn("Check your connection", self.dashboard.update_view.detail.text())
             self.assertEqual(self.dashboard.update_view.action.text(), "Retry update")
             self.assertTrue(self.dashboard.update_view.action.isEnabled())
             updater.side_effect = None
@@ -1857,12 +1857,24 @@ class DesktopTests(IsolatedState):
             self.assertTrue(self.dashboard.update_view.completed)
             self.assertTrue(self.dashboard.update_view.action.isEnabled())
             self.assertEqual(self.dashboard.update_view.action.text(), "Done")
-            self.assertIn("verified installer is open", self.dashboard.update_view.status.text())
+            self.assertEqual(self.dashboard.update_view.status.text(), "Updater opened")
+            self.assertEqual(self.dashboard.update_view.detail.text(), "Finish the update in Setup.")
+            self.assertIn("verified installer is open", self.dashboard.update_view.status.toolTip())
             self.dashboard.update_view.action.click()
             self.assertFalse(self.dashboard.viewing_updates())
             self.assertEqual(updater.call_count, 2)  # Done never opens a second setup wizard.
             self.dashboard.show_updates()  # Setup can be cancelled; a later action can retry.
             self.assertEqual(self.dashboard.update_view.action.text(), self.update_guide()["actionLabel"])
+            version["has_update"] = False
+            self.dashboard.update_view.set_guide(self.update_guide(), version)
+            self.dashboard.on_update_finished("AI Status is already up to date.", True)
+            self.assertEqual(self.dashboard.update_view.status.text(), "Up to date")
+            self.assertTrue(self.dashboard.update_view.steps.isHidden())
+            self.assertTrue(self.dashboard.update_view.detail.isHidden())
+            self.assertTrue(self.dashboard.update_view.action.isEnabled())
+            self.dashboard.update_view.action.click()
+            self.assertFalse(self.dashboard.viewing_updates())
+            self.assertEqual(updater.call_count, 2)
 
     def test_update_guide_command_can_be_copied(self):
         guide = self.update_guide(False)
@@ -1900,7 +1912,7 @@ class DesktopTests(IsolatedState):
                 self.assertEqual(view.progress_bar.value(), 42)
                 self.assertEqual(view.transferred.text(), "4.2 / 10.0 MB")
                 self.assertEqual(view.remaining.text(), "5.8 MB left")
-                self.assertFalse(view.spinner.running)
+                self.assertTrue(view.spinner.running)
                 self.assertTrue(view.action.isHidden())
                 self.assertIs(view.footer.parentWidget(), self.dashboard.pages.parentWidget())
                 self.assertGreaterEqual(view.footer.y(), self.dashboard.pages.geometry().bottom())
@@ -1911,7 +1923,7 @@ class DesktopTests(IsolatedState):
                 self.app.processEvents()
                 self.assertEqual(view.progress_bar.value(), 42)
                 self.assertEqual(view.percent.text(), "42%")
-                self.assertTrue(view.spinner.isHidden())
+                self.assertTrue(view.spinner.isVisible())
                 self.assertTrue(view.progress_bar.isVisible())
                 self.assertEqual(view.remaining.text(), "5.8 MB left")
                 self.assertFalse(view.action.isEnabled())
@@ -1921,7 +1933,10 @@ class DesktopTests(IsolatedState):
             self.assertTrue(view.progress_bar.isHidden())
             self.assertTrue(view.spinner.isHidden())
             self.assertTrue(view.remaining.isHidden())
-            self.assertIn("Complete setup", view.status.text())
+            self.assertEqual(view.status.text(), "Updater opened")
+            self.assertEqual(view.detail.text(), "Finish the update in Setup.")
+            self.assertTrue(view.result_icon.isVisible())
+            self.assertIn("Complete setup", view.status.toolTip())
 
     def test_unknown_download_size_and_verification_do_not_show_fake_percentage(self):
         with patch.object(tray.fetch, "get_version_info", return_value={"has_update": True}), \

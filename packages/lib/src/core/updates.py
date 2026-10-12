@@ -105,33 +105,29 @@ def update_guide():
     }
     if method == "windows-installer":
         guide.update(
-            title="Update on Windows", actionLabel="Download and open installer", canUpdate=True,
-            description="Download and verify the latest installer. Your settings are kept.",
-            steps=["Setup opens automatically after downloading. Finish setup and leave Launch AI Status selected to reopen the app."],
+            title="Update on Windows", actionLabel="Update now", canUpdate=True,
+            description="Downloads and opens Setup.\nYour settings are kept.",
         )
     elif method == "windows-portable":
         guide.update(title="Update a portable Windows copy",
-                     description="Get the latest portable ZIP. Your settings stay in AppData.",
-                     steps=["Quit AI Status, extract the ZIP to a new folder, then open ai-status.exe."])
+                     description="Replace this copy with the latest ZIP.\nYour settings stay in AppData.")
     elif method == "omarchy":
         guide.update(title="Update the Omarchy plugin",
                      command="omarchy plugin update " + PLUGIN_ID + " --yes && omarchy restart shell",
-                     actionLabel="Update in terminal", canUpdate=shutil.which("omarchy") is not None,
-                     description="Update the plugin in your terminal. Your settings are kept.",
-                     steps=["The terminal shows progress. Omarchy restarts the shell when the update succeeds."])
+                     actionLabel="Update now", canUpdate=shutil.which("omarchy") is not None,
+                     description="Updates in Terminal, then restarts the shell.\nYour settings are kept.")
     elif method in ("linux-installer", "macos-installer"):
         native = method == "macos-installer" and options["mode"] == "native"
         guide.update(title="Update on macOS" if method == "macos-installer" else "Update on Linux",
                      command=_installer_command(method, options, latest),
-                     actionLabel="Download and install update" if native else "Update in terminal", canUpdate=True,
-                     description="Download and verify the latest release. Your settings are kept.",
-                     steps=["AI Status closes briefly and reopens automatically after installation." if native else
-                            "The terminal shows progress, then refreshes your menu bar." if method == "macos-installer" else
-                            "The terminal shows progress, then reloads your desktop bar."])
+                     actionLabel="Update now", canUpdate=True,
+                     description="Installs and restarts automatically.\nYour settings are kept." if native else
+                                 "Updates in Terminal.\nYour settings are kept.")
+        if method == "macos-installer":
+            guide["mode"] = options["mode"]
     else:
         guide.update(title="Update your installation",
-                     description="This copy uses a source checkout or custom installation.",
-                     steps=["Follow the update guide for your installation method. Your copy is never replaced automatically."])
+                     description="Update this copy manually.\nYour settings are kept.")
     return guide
 
 

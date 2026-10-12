@@ -80,6 +80,8 @@ class UpdateGuideTests(unittest.TestCase):
             guide = updates.update_guide()
         self.assertEqual(guide["method"], "macos-installer")
         self.assertTrue(guide["canUpdate"])
+        self.assertEqual(guide["mode"], "native")
+        self.assertEqual(guide["actionLabel"], "Update now")
         self.assertIn("https://ai-status.gelzin.com/install/macos", guide["command"])
         self.assertIn("--mode native", guide["command"])
         self.assertIn("--version v0.13.0", guide["command"])
@@ -101,6 +103,8 @@ class UpdateGuideTests(unittest.TestCase):
         with patch.object(paths, "LIB_DIR", lib), patch.object(sys, "platform", "darwin"):
             guide = updates.update_guide()
         self.assertTrue(guide["canUpdate"])
+        self.assertEqual(guide["mode"], "stream")
+        self.assertEqual(guide["actionLabel"], "Update now")
         self.assertIn("--mode stream", guide["command"])
 
     def test_omarchy_install_uses_plugin_manager_and_general_install_preserves_bar(self):
@@ -111,6 +115,7 @@ class UpdateGuideTests(unittest.TestCase):
                 patch.object(updates.shutil, "which", return_value="/usr/bin/omarchy"):
             guide = updates.update_guide()
         self.assertEqual(guide["method"], "omarchy")
+        self.assertEqual(guide["actionLabel"], "Update now")
         self.assertEqual(guide["command"], "omarchy plugin update " + updates.PLUGIN_ID + " --yes && omarchy restart shell")
         lib = self.managed_lib()
         with patch.object(paths, "LIB_DIR", lib), patch.object(sys, "platform", "linux"):
@@ -167,6 +172,7 @@ class UpdateGuideTests(unittest.TestCase):
             guide = updates.update_guide()
         self.assertEqual(guide["method"], "windows-installer")
         self.assertTrue(guide["canUpdate"])
+        self.assertEqual(guide["actionLabel"], "Update now")
 
 
 class UpdateActionTests(unittest.TestCase):

@@ -77,6 +77,16 @@ Ui.Panel {
         showUsage()
     }
 
+    function updateFailureReason(message) {
+        if (message.indexOf("No supported terminal found.") === 0)
+            return "Run the manual command or try again."
+        const prefixes = ["Download failed.", "The download was interrupted.", "Update download failed.", "Installer download failed."]
+        for (const prefix of prefixes) {
+            if (message.indexOf(prefix) === 0) return message.slice(prefix.length).trim()
+        }
+        return message
+    }
+
     function showResetCredits(provider, idx) {
         const entry = Plugin.Model.snapshot.providers.find(item => item.id === provider && item.idx === idx)
         if (!entry || !entry.resetCredits || entry.resetCredits.available === 0) return
@@ -480,8 +490,8 @@ Ui.Panel {
                 objectName: "update-footer"
                 anchors.bottom: parent.bottom
                 width: parent.width
-                height: updateDivider.height + Style.space(12) + updateActions.height + Style.space(12) + updateDetail.implicitHeight
-                visible: root.updatePage
+                height: updateDivider.height + Style.space(12) + updateActions.implicitHeight
+                visible: root.updatePage && (!!updates.guide.canUpdate || Plugin.Model.updateRunning || failed || finished)
                 readonly property bool failed: !Plugin.Model.updateRunning && Plugin.Model.updateError !== ""
                 readonly property bool finished: !Plugin.Model.updateRunning && !failed && Plugin.Model.updateMessage !== ""
                 readonly property bool current: finished && Plugin.Model.updateMessage.indexOf("already up to date") !== -1
@@ -493,29 +503,27 @@ Ui.Panel {
                     height: Style.space(1)
                     color: divider.color
                 }
-                Item {
+                Column {
                     id: updateActions
                     y: updateDivider.height + Style.space(12)
                     width: parent.width
-                    height: updates.guide.canUpdate || updateStatus.visible ? Style.space(30) : 0
+                    spacing: Style.space(8)
                     Item {
                         id: updateStatus
                         objectName: "update-status"
-                        anchors.left: parent.left
-                        anchors.right: updateAction.visible ? updateAction.left : parent.right
-                        anchors.rightMargin: updateAction.visible ? Style.space(12) : 0
-                        height: parent.height
+                        width: parent.width
+                        height: Style.space(16)
                         visible: Plugin.Model.updateRunning || updateFooter.failed || updateFooter.finished
                         Plugin.PanelIcon {
                             id: updateStatusIcon
                             objectName: "update-status-icon"
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            width: Style.space(14)
+                            width: Style.space(16)
                             height: width
-                            visible: Plugin.Model.updateRunning || updateFooter.finished
-                            name: Plugin.Model.updateRunning ? "loader-circle" : "check"
-                            foreground: root.barForeground
+                            visible: Plugin.Model.updateRunning || updateFooter.failed || updateFooter.finished
+                            name: Plugin.Model.updateRunning ? "loader-circle" : updateFooter.failed ? "info" : "check"
+                            foreground: updateFooter.failed ? Commons.Color.urgent : Commons.Color.accent
                             NumberAnimation on rotation {
                                 from: 0
                                 to: 360
@@ -531,79 +539,82 @@ Ui.Panel {
                             anchors.leftMargin: updateStatusIcon.visible ? updateStatusIcon.width + Style.space(6) : 0
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
-                            text: Plugin.Model.updateRunning ? (Plugin.Model.updateStage === "checking" ? "Checking release…" : "Opening terminal…") : updateFooter.failed ? "Could not start" : updateFooter.current ? "Up to date" : "Terminal opened"
+                            text: Plugin.Model.updateRunning ? (Plugin.Model.updateStage === "checking" ? "Checking for updates…" : "Opening updater…") : updateFooter.failed ? "Update failed" : updateFooter.current ? "Up to date" : "Updater opened"
                             textFormat: Text.PlainText
                             elide: Text.ElideRight
-                            color: updateFooter.failed ? Commons.Color.urgent : root.barForeground
+                            color: updateFooter.failed ? Commons.Color.urgent : Commons.Color.accent
                             font.family: root.panelFont
-                            font.pixelSize: Style.font.caption
+                            font.pixelSize: Style.font.body
                             Accessible.role: Accessible.StaticText
                             Accessible.name: text
+                            Accessible.description: updateFooter.failed ? Plugin.Model.updateError : ""
                         }
+                    }
+                    Rectangle {
+                        id: updateProgress
+                        objectName: "update-progress"
+                        width: parent.width
+                        height: Style.space(3)
+                        radius: height / 2
+                        visible: Plugin.Model.updateRunning
+                        color: Qt.rgba(root.barForeground.r, root.barForeground.g, root.barForeground.b, 0.12)
+                        clip: true
+                        property real phase: 0
+                        readonly property bool animating: progressAnimation.running
+                        Accessible.role: Accessible.ProgressBar
+                        Accessible.name: Plugin.Model.updateStage === "checking" ? "Checking for updates" : "Opening updater"
+                        Rectangle {
+                            x: (parent.width + width) * updateProgress.phase - width
+                            width: parent.width * 0.3
+                            height: parent.height
+                            radius: parent.radius
+                            color: Commons.Color.accent
+                        }
+                        NumberAnimation {
+                            id: progressAnimation
+                            target: updateProgress
+                            property: "phase"
+                            from: 0
+                            to: 1
+                            duration: 1200
+                            loops: Animation.Infinite
+                            running: Plugin.Model.updateRunning && updateFooter.visible
+                        }
+                    }
+                    Text {
+                        id: updateDetail
+                        objectName: "update-status-detail"
+                        width: parent.width
+                        visible: !Plugin.Model.updateRunning && text !== ""
+                        text: updateFooter.failed ? root.updateFailureReason(Plugin.Model.updateError) : updateFooter.finished && !updateFooter.current ? "Finish the update in Terminal." : ""
+                        textFormat: Text.PlainText
+                        wrapMode: Text.WordWrap
+                        color: root.barForeground
+                        opacity: 0.7
+                        font.family: root.panelFont
+                        font.pixelSize: Style.space(updateFooter.failed ? 12 : 11)
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: text
+                        Accessible.description: updateFooter.failed ? Plugin.Model.updateError : ""
                     }
                     Plugin.PanelButton {
                         id: updateAction
                         objectName: "update-action"
-                        anchors.right: parent.right
-                        visible: !!updates.guide.canUpdate
+                        width: parent.width
+                        implicitHeight: Style.space(34)
+                        visible: !!updates.guide.canUpdate && !Plugin.Model.updateRunning
                         enabled: !Plugin.Model.updateRunning
-                        text: updateFooter.finished ? "Done" : updateFooter.failed ? "Retry" : "Update"
-                        foreground: Commons.Color.popups.background
+                        text: updateFooter.finished ? "Done" : updateFooter.failed ? "Retry update" : "Update now"
+                        foreground: Commons.Color.accent
                         fontFamily: root.panelFont
-                        primary: true
-                        Accessible.name: updateFooter.finished ? "Back to usage" : updates.guide.actionLabel || "Update in terminal"
+                        alignLeft: true
+                        outlined: true
+                        Accessible.name: text
                         onClicked: {
                             if (updateFooter.finished) root.showUsage()
                             else Plugin.Model.startUpdate()
                         }
                     }
-                }
-                Rectangle {
-                    id: updateProgress
-                    objectName: "update-progress"
-                    y: updateActions.y + updateActions.height + Style.space(4)
-                    width: parent.width
-                    height: Style.space(3)
-                    radius: height / 2
-                    visible: Plugin.Model.updateRunning
-                    color: Qt.rgba(root.barForeground.r, root.barForeground.g, root.barForeground.b, 0.12)
-                    clip: true
-                    property real phase: 0
-                    readonly property bool animating: progressAnimation.running
-                    Accessible.role: Accessible.ProgressBar
-                    Accessible.name: "Opening the update terminal"
-                    Rectangle {
-                        x: (parent.width + width) * updateProgress.phase - width
-                        width: parent.width * 0.3
-                        height: parent.height
-                        radius: parent.radius
-                        color: Commons.Color.accent
-                    }
-                    NumberAnimation {
-                        id: progressAnimation
-                        target: updateProgress
-                        property: "phase"
-                        from: 0
-                        to: 1
-                        duration: 1200
-                        loops: Animation.Infinite
-                        running: Plugin.Model.updateRunning && updateFooter.visible
-                    }
-                }
-                Text {
-                    id: updateDetail
-                    objectName: "update-status-detail"
-                    y: updateActions.y + updateActions.height + Style.space(12)
-                    width: parent.width
-                    text: updateFooter.failed ? Plugin.Model.updateError : updateFooter.current ? Plugin.Model.updateMessage : !updates.guide.canUpdate ? "Use the release notes or update help to update this installation." : (updateFooter.finished ? "Follow the download and installation in the terminal. " : "A terminal opens automatically. ") + (updates.guide.method === "omarchy" ? "The shell restarts after the update succeeds." : "Your desktop bar reloads when installation finishes.")
-                    textFormat: Text.PlainText
-                    wrapMode: Text.WordWrap
-                    color: updateFooter.failed ? Commons.Color.urgent : root.barForeground
-                    opacity: updateFooter.failed ? 1 : 0.7
-                    font.family: root.panelFont
-                    font.pixelSize: Style.font.caption
-                    Accessible.role: Accessible.StaticText
-                    Accessible.name: text
                 }
             }
             Item {

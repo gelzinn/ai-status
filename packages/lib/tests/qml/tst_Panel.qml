@@ -308,7 +308,7 @@ Item {
             snapshot.version = {current: "0.11.0", latest: "0.12.1", has_update: true}
             snapshot.update = {
                 method: "omarchy",
-                title: "Update the Omarchy plugin", description: "Omarchy updates AI Status in place.",
+                title: "Update the Omarchy plugin", description: "Updates in Terminal, then restarts the shell. Your settings are kept.",
                 steps: ["Start the update.", "Wait for the plugin to reload."],
                 command: "omarchy plugin update io.github.gelzinn.ai-status",
                 canUpdate: canUpdate, actionLabel: "Update in terminal",
@@ -395,15 +395,38 @@ Item {
             mouseClick(action)
             compare(Plugin.Model.updateStarts, 1)
             verify(!action.enabled)
-            mouseClick(action)
+            verify(!action.visible)
+            Plugin.Model.startUpdate()
             compare(Plugin.Model.updateStarts, 1)
             Plugin.Model.updateError = "Terminal not found. Run the command above."
             Plugin.Model.updateRunning = false
             verify(action.enabled)
+            verify(action.visible)
+            compare(action.text, "Retry update")
             compare(findChild(panel, "update-status-detail").text, Plugin.Model.updateError)
-            compare(findChild(panel, "update-status-label").text, "Could not start")
+            compare(findChild(panel, "update-status-label").text, "Update failed")
+            const detail = findChild(panel, "update-status-detail")
+            const icon = findChild(panel, "update-status-icon")
+            compare(detail.font.pixelSize, Style.space(12))
+            compare(detail.wrapMode, Text.WordWrap)
+            compare(detail.color, panel.barForeground)
+            compare(detail.Accessible.description, Plugin.Model.updateError)
+            verify(icon.visible)
+            compare(icon.name, "info")
+            compare(icon.width, Style.space(16))
+            compare(icon.foreground, findChild(panel, "update-status-label").color)
+            for (const prefix of ["Download failed.", "The download was interrupted.", "Update download failed.", "Installer download failed."]) {
+                Plugin.Model.updateError = prefix + " Check your connection and retry."
+                compare(detail.text, "Check your connection and retry.")
+                compare(detail.Accessible.description, Plugin.Model.updateError)
+            }
+            Plugin.Model.updateError = "No supported terminal found. Run the command shown in the guide in your terminal."
+            compare(detail.text, "Run the manual command or try again.")
+            compare(detail.Accessible.description, Plugin.Model.updateError)
             verify(findChild(panel, "update-command-box").visible)
-            mouseClick(action)
+            compare(findChild(panel, "update-manual-command").text, "Hide manual update")
+            action.forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Return)
             compare(Plugin.Model.updateStarts, 2)
             compare(Plugin.Model.updateError, "")
             panel.close()
@@ -416,9 +439,17 @@ Item {
             wait(20)
             verify(panel.updatePage)
             verify(!findChild(panel, "update-action").visible)
+            verify(!findChild(panel, "update-footer").visible)
+            verify(!findChild(panel, "update-status-detail").visible)
             verify(findChild(panel, "update-release-notes").visible)
+            compare(findChild(panel, "update-guide-link").text, "Installation guide")
+            verify(!findChild(panel, "update-guide-link").outlined)
             verify(findChild(panel, "update-copy-command").visible)
             compare(Plugin.Model.updateStarts, 0)
+            const copy = findChild(panel, "update-copy-command")
+            copy.forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Return)
+            compare(copy.iconName, "check")
             Plugin.Model.updateError = ""
             panel.configure()
             verify(!panel.updatePage)
@@ -442,21 +473,37 @@ Item {
             compare(scroller.mapToItem(footer, 0, scroller.height).y, separator.y)
             verify(!command.visible)
             verify(!progress.visible)
-            compare(action.text, "Update")
-            verify(action.primary)
+            compare(action.text, "Update now")
+            verify(!action.primary)
+            verify(action.outlined)
+            verify(action.alignLeft)
+            compare(action.iconName, "")
+            compare(action.leadingIconName, "")
+            compare(action.trailingIconName, "")
+            compare(action.width, footer.width)
+            compare(action.x, 0)
+            compare(icon.width, Style.space(16))
+            compare(label.font.pixelSize, Style.font.body)
+            compare(detail.font.pixelSize, Style.space(11))
+            verify(!detail.visible)
+            compare(findChild(panel, "update-manual-command").text, "Update manually…")
             mouseClick(findChild(panel, "update-manual-command"))
             wait(20)
             verify(command.visible)
-            const footerBottom = footer.y + footer.height
+            compare(findChild(panel, "update-manual-command").text, "Hide manual update")
             compare(findChild(panel, "update-command").text, Plugin.Model.snapshot.update.command)
             const copy = findChild(panel, "update-copy-command")
             mouseClick(copy)
             compare(copy.iconName, "check")
             mouseClick(action)
+            wait(20)
+            const footerBottom = footer.y + footer.height
             compare(Plugin.Model.updateStarts, 1)
             compare(icon.name, "loader-circle")
             tryVerify(() => icon.rotation > 0)
-            compare(label.text, "Checking release…")
+            compare(label.text, "Checking for updates…")
+            verify(!action.visible)
+            verify(!detail.visible)
             verify(progress.visible)
             verify(progress.animating)
             const phase = progress.phase
@@ -464,7 +511,9 @@ Item {
             verify(!action.enabled)
             Plugin.Model.updateStage = "opening"
             Plugin.Model.updateMessage = "Opening the updater in a terminal…"
-            compare(label.text, "Opening terminal…")
+            compare(label.text, "Opening updater…")
+            verify(!detail.visible)
+            verify(!action.visible)
             compare(footer.y + footer.height, footerBottom)
             panel.showUsage()
             tryCompare(icon, "rotation", 0)
@@ -473,13 +522,19 @@ Item {
             tryVerify(() => icon.rotation > 0)
             Plugin.Model.updateMessage = "The updater is open in a terminal. Follow its progress there."
             Plugin.Model.updateRunning = false
-            compare(label.text, "Terminal opened")
+            wait(20)
+            compare(label.text, "Updater opened")
             compare(icon.name, "check")
+            compare(icon.foreground, label.color)
             tryCompare(icon, "rotation", 0)
             verify(!progress.visible)
             verify(!progress.animating)
-            verify(detail.text.indexOf("in the terminal") !== -1)
-            verify(detail.text.indexOf("shell restarts") !== -1)
+            verify(detail.visible)
+            verify(action.visible)
+            compare(detail.text, "Finish the update in Terminal.")
+            verify(findChild(panel, "update-description").text.indexOf("restarts the shell") !== -1)
+            verify(!findChild(panel, "update-next-step"))
+            verify(detail.mapToItem(action, 0, detail.height).y <= 0)
             compare(action.text, "Done")
             mouseClick(action)
             verify(!panel.updatePage)
@@ -493,7 +548,16 @@ Item {
             Plugin.Model.updateMessage = "AI Status is already up to date."
             Plugin.Model.updateRunning = false
             compare(findChild(panel, "update-status-label").text, "Up to date")
-            compare(findChild(panel, "update-status-detail").text, "AI Status is already up to date.")
+            verify(findChild(panel, "update-description").visible)
+            compare(findChild(panel, "update-description").text, "Your settings are kept.")
+            verify(!findChild(panel, "update-next-step"))
+            compare(findChild(panel, "update-versions").text, "v0.11.0")
+            compare(findChild(panel, "update-status-detail").text, "")
+            verify(!findChild(panel, "update-status-detail").visible)
+            compare(findChild(panel, "update-status-icon").name, "check")
+            compare(findChild(panel, "update-status-icon").foreground, findChild(panel, "update-status-label").color)
+            compare(findChild(panel, "update-action").text, "Done")
+            verify(findChild(panel, "update-action").outlined)
             verify(!findChild(panel, "update-progress").visible)
         }
         function test_update_notice_does_not_replace_backend_error() {
