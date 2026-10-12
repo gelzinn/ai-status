@@ -36,26 +36,53 @@ def entry_name(entry):
     return f"{name} · {label}" if label else name
 
 
-def metric_percentage(metric):
+def metric_percentage(metric, selected=None):
+    if isinstance(metric.get("percentage"), bool):
+        return None
     try:
         value = float(metric.get("percentage"))
-        return value if math.isfinite(value) else None
-    except (ValueError, TypeError):
+        if not math.isfinite(value):
+            return None
+        if state.get_usage_display(selected) == "remaining":
+            return max(0.0, min(100.0, 100.0 - value))
+        return value
+    except (ValueError, TypeError, OverflowError):
         return None
 
 
-def metric_value(metric):
+def _metric_ratio(metric):
+    if metric.get("value_format") != "amount_ratio":
+        return None
+    if any(isinstance(metric.get(key), bool) for key in ("amount", "limit")):
+        return None
+    try:
+        amount, limit = float(metric.get("amount")), float(metric.get("limit"))
+        if math.isfinite(amount) and math.isfinite(limit) and limit > 0:
+            return amount, limit
+    except (ValueError, TypeError, OverflowError):
+        pass
+    return None
+
+
+def _shows_remaining(metric, selected):
+    # Provider percentages are normalized to consumption, including credit
+    # ratios. Balances and uncapped spend have no percentage to complement.
+    return state.get_usage_display(selected) == "remaining" and (
+        metric_percentage(metric) is not None or _metric_ratio(metric) is not None
+    )
+
+
+def metric_value(metric, selected=None):
     unit = metric.get("unit", "")
-    if metric.get("value_format") == "amount_ratio":
-        try:
-            amount, limit = float(metric.get("amount")), float(metric.get("limit"))
-            if math.isfinite(amount) and math.isfinite(limit) and limit > 0:
-                if unit == "USD":
-                    return f"${amount:.2f} / ${limit:.2f}"
-                return f"{amount:,.2f} / {limit:,.2f} {unit}".strip()
-        except (ValueError, TypeError):
-            pass
-    percentage = metric_percentage(metric)
+    ratio = _metric_ratio(metric)
+    if ratio is not None:
+        amount, limit = ratio
+        if _shows_remaining(metric, selected):
+            amount = max(0.0, min(limit, limit - amount))
+        if unit == "USD":
+            return f"${amount:.2f} / ${limit:.2f}"
+        return f"{amount:,.2f} / {limit:,.2f} {unit}".strip()
+    percentage = metric_percentage(metric, selected)
     if percentage is not None:
         return f"{percentage:.0f}%"
     try:
@@ -67,11 +94,22 @@ def metric_value(metric):
     return f"${amount:.2f}" if unit == "USD" else f"{amount:,.2f} {unit}".strip()
 
 
-def metric_title(metric):
+def metric_title(metric, selected=None):
     title = metric.get("title") or metric.get("name") or TYPE_NAMES.get(metric.get("type", "generic"), "Usage")
     unit = metric.get("unit")
     if unit and (metric_percentage(metric) is None or metric.get("value_format") == "amount_ratio"):
         title = title.removesuffix(f" ({unit})")
+    if _shows_remaining(metric, selected):
+        # Some providers embed the used amount in their label. Keep that
+        # factual breakdown in detail instead of relabeling it as remaining.
+        title = re.sub(r":\s*\$[\d.,]+ of \$[\d.,]+ used(?:\s+\([^)]+\))?$", "", title)
+        title, count = re.subn(
+            r"\b(usage|used|spend|spent)\b",
+            lambda match: "Remaining" if match[0][0].isupper() else "remaining",
+            title, flags=re.IGNORECASE,
+        )
+        if not count:
+            title += " remaining"
     return title
 
 
@@ -179,7 +217,7 @@ def get_selected_metric_text(latest_data, selected, spinner=None):
     if not m and metrics:
         m = sorted(metrics, key=metric_sort_key)[0]
 
-    metric_name = metric_title(m) if m else "Usage"
+    metric_name = metric_title(m, selected) if m else "Usage"
 
     if spinner is not None:
         # While loading the percentage isn't known yet — show the spinner in
@@ -188,7 +226,7 @@ def get_selected_metric_text(latest_data, selected, spinner=None):
         pct_str = spinner
         show_pct = True
     elif m:
-        pct_str = metric_value(m)
+        pct_str = metric_value(m, selected)
     else:
         pct_str = "0%"
 
@@ -275,7 +313,7 @@ def format_reset_time(seconds, mtype):
 
 
 def format_provider_block(
-    provider_data, selected_dir=None, selected_idx=None, selected_metric=None
+    provider_data, selected_dir=None, selected_idx=None, selected_metric=None, selected=None
 ):
     provider = escape(entry_name(provider_data))
     metrics = provider_data.get("metrics", [])
@@ -299,7 +337,7 @@ def format_provider_block(
     sorted_metrics = sorted(metrics, key=metric_sort_key)
     lines = [header, ""]
     for metric in sorted_metrics:
-        name = escape(metric_title(metric))
+        name = escape(metric_title(metric, selected))
         is_active = is_selected and metric_key(metric) == selected_metric
         detail = metric_detail(metric)
 
@@ -308,13 +346,13 @@ def format_provider_block(
         label = f"•   {name}:" if is_active else f"    {name}:"
         if recede:
             label = _dim(label, recede)
-        percentage = metric_percentage(metric)
+        percentage = metric_percentage(metric, selected)
         if percentage is not None:
             bar_str = make_progress_bar(percentage)
             if metric.get("value_format") == "amount_ratio":
-                bar_str = bar_str.rsplit(" ", 1)[0] + " " + escape(metric_value(metric))
+                bar_str = bar_str.rsplit(" ", 1)[0] + " " + escape(metric_value(metric, selected))
         else:
-            bar_str = escape(metric_value(metric))
+            bar_str = escape(metric_value(metric, selected))
         bar_line = ("    " + _dim(bar_str, recede)) if recede else f"    {bar_str}"
 
         lines.append(label)
@@ -328,7 +366,7 @@ def format_provider_block(
 
 
 def format_loading_provider_block(
-    provider_data, frame_index, selected_dir=None, selected_idx=None, selected_metric=None
+    provider_data, frame_index, selected_dir=None, selected_idx=None, selected_metric=None, selected=None
 ):
     provider = escape(entry_name(provider_data))
     metrics = provider_data.get("metrics", [])
@@ -356,7 +394,7 @@ def format_loading_provider_block(
     sorted_metrics = sorted(metrics, key=metric_sort_key)
     lines = [header, ""]
     for metric in sorted_metrics:
-        name = escape(metric_title(metric))
+        name = escape(metric_title(metric, selected))
         is_active = is_selected and metric_key(metric) == selected_metric
         detail = metric_detail(metric)
 
@@ -369,7 +407,7 @@ def format_loading_provider_block(
             lines.append(f"    {make_shimmer_bar(frame_index, spinner)}")
         else:
             # Cached balances/text statuses have no quota bar to animate.
-            value = escape(metric_value(metric)) + " " + spinner
+            value = escape(metric_value(metric, selected)) + " " + spinner
             lines.append("    " + (_dim(value, recede) if recede else value))
         if detail:
             lines.append("    " + _dim(detail, recede if recede else DIM_RESET))
@@ -416,11 +454,11 @@ def build_loading_state(latest_data, frame, selected=None, pending=None):
         for p in latest_data:
             if _is_pending(p):
                 block = format_loading_provider_block(
-                    p, frame, selected_dir, selected_idx, selected_metric
+                    p, frame, selected_dir, selected_idx, selected_metric, selected
                 )
             else:
                 block = format_provider_block(
-                    p, selected_dir, selected_idx, selected_metric
+                    p, selected_dir, selected_idx, selected_metric, selected
                 )
             if block:
                 blocks.append(block)
@@ -458,7 +496,7 @@ def build_final_state(latest_data, selected=None):
         blocks = []
         for p in latest_data:
             block = format_provider_block(
-                p, selected_dir, selected_idx, selected_metric
+                p, selected_dir, selected_idx, selected_metric, selected
             )
             if block:
                 blocks.append(block)

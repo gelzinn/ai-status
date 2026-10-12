@@ -38,6 +38,9 @@ curl -fsSL https://ai-status.gelzin.com/install | bash -s -- \
 
 If you prefer no logo (text-only), swap `--icon-mode logo` for `--icon-mode off`. Right-click the module to change preferences later: Quickshell has a native settings page and Waybar uses the config TUI.
 
+Add `--usage-display remaining` to show the quota you have left. The default
+is `used`; updates preserve your choice unless you pass this flag explicitly.
+
 Use `--bar waybar` or `--bar quickshell` to select explicitly. Automatic detection prefers a running Omarchy shell, then Waybar; when neither is running it uses the only available integration, or Waybar if both are installed. The installer configures and reloads only the selected bar. Existing `--configure-waybar true|false` flags still work and select Waybar; combining them with `--bar quickshell` is an error.
 
 On updates, existing display preferences and provider selection are preserved unless explicit flags or wizard choices replace them. `--no-interactive` without `--configure-bar true` installs but does not add/enable a bar widget.
@@ -94,14 +97,15 @@ Prefer to choose each option manually? Run the wizard:
 bash <(curl -fsSL https://ai-status.gelzin.com/install)
 ```
 
-Arrow keys toggle Yes/No, Enter confirms. When both integrations are available and no explicit bar flag was passed, the wizard first offers Quickshell or Waybar. It then asks:
+Arrow keys change the selected answer; Enter confirms. When both integrations are available and no explicit bar flag was passed, the wizard first offers Quickshell or Waybar. It then asks:
 
 1. Show provider logo as an image?
 2. Show provider name? (e.g. "Claude")
 3. Show model/plan name? (e.g. "(Pro)")
 4. Show metric type? (e.g. "Rolling Usage")
 5. Show percentage? (e.g. "4%")
-6. Add/enable the widget in the selected bar automatically?
+6. Show quota as **Used** or **Remaining**?
+7. Add/enable the widget in the selected bar automatically?
 
 ## Manual Waybar config
 
@@ -180,7 +184,7 @@ This copies the backup back (saving the current one as `.pre-revert` first) and 
 | Scroll up/down | Switch between providers |
 | Middle-click | Cycle through the provider's limits (rolling → weekly → monthly, and per-model ones like Claude's Fable weekly) |
 
-The config TUI lets you enable/disable providers, reorder with Shift+J/K, toggle display settings, and switch icon modes (bot, logo, off).
+The config TUI lets you enable/disable providers, reorder with Shift+J/K, toggle display settings, switch icon modes (bot, logo, off), and choose **Usage display: Used / Remaining**. Use Space or the left/right arrows to change the display choice, Enter to save, or Escape to cancel.
 
 ## Command line
 
@@ -199,6 +203,8 @@ use `~/.local/bin/ai-status`.
 | Collect usage for enabled connections | `ai-status status` |
 | Check the version, paths and installed collectors | `ai-status doctor` |
 | Change providers, ordering and display preferences | `ai-status config` |
+| Show quota remaining without opening Settings | `ai-status config --usage-display remaining` |
+| Show quota used (default) | `ai-status config --usage-display used` |
 | Request a refresh of the running app or daemon | `ai-status refresh` |
 
 `status` prints JSON with `providers` and `errors` and updates the usage cache.
@@ -206,6 +212,13 @@ use `~/.local/bin/ai-status`.
 provider usage. `providers` lists default connections without verifying their
 credentials; use `providers --json` for scripts. For example, save a snapshot
 with `ai-status status > usage.json`.
+
+The usage display preference changes quota percentages, progress bars, and
+amounts with a known limit across the bar and usage panel. **Remaining** shows
+`100% - used`, and `$25 / $100` used becomes `$75 / $100` remaining. Raw `status`
+JSON, uncapped spend, available balances, and reset credits retain their original
+meaning. The CLI option redraws cached usage without fetching
+providers again.
 
 ### Default sessions and additional accounts
 
@@ -285,6 +298,7 @@ a release; the CLI's `ai-status --version` prints the installed version.
 | `--show-model` | `true`, `false` |
 | `--show-metric` | `true`, `false` |
 | `--show-pct` | `true`, `false` |
+| `--usage-display` | `used` (default), `remaining` |
 | `--bar` | `auto` (default), `waybar`, `quickshell` |
 | `--configure-bar` | `true`, `false` |
 | `--configure-waybar` | `true`, `false`; legacy flag selecting Waybar |

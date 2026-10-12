@@ -696,7 +696,14 @@ def _build_parser():
     _configure_accounts_parser(command_parsers["accounts"])
     command_parsers["config"].epilog = (
         "Windows and macOS open native Settings by default. On Linux, this opens the\n"
-        "terminal configuration UI. On macOS, --frontend selects the terminal UI."
+        "terminal configuration UI. On macOS, --frontend selects the terminal UI.\n\n"
+        "Set quota display without opening Settings:\n"
+        "  ai-status config --usage-display remaining\n"
+        "  ai-status config --usage-display used"
+    )
+    command_parsers["config"].add_argument(
+        "--usage-display", choices=state.USAGE_DISPLAY_MODES,
+        help="Show quota used or remaining; save directly without opening Settings (default: used)",
     )
     command_parsers["status"].epilog = "Output: a JSON object with providers and errors. Requires provider authentication."
     command_parsers["update"].epilog = (
@@ -804,6 +811,16 @@ def main(argv=None):
         return _run_accounts(args, command_parsers[command])
     if command == "providers":
         return _providers_main(args.json)
+    if command == "config" and args.usage_display is not None:
+        selected = state.load_selected() or {}
+        selected["usage_display"] = args.usage_display
+        try:
+            paths.atomic_json(state.SELECTED_FILE, selected)
+        except OSError:
+            print("Unable to save display preferences.", file=sys.stderr)
+            return 1
+        print(f"Usage display: {args.usage_display.title()}")
+        return 0
     if command == "update":
         from . import updates
         try:

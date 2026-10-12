@@ -41,6 +41,7 @@ SHOW_PROVIDER="true"
 SHOW_MODEL="true"
 SHOW_METRIC="false"
 SHOW_PCT="true"
+USAGE_DISPLAY="used"
 PREFS_FILE="$HOME/.config/ai-status/selected.json"
 [ -f "$PREFS_FILE" ] || PREFS_FILE="$HOME/.config/waybar-ai-status/selected.json"
 if [ -f "$PREFS_FILE" ]; then
@@ -54,6 +55,9 @@ if not isinstance(data, dict):
 mode = data.get("icon_mode", "bot" if data.get("show_icon", True) else "off")
 if mode in ("bot", "logo", "off"):
     print("ICON_MODE=" + mode)
+usage_display = data.get("usage_display", "used")
+if usage_display in ("used", "remaining"):
+    print("USAGE_DISPLAY=" + usage_display)
 for key in ("show_provider", "show_model", "show_metric", "show_pct"):
     if isinstance(data.get(key), bool):
         print(key.upper() + "=" + str(data[key]).lower())
@@ -75,7 +79,7 @@ ROLLBACK=false
 # ── parse flags ───────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --icon-mode|--show-provider|--show-model|--show-metric|--show-pct|--configure-waybar|--configure-bar|--bar)
+        --icon-mode|--show-provider|--show-model|--show-metric|--show-pct|--usage-display|--configure-waybar|--configure-bar|--bar)
             [ $# -ge 2 ] || { echo "Missing value for $1" >&2; exit 1; } ;;
     esac
     case "$1" in
@@ -84,6 +88,7 @@ while [[ $# -gt 0 ]]; do
         --show-model)       SHOW_MODEL="$2"; shift 2 ;;
         --show-metric)      SHOW_METRIC="$2"; shift 2 ;;
         --show-pct)         SHOW_PCT="$2"; shift 2 ;;
+        --usage-display)    USAGE_DISPLAY="$2"; shift 2 ;;
         --configure-waybar) CONFIGURE_WAYBAR="$2"; shift 2 ;;
         --configure-bar)    CONFIGURE_BAR="$2"; shift 2 ;;
         --bar)              BAR="$2"; [ "$BAR" = auto ] || BAR_EXPLICIT=true; shift 2 ;;
@@ -106,6 +111,7 @@ if [ -n "$CONFIGURE_WAYBAR" ]; then
 fi
 validate_options() {
     case "$ICON_MODE" in bot|logo|off) ;; *) echo "Invalid --icon-mode: $ICON_MODE" >&2; exit 1 ;; esac
+    case "$USAGE_DISPLAY" in used|remaining) ;; *) echo "Invalid --usage-display: $USAGE_DISPLAY" >&2; exit 1 ;; esac
     local option value
     for option in SHOW_PROVIDER SHOW_MODEL SHOW_METRIC SHOW_PCT CONFIGURE_BAR; do
         value="${!option}"
@@ -385,12 +391,12 @@ if [ "$NON_INTERACTIVE" = false ]; then
         WIZARD_OUT="$WORK_DIR/wizard.json"
         # If the user cancels the wizard (Ctrl-C -> exit 1), don't let `set -e`
         # abort mid-install and leave a half-state — finish with defaults.
-        if python3 "$WIZARD_SCRIPT" "$WIZARD_OUT" "$BAR" "$BAR_EXPLICIT"; then
+        if python3 "$WIZARD_SCRIPT" "$WIZARD_OUT" "$BAR" "$BAR_EXPLICIT" "$USAGE_DISPLAY"; then
             eval "$(python3 - "$WIZARD_OUT" <<'PY'
 import json, shlex, sys
 with open(sys.argv[1]) as f:
     data = json.load(f)
-for key in ('BAR', 'ICON_MODE', 'SHOW_PROVIDER', 'SHOW_MODEL', 'SHOW_METRIC', 'SHOW_PCT', 'CONFIGURE_BAR'):
+for key in ('BAR', 'ICON_MODE', 'SHOW_PROVIDER', 'SHOW_MODEL', 'SHOW_METRIC', 'SHOW_PCT', 'USAGE_DISPLAY', 'CONFIGURE_BAR'):
     if key in data:
         print(f'{key}={shlex.quote(str(data[key]))}')
 PY
@@ -434,6 +440,7 @@ echo -e "  ${C_PURPLE}show provider${C_RESET} ${C_DIM}>${C_RESET} $(bool_color "
 echo -e "  ${C_PURPLE}show model${C_RESET}    ${C_DIM}>${C_RESET} $(bool_color "$SHOW_MODEL")$SHOW_MODEL${C_RESET}"
 echo -e "  ${C_PURPLE}show metric${C_RESET}   ${C_DIM}>${C_RESET} $(bool_color "$SHOW_METRIC")$SHOW_METRIC${C_RESET}"
 echo -e "  ${C_PURPLE}show %${C_RESET}        ${C_DIM}>${C_RESET} $(bool_color "$SHOW_PCT")$SHOW_PCT${C_RESET}"
+echo -e "  ${C_PURPLE}quota display${C_RESET} ${C_DIM}>${C_RESET} ${C_CYAN}$USAGE_DISPLAY${C_RESET}"
 echo -e "  ${C_PURPLE}bar${C_RESET}           ${C_DIM}>${C_RESET} ${C_CYAN}$BAR${C_RESET}"
 echo -e "  ${C_PURPLE}bar config${C_RESET}    ${C_DIM}>${C_RESET} $(bool_color "$CONFIGURE_BAR")$CONFIGURE_BAR${C_RESET}"
 echo ""
@@ -453,9 +460,9 @@ ln -sf "$BIN_DIR/ai-status" "$BIN_DIR/waybar-ai-status"
 CONFIG_DIR="$HOME/.config/ai-status"
 mkdir -p "$CONFIG_DIR"
 
-python3 - "$CONFIG_DIR/selected.json" "$ICON_MODE" "$SHOW_PROVIDER" "$SHOW_MODEL" "$SHOW_METRIC" "$SHOW_PCT" <<'PY'
+python3 - "$CONFIG_DIR/selected.json" "$ICON_MODE" "$SHOW_PROVIDER" "$SHOW_MODEL" "$SHOW_METRIC" "$SHOW_PCT" "$USAGE_DISPLAY" <<'PY'
 import json, os, sys, tempfile
-path, icon, sp, sm, smt, pct = sys.argv[1:]
+path, icon, sp, sm, smt, pct, usage_display = sys.argv[1:]
 existing = {}
 if os.path.exists(path):
     with open(path, encoding="utf-8") as source:
@@ -463,7 +470,7 @@ if os.path.exists(path):
     if not isinstance(existing, dict):
         sys.exit("Display preferences must be a JSON object")
 existing.update(icon_mode=icon, show_provider=sp == "true", show_model=sm == "true",
-                show_metric=smt == "true", show_pct=pct == "true")
+                show_metric=smt == "true", show_pct=pct == "true", usage_display=usage_display)
 existing.setdefault("provider", "claude")
 existing.setdefault("idx", 0)
 existing.setdefault("metric", "rolling")

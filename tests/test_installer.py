@@ -289,14 +289,14 @@ sys.exit(result.returncode)
         path = self.home / ".config/ai-status/selected.json"
         saved = {"icon_mode": "logo", "show_provider": False, "show_model": False,
                  "show_metric": True, "show_pct": False, "provider": "codex", "idx": 3,
-                 "metric": "weekly", "custom": "keep this"}
+                 "metric": "weekly", "usage_display": "remaining", "custom": "keep this"}
         path.write_text(json.dumps(saved))
         result = self.run_installer(display_flags=False)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(path.read_text()), saved)
-        result = self.run_installer()  # Explicit flags take precedence.
+        result = self.run_installer("--usage-display", "used")  # Explicit flags take precedence.
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(json.loads(path.read_text()), {**saved, "icon_mode": "off"})
+        self.assertEqual(json.loads(path.read_text()), {**saved, "icon_mode": "off", "usage_display": "used"})
 
     def test_offline_rollback_restores_previous_version(self):
         for args in (("--version", "v0.9.0"), (), ("--rollback",)):

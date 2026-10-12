@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 LIB = Path(__file__).resolve().parents[1]
@@ -64,7 +65,8 @@ exit "${AI_STATUS_TEST_PLUGIN_FAILURE:-0}"''')
         self.assertTrue((self.home / ".local/bin/ai-status").is_symlink())
 
     def test_repeated_quickshell_install_updates_only_ai_status_and_keeps_preferences(self):
-        self.install("--bar", "quickshell", "--configure-bar", "true", "--show-pct", "false", "--icon-mode", "off")
+        self.install("--bar", "quickshell", "--configure-bar", "true", "--show-pct", "false", "--icon-mode", "off",
+                     "--usage-display", "remaining")
         self.log.write_text("")
         self.install("--bar", "quickshell", "--configure-bar", "true")
         self.assertIn(f"omarchy plugin update {PLUGIN_ID} --yes", self.commands())
@@ -72,6 +74,18 @@ exit "${AI_STATUS_TEST_PLUGIN_FAILURE:-0}"''')
         prefs = json.loads((self.home / ".config/ai-status/selected.json").read_text())
         self.assertFalse(prefs["show_pct"])
         self.assertEqual(prefs["icon_mode"], "off")
+        self.assertEqual(prefs["usage_display"], "remaining")
+
+    def test_usage_display_defaults_to_used_and_explicit_flag_overrides_saved_mode(self):
+        self.install("--bar", "waybar", "--configure-bar", "false")
+        path = self.home / ".config/ai-status/selected.json"
+        self.assertEqual(json.loads(path.read_text())["usage_display"], "used")
+        prefs = {**json.loads(path.read_text()), "provider": "codex", "metric": "weekly", "custom": "keep"}
+        path.write_text(json.dumps(prefs))
+        self.install("--bar", "waybar", "--configure-bar", "false", "--usage-display", "remaining")
+        self.assertEqual(json.loads(path.read_text()), {**prefs, "usage_display": "remaining"})
+        self.install("--bar", "waybar", "--configure-bar", "false", "--usage-display", "used")
+        self.assertEqual(json.loads(path.read_text()), {**prefs, "usage_display": "used"})
 
     def test_legacy_flag_selects_waybar_and_preserves_omarchy_configuration(self):
         shell_config = self.home / ".config/omarchy/shell.json"
@@ -103,7 +117,9 @@ exit "${AI_STATUS_TEST_PLUGIN_FAILURE:-0}"''')
         self.assertNotIn("plugin enable", self.commands())
 
     def test_conflicting_or_invalid_flags_do_not_install(self):
-        for flags in (("--bar", "quickshell", "--configure-waybar", "true"), ("--bar", "unknown"), ("--configure-bar", "invalid"), ("--show-pct", "invalid"), ("--bar",)):
+        for flags in (("--bar", "quickshell", "--configure-waybar", "true"), ("--bar", "unknown"),
+                      ("--configure-bar", "invalid"), ("--show-pct", "invalid"), ("--bar",),
+                      ("--usage-display", "invalid"), ("--usage-display",), ("--usage-display", "")):
             self.install(*flags, success=False)
             self.assertFalse((self.home / ".local/share/ai-status").exists())
             self.assertEqual(self.waybar_config.read_text(), self.original_waybar)
@@ -128,6 +144,72 @@ exit "${AI_STATUS_TEST_PLUGIN_FAILURE:-0}"''')
         result = subprocess.run(["bash", str(LIB / "check.sh"), "quickshell"], env=self.env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("SVG rasterizer", result.stdout)
+
+
+@unittest.skipIf(sys.platform == "win32", "The installer wizard requires a controlling terminal")
+class InstallerWizardTests(unittest.TestCase):
+    def wizard(self, keys, default="used"):
+        import fcntl
+        import pty
+        import select
+        import termios
+
+        temporary = tempfile.TemporaryDirectory(prefix="ai-status-wizard-")
+        self.addCleanup(temporary.cleanup)
+        output = Path(temporary.name) / "preferences.json"
+        master, slave = pty.openpty()
+
+        def attach_terminal():
+            os.setsid()
+            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+        process = subprocess.Popen([sys.executable, str(LIB / "install-wizard.py"), str(output), "waybar", "true", default],
+                                   stdin=slave, stdout=slave, stderr=slave, preexec_fn=attach_terminal)
+        os.close(slave)
+        transcript = b""
+        sent = False
+        deadline = time.monotonic() + 10
+        try:
+            while time.monotonic() < deadline:
+                readable, _, _ = select.select([master], [], [], 0.1)
+                if readable:
+                    try:
+                        chunk = os.read(master, 65536)
+                    except OSError:
+                        break
+                    transcript += chunk
+                    if not sent and b"Show the provider logo" in transcript:
+                        os.write(master, keys)
+                        sent = True
+                if process.poll() is not None:
+                    break
+            process.wait(timeout=1)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            os.close(master)
+        return process.returncode, transcript.decode(), json.loads(output.read_text()) if output.exists() else None
+
+    def test_wizard_offers_used_and_remaining_and_accepts_arrow_selection(self):
+        code, transcript, result = self.wizard(b"\r" * 5 + b"\x1b[C\r\r")
+        self.assertEqual(code, 0, transcript)
+        self.assertIn("Show quota as", transcript)
+        self.assertIn("Used", transcript)
+        self.assertIn("Remaining", transcript)
+        self.assertEqual(result["USAGE_DISPLAY"], "remaining")
+
+    def test_wizard_used_default_and_remaining_preference(self):
+        for mode in ("used", "remaining"):
+            with self.subTest(mode=mode):
+                code, transcript, result = self.wizard(b"\r" * 7, default=mode)
+                self.assertEqual(code, 0, transcript)
+                self.assertEqual(result["USAGE_DISPLAY"], mode)
+
+    def test_cancel_during_usage_display_does_not_publish_preferences(self):
+        code, transcript, result = self.wizard(b"\r" * 5 + b"\x1b[C\x03")
+        self.assertEqual(code, 1, transcript)
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

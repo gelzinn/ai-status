@@ -239,6 +239,7 @@ class DesktopTests(IsolatedState):
         self.assertEqual(settings.active.itemIcon(settings.active.currentIndex()).cacheKey(), tray.provider_icon("codex").cacheKey())
         settings.display["show_provider"].setChecked(False)
         settings.icon_mode.setCurrentIndex(settings.icon_mode.findData("logo"))
+        settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
         with patch.object(self.dashboard, "refresh") as refresh:
             QTest.mouseClick(settings.save_button, tray.Qt.MouseButton.LeftButton)
         refresh.assert_called_once()
@@ -247,6 +248,7 @@ class DesktopTests(IsolatedState):
         selected = state.load_selected()
         self.assertEqual(selected["metric"], "weekly")
         self.assertEqual(selected["icon_mode"], "logo")
+        self.assertEqual(selected["usage_display"], "remaining")
         self.assertFalse(selected["show_provider"])
         self.assertTrue(self.dashboard.isVisible())
         self.dashboard.back_button.click()
@@ -267,21 +269,53 @@ class DesktopTests(IsolatedState):
     def test_settings_escape_and_cancel_discard_only_unsaved_changes(self):
         self.dashboard.configure()
         settings = self.dashboard.settings_view
+        self.assertEqual(settings.usage_display.currentData(), "used")
+        settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
         settings.display["show_metric"].setChecked(True)
         with patch.object(self.dashboard, "refresh"):
             settings.save()
         saved = state.load_selected()
         settings.display["show_metric"].setChecked(False)
+        settings.usage_display.setCurrentIndex(settings.usage_display.findData("used"))
         QTest.keyClick(settings.active, tray.Qt.Key.Key_Escape)
         self.assertFalse(self.dashboard.configuring())
         self.assertEqual(state.load_selected(), saved)
         self.dashboard.configure()
         settings = self.dashboard.settings_view
         self.assertTrue(settings.display["show_metric"].isChecked())
+        self.assertEqual(settings.usage_display.currentData(), "remaining")
         settings.providers.item(0).setCheckState(tray.Qt.CheckState.Unchecked)
         settings.cancel_button.click()
         self.assertFalse(self.dashboard.configuring())
         self.assertEqual(config.enabled_order(), ["codex", "copilot"])
+
+    def test_remaining_usage_updates_values_bars_accessibility_and_tooltip(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "_dir": "codex", "_idx": 0,
+            "metrics": [{"type": "weekly", "percentage": 23},
+                        {"type": "monthly", "percentage": 25, "amount": 25, "limit": 100,
+                         "unit": "USD", "value_format": "amount_ratio"},
+                        {"type": "balance", "amount": 42.5, "unit": "USD"}]}])
+        rows = self.dashboard.metric_buttons[:]
+        self.assertEqual(rows[0].percentage.text(), "23%")
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
+        with patch.object(self.dashboard, "refresh"):
+            settings.save()
+        # Updating the preference reuses the rows and changes every usage surface.
+        self.assertEqual(self.dashboard.metric_buttons, rows)
+        self.assertEqual(rows[0].title.text(), "Weekly Remaining")
+        self.assertEqual(rows[0].percentage.text(), "77%")
+        self.assertEqual(rows[0].bar.target, 77)
+        self.assertIn("Weekly Remaining 77%", rows[0].accessibleName())
+        self.assertIn("77%", self.dashboard.tray.toolTip())
+        self.assertEqual(rows[1].percentage.text(), "$75.00 / $100.00")
+        self.assertEqual(rows[1].bar.target, 75)
+        self.assertEqual(rows[2].percentage.text(), "$42.50")
+        self.assertTrue(rows[2].bar_container.isHidden())
+        self.dashboard.show_usage()
+        self.dashboard.configure()
+        self.assertEqual(self.dashboard.settings_view.usage_display.currentData(), "remaining")
 
     def test_settings_failure_keeps_draft_open_and_does_not_refresh(self):
         self.dashboard.configure()

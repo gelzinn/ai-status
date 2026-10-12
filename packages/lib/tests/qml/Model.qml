@@ -53,7 +53,7 @@ Item {
                 names: {claude: "Claude", codex: "Codex", kiro: "Kiro"},
                 order: ["claude", "codex", "kiro"], enabled: ["claude", "codex"],
                 display: {show_provider: true, show_model: true, show_metric: false, show_pct: true},
-                iconMode: "logo"
+                iconMode: "logo", usageDisplay: "used"
             }
         }
     }

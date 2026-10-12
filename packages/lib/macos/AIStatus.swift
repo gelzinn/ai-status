@@ -144,6 +144,7 @@ struct Settings: Decodable {
     let enabled: [String]
     let display: [String: Bool]
     let iconMode: String
+    let usageDisplay: String?
 }
 
 struct ProjectInfo: Decodable {
@@ -219,6 +220,7 @@ struct SettingsDraft {
     var enabled: Set<String> = []
     var display: [String: Bool] = [:]
     var iconMode = "bot"
+    var usageDisplay = "used"
     var selected = Selection()
     var saved = false
 }
@@ -365,7 +367,7 @@ final class Model: ObservableObject {
     }
 
     var settingsValid: Bool {
-        !draft.enabled.isEmpty && draft.display.values.contains(true) && choices.contains { $0.selection == draft.selected }
+        !draft.enabled.isEmpty && draft.display.values.contains(true) && ["used", "remaining"].contains(draft.usageDisplay) && choices.contains { $0.selection == draft.selected }
     }
     func providerName(_ name: String) -> String { snapshot?.settings.names[name] ?? name }
     func logoProviderID(_ connection: String) -> String {
@@ -476,6 +478,7 @@ final class Model: ObservableObject {
         guard !settingsSaving, let snapshot = snapshot else { return }
         draft = SettingsDraft(order: snapshot.settings.order, enabled: Set(snapshot.settings.enabled),
                               display: snapshot.settings.display, iconMode: snapshot.settings.iconMode,
+                              usageDisplay: snapshot.settings.usageDisplay == "remaining" ? "remaining" : "used",
                               selected: snapshot.selected)
         settingsError = ""
         page = .settings
@@ -495,7 +498,8 @@ final class Model: ObservableObject {
         guard settingsValid, !settingsSaving else { return }
         let selection = ["provider": draft.selected.provider, "idx": draft.selected.idx, "metric": draft.selected.metric] as [String: Any]
         let payload: [String: Any] = ["enabled": draft.order.filter { draft.enabled.contains($0) },
-                                     "display": draft.display, "iconMode": draft.iconMode, "selected": selection]
+                                     "display": draft.display, "iconMode": draft.iconMode,
+                                     "usageDisplay": draft.usageDisplay, "selected": selection]
         guard let data = try? JSONSerialization.data(withJSONObject: payload), let json = String(data: data, encoding: .utf8) else { return }
         settingsSaving = true
         settingsError = ""
@@ -834,6 +838,15 @@ struct SettingsPage: View {
                         Label { Text(choice.label) } icon: { ProviderLogo(provider: choice.provider, path: choice.logoPath) }
                             .tag(choice.selection)
                     }
+                }.labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Usage display").foregroundColor(Palette.bright)
+                Picker("Usage display", selection: Binding(get: { model.draft.usageDisplay }, set: {
+                    model.draft.usageDisplay = $0; model.draft.saved = false
+                })) {
+                    Text("Used").tag("used")
+                    Text("Remaining").tag("remaining")
                 }.labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
             }
             VStack(alignment: .leading, spacing: 8) {
@@ -1341,10 +1354,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             throw AppError.message("Legacy update guide fallback failed.")
         }
         model.showSettings()
-        guard model.settingsValid, model.choices.count == 4 else { throw AppError.message("Settings model failed.") }
+        guard model.settingsValid, model.choices.count == 4, model.draft.usageDisplay == "used" else {
+            throw AppError.message("Settings model or legacy usage display fallback failed.")
+        }
         model.draft.display["show_provider"] = false
+        model.draft.usageDisplay = "remaining"
         model.accept(Data(sample.utf8))
-        guard model.draft.display["show_provider"] == false else { throw AppError.message("A refresh replaced the settings draft.") }
+        guard model.draft.display["show_provider"] == false, model.draft.usageDisplay == "remaining" else {
+            throw AppError.message("A refresh replaced the settings draft.")
+        }
+        model.draft.usageDisplay = "invalid"
+        guard !model.settingsValid else { throw AppError.message("Invalid usage display was accepted.") }
+        let remainingSample = sample.replacingOccurrences(of: "\"iconMode\":\"logo\"}", with: "\"iconMode\":\"logo\",\"usageDisplay\":\"remaining\"}")
+        model.accept(Data(remainingSample.utf8))
+        model.showSettings()
+        guard model.settingsValid, model.draft.usageDisplay == "remaining" else {
+            throw AppError.message("Reopening settings did not reload the saved usage display.")
+        }
         let malformed = Data(sample.replacingOccurrences(of: "\"schemaVersion\":1", with: "\"schemaVersion\":2").utf8)
         model.accept(malformed)
         guard model.snapshot?.schemaVersion == 1 else { throw AppError.message("Invalid snapshot replaced usable data.") }

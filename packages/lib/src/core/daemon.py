@@ -82,15 +82,19 @@ def _run(output_format="waybar"):
 
     latest_data = state.load_cache()
 
-    if not state.load_selected():
+    selected = state.load_selected() or {}
+    if not selected.get("provider"):
         for p in latest_data:
             if p.get("metrics"):
-                state.save_selected({"provider": render.connection_key(p), "idx": p.get("_idx", 0), "metric": "rolling"})
+                selected.update(provider=render.connection_key(p), idx=p.get("_idx", 0),
+                                metric=render.metric_key(sorted(p["metrics"], key=render.metric_sort_key)[0]))
+                state.save_selected(selected)
                 break
         else:
             providers = cfgmod.enabled_connection_order()
             if providers:
-                state.save_selected({"provider": providers[0], "idx": 0, "metric": "rolling"})
+                selected.update(provider=providers[0], idx=0, metric="rolling")
+                state.save_selected(selected)
 
     # Seed the waybar logo (current.png) for the selected provider on startup.
     if output_format == "waybar":

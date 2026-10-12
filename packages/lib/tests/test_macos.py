@@ -84,7 +84,8 @@ class MacOSFrontendTests(unittest.TestCase):
     def test_settings_use_shared_validation_and_report_write_errors(self):
         payload = {"enabled": ["codex", "claude"], "display": {
             "show_provider": False, "show_model": True, "show_metric": True, "show_pct": True},
-            "iconMode": "bot", "selected": {"provider": "codex", "idx": 1, "metric": "weekly"}}
+            "iconMode": "bot", "usageDisplay": "remaining",
+            "selected": {"provider": "codex", "idx": 1, "metric": "weekly"}}
         with patch.object(config, "available_providers", return_value=["claude", "codex"]), \
                 patch.object(state, "load_selected", return_value=SELECTED.copy()), \
                 patch.object(state, "_save_json") as save, patch.object(state, "trigger_refresh") as refresh:
@@ -95,12 +96,37 @@ class MacOSFrontendTests(unittest.TestCase):
         saved_selection = save.call_args.args[1]
         self.assertEqual(saved_selection["idx"], 1)
         self.assertEqual(saved_selection["icon_mode"], "bot")
+        self.assertEqual(saved_selection["usage_display"], "remaining")
         self.assertFalse(saved_selection["show_provider"])
         refresh.assert_called_once_with()
         with patch.object(quickshell, "save_settings", side_effect=OSError("Permission denied")):
             result, errors = self.invoke(["save-settings", "--frontend", "macos", "--settings-json", json.dumps(payload)])
         self.assertEqual(result, 1)
         self.assertIn("Permission denied", errors)
+
+    def test_remaining_usage_is_shared_by_native_settings_and_metrics(self):
+        snapshot = quickshell.build_snapshot(DATA, dict(SELECTED, usage_display="remaining"))
+        self.assertEqual(snapshot["settings"]["usageDisplay"], "remaining")
+        self.assertEqual(snapshot["text"], "Claude (Pro) 100%")
+        metrics = snapshot["providers"][0]["metrics"]
+        self.assertEqual(metrics[0]["name"], "Rolling Remaining")
+        self.assertEqual(metrics[0]["percentage"], 100)
+        self.assertEqual(metrics[0]["value"], "100%")
+        self.assertEqual(metrics[1]["percentage"], 38)
+        self.assertEqual(quickshell.build_snapshot(DATA, SELECTED)["settings"]["usageDisplay"], "used")
+
+    def test_invalid_usage_display_does_not_save_native_settings(self):
+        payload = {"enabled": ["claude", "codex"], "display": {
+            "show_provider": True, "show_model": True, "show_metric": False, "show_pct": True},
+            "iconMode": "bot", "usageDisplay": "invalid",
+            "selected": {"provider": "claude", "idx": 0, "metric": "rolling"}}
+        with patch.object(config, "available_providers", return_value=["claude", "codex"]), \
+                patch.object(state, "_save_json") as save, patch.object(state, "trigger_refresh") as refresh:
+            result, errors = self.invoke(["save-settings", "--frontend", "macos", "--settings-json", json.dumps(payload)])
+        self.assertEqual(result, 1)
+        self.assertTrue(errors.strip())
+        save.assert_not_called()
+        refresh.assert_not_called()
 
     def test_failed_and_nonfinite_metrics_stay_out_of_the_native_model(self):
         invalid = [

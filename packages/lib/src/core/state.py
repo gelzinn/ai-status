@@ -17,6 +17,7 @@ PID_FILE = str(paths.RUNTIME_DIR / "ai-status.pids")
 REFRESH_FILE = str(paths.RUNTIME_DIR / "ai-status-refresh.json")
 
 ICON_MODES = ["off", "bot", "logo"]
+USAGE_DISPLAY_MODES = ["used", "remaining"]
 _lock_heartbeat = None
 
 
@@ -40,6 +41,11 @@ def get_icon_mode(selected):
     if mode in ICON_MODES:
         return mode
     return "bot" if selected.get("show_icon", True) else "off"
+
+
+def get_usage_display(selected):
+    mode = (selected or {}).get("usage_display")
+    return mode if mode in USAGE_DISPLAY_MODES else "used"
 
 def load_cache():
     if os.path.exists(CACHE_FILE):

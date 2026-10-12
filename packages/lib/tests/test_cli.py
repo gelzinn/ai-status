@@ -103,6 +103,7 @@ class CLIEntrypointTests(unittest.TestCase):
 
     def test_subcommand_help_and_help_command_are_equivalent(self):
         cases = {
+            "config": ("--usage-display", "used", "remaining", "without opening Settings"),
             "accounts": ("add", "edit", "list", "remove", "--saved", "--refresh"),
             "providers": ("--json",),
             "status": ("status",),
@@ -166,6 +167,8 @@ class CLIEntrypointTests(unittest.TestCase):
             ("daemon", "--format", "unknown-format"),
             ("refresh", "--settings-json", "{}"),
             ("status", "--format", "quickshell"), ("help", "unknown-command"),
+            ("config", "--usage-display", "invalid"), ("config", "--usage-display"),
+            ("status", "--usage-display", "remaining"),
         )
         for arguments in cases:
             with self.subTest(arguments=arguments):
@@ -314,6 +317,51 @@ class CLICommandTests(unittest.TestCase):
     def usage(self, identity="codex", **changes):
         return {"_dir": "codex", "_connection_id": identity, "_idx": 0,
                 "provider": "Codex (Pro)", "metrics": [{"type": "rolling", "percentage": 0}], **changes}
+
+    def test_usage_display_config_saves_without_opening_settings_or_collecting(self):
+        initial = {"provider": "account:work", "idx": 2, "metric": "weekly", "icon_mode": "logo",
+                   "show_pct": False, "custom": {"preserve": True}}
+        state.save_selected(initial)
+        for platform, windows in (("linux", False), ("darwin", False), ("win32", True)):
+            for mode in ("remaining", "used"):
+                with self.subTest(platform=platform, mode=mode), \
+                        patch.object(sys, "platform", platform), patch.object(paths, "IS_WINDOWS", windows), \
+                        patch.object(cli.subprocess, "Popen") as launch, \
+                        patch.object(macos, "launch") as native, \
+                        patch.object(fetch, "fetch_all_data") as collect, \
+                        patch.object(state, "trigger_refresh") as refresh:
+                    result, output, errors = self.invoke(["config", "--usage-display", mode])
+                self.assertEqual((result, errors), (0, ""))
+                self.assertEqual(output.strip(), f"Usage display: {mode.title()}")
+                self.assertEqual(state.load_selected(), {**initial, "usage_display": mode})
+                launch.assert_not_called()
+                native.assert_not_called()
+                collect.assert_not_called()
+                refresh.assert_not_called()
+
+    def test_usage_display_config_works_without_existing_preferences(self):
+        result, output, errors = self.invoke(["config", "--usage-display", "remaining", "--frontend", "quickshell"])
+        self.assertEqual((result, errors), (0, ""))
+        self.assertEqual(state.load_selected(), {"usage_display": "remaining"})
+
+    def test_invalid_usage_display_preserves_existing_preferences(self):
+        initial = {"provider": "codex", "usage_display": "remaining"}
+        state.save_selected(initial)
+        for value in ("invalid", "", "USED"):
+            with self.subTest(value=value):
+                result, output, errors = self.invoke(["config", "--usage-display", value])
+                self.assertEqual((result, output), (2, ""))
+                self.assertIn("invalid choice", errors)
+                self.assertEqual(state.load_selected(), initial)
+
+    def test_usage_display_reports_save_failure(self):
+        initial = {"provider": "codex", "usage_display": "used"}
+        state.save_selected(initial)
+        with patch.object(paths, "atomic_json", side_effect=OSError("Permission denied")):
+            result, output, errors = self.invoke(["config", "--usage-display", "remaining"])
+        self.assertEqual((result, output), (1, ""))
+        self.assertIn("Unable to save", errors)
+        self.assertEqual(state.load_selected(), initial)
 
     def test_full_accounts_keeps_default_and_saved_connection_identities_distinct(self):
         records = [accounts.normalize({"id": identity, "provider": "codex", "label": label})
@@ -704,6 +752,63 @@ class CLICommandTests(unittest.TestCase):
         launch.assert_called_once_with(["/usr/bin/kitty", "-e", sys.executable, str(ENTRYPOINT.resolve()),
                                        "config", "--frontend", "quickshell"])
         native.assert_not_called()
+
+
+@unittest.skipIf(sys.platform == "win32", "The terminal configuration UI uses curses")
+class TerminalConfigTests(unittest.TestCase):
+    def run_config(self, keys, selected, height=24):
+        from core import tui
+        screen = Mock()
+        screen.getmaxyx.return_value = (height, 100)
+        screen.getch.side_effect = keys
+        items = [{"provider": "codex", "idx": 1, "metric": "weekly", "label": "Codex · Weekly Usage"}]
+        with patch.multiple(tui.curses, initscr=Mock(return_value=screen), noecho=Mock(), cbreak=Mock(),
+                            curs_set=Mock(), nocbreak=Mock(), echo=Mock(), endwin=Mock()), \
+                patch.object(config, "available_connections", return_value=["codex", "claude"]), \
+                patch.object(config, "enabled_connection_order", return_value=["codex", "claude"]), \
+                patch.object(tui, "get_selectable_items", return_value=items), \
+                patch.object(state, "load_selected", return_value=selected), \
+                patch.object(state, "save_selected") as save, \
+                patch.object(config, "save_connection_order") as order, \
+                patch.object(state, "trigger_refresh") as refresh:
+            tui.run()
+        return screen, save, order, refresh
+
+    def test_usage_display_saves_remaining_and_preserves_other_preferences(self):
+        initial = {"provider": "codex", "idx": 1, "metric": "weekly", "icon_mode": "off",
+                   "custom": {"preserve": True}}
+        screen, save, order, refresh = self.run_config([ord("j")] * 6 + [ord(" "), ord("\n")], initial)
+        selected = save.call_args.args[0]
+        self.assertEqual(selected["usage_display"], "remaining")
+        for key, value in initial.items():
+            self.assertEqual(selected[key], value)
+        self.assertTrue(any("Usage display: < Remaining >" in call.args[2] for call in screen.addstr.call_args_list))
+        order.assert_not_called()
+        refresh.assert_not_called()
+
+    def test_usage_display_can_be_changed_back_with_arrow_keys(self):
+        from core import tui
+        for key in (tui.curses.KEY_LEFT, tui.curses.KEY_RIGHT):
+            with self.subTest(key=key):
+                screen, save, order, refresh = self.run_config([ord("j")] * 6 + [key, ord("\n")],
+                                                               {"usage_display": "remaining"})
+                self.assertEqual(save.call_args.args[0]["usage_display"], "used")
+                refresh.assert_not_called()
+
+    def test_cancel_discards_a_usage_display_change(self):
+        for cancel in (27, ord("q")):
+            with self.subTest(cancel=cancel):
+                screen, save, order, refresh = self.run_config([ord("j")] * 6 + [ord(" "), cancel], {})
+                save.assert_not_called()
+                order.assert_not_called()
+                refresh.assert_not_called()
+
+    def test_provider_navigation_and_reordering_after_display_options(self):
+        screen, save, order, refresh = self.run_config([ord("j")] * 7 + [ord("J"), ord(" "), ord("\n")],
+                                                       {"usage_display": "remaining"}, height=16)
+        order.assert_called_once_with(["claude"])
+        refresh.assert_called_once_with()
+        self.assertEqual(save.call_args.args[0]["usage_display"], "remaining")
 
 
 if __name__ == "__main__":

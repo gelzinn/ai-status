@@ -117,6 +117,7 @@ Item {
             compare(Plugin.Model.saved.enabled[0], "codex")
             compare(Plugin.Model.saved.selected.metric, "weekly:Fable")
             compare(Plugin.Model.saved.iconMode, "logo")
+            compare(Plugin.Model.saved.usageDisplay, "used")
         }
         function test_account_credit_ratio_aligns_with_title_above_full_width_progress() {
             settings.visible = false
@@ -267,12 +268,13 @@ Item {
             settings.save()
             compare(Plugin.Model.saved.selected.idx, 1)
         }
-        function test_both_selectors_overlay_without_resizing_and_support_keyboard() {
+        function test_all_selectors_overlay_without_resizing_and_support_keyboard() {
             const provider = findChild(settings, "active-provider")
             const icon = findChild(settings, "icon-mode")
+            const usageDisplay = findChild(settings, "usage-display")
             wait(20)
             const height = settings.implicitHeight
-            for (const trigger of [provider, icon]) {
+            for (const trigger of [provider, icon, usageDisplay]) {
                 compare(trigger.trailingIconName, "chevron-down")
                 const chevron = findChild(trigger, "trailing-icon")
                 compare(chevron.x + chevron.width, trigger.width - 8)
@@ -291,6 +293,7 @@ Item {
             compare(settings.selected.provider, "codex")
             compare(settings.selected.metric, "weekly")
             compare(settings.iconMode, "logo")
+            compare(settings.usageDisplay, "remaining")
             mouseClick(icon)
             wait(20)
             keyClick(Qt.Key_Home)
@@ -306,6 +309,49 @@ Item {
             mouseClick(icon.popupItem, 370, 780)
             verify(!icon.popupOpen)
             compare(settings.implicitHeight, height)
+        }
+        function test_usage_display_draft_save_reopen_and_validation() {
+            compare(settings.usageDisplay, "used")
+            settings.usageDisplay = "remaining"
+            compare(Plugin.Model.snapshot.settings.usageDisplay, "used")
+            settings.begin()
+            compare(settings.usageDisplay, "used")
+            settings.usageDisplay = "remaining"
+            settings.save()
+            compare(Plugin.Model.saved.usageDisplay, "remaining")
+            const snapshot = Plugin.Model.snapshot
+            snapshot.settings.usageDisplay = Plugin.Model.saved.usageDisplay
+            Plugin.Model.snapshot = Object.assign({}, snapshot)
+            settings.begin()
+            compare(settings.usageDisplay, "remaining")
+            settings.usageDisplay = "invalid"
+            verify(!settings.valid)
+            Plugin.Model.saved = null
+            settings.save()
+            compare(Plugin.Model.saved, null)
+            delete snapshot.settings.usageDisplay
+            Plugin.Model.snapshot = Object.assign({}, snapshot)
+            settings.begin()
+            compare(settings.usageDisplay, "used")
+        }
+        function test_usage_display_selector_dismisses_other_selectors_and_on_page_exit() {
+            const provider = findChild(settings, "active-provider")
+            const icon = findChild(settings, "icon-mode")
+            const usageDisplay = findChild(settings, "usage-display")
+            provider.popupOpen = true
+            verify(provider.popupOpen)
+            usageDisplay.popupOpen = true
+            verify(usageDisplay.popupOpen)
+            verify(settings.selectionOpen)
+            verify(!provider.popupOpen)
+            icon.popupOpen = true
+            verify(icon.popupOpen)
+            verify(!usageDisplay.popupOpen)
+            usageDisplay.popupOpen = true
+            verify(!icon.popupOpen)
+            settings.visible = false
+            verify(!settings.selectionOpen)
+            verify(!usageDisplay.popupOpen)
         }
         function test_provider_rows_show_official_names_and_logos_independent_of_bar_icon() {
             settings.iconMode = "off"
