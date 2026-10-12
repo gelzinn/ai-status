@@ -52,14 +52,21 @@ their different meanings. Known expiry is checked against the current clock when
 view, including while offline. Cached/failed observations and observations older
 than ten minutes are unavailable, with their last amount and observation time
 identified. A cached positive number after its expiry cannot be presented as
-spendable credit.
+spendable credit. In Quickshell, Windows and native macOS, clicking the Cloud
+credit summary opens its own detail page, like saved Reset credits. It shows
+the account, balance/state, reported allowance and usage, local expiration date,
+time remaining and UTC offset. Stale or expired credit also identifies the last
+observed balance and collection time. Back returns to usage without changing the
+selected quota.
 
 The [automated credit tests](../../packages/lib/tests/test_cloud_credits.py)
 cover the upstream response shape and synthetic edge cases. The implementation
-and PR can be reviewed with that coverage; a tester with an eligible account
-will perform the live check below. This live check has not yet been performed,
-and the fixtures do not establish that every plan, account or authentication
-source receives the block.
+and PR can be reviewed with that coverage. A tester's screenshot of the PR on
+Quickshell shows Claude Max reporting **$250.00** and expiration
+`2026-11-05T07:59:00Z`, alongside quotas and saved resets. This confirms that
+the row appeared for that account; no raw authenticated response or independent
+comparison with Claude's own usage view was supplied. The tests and screenshot do not
+establish that every plan, account or authentication source receives the block.
 
 ### Manual check for the PR tester
 
@@ -79,7 +86,9 @@ source receives the block.
    credit collection, the interface/OS and whether the refresh succeeded; remove
    unrelated provider data and account identifiers. No credential file or cookie
    is needed in the report.
-4. Open the available interfaces and check the credit amount/detail row. If
+4. Click **Cloud credits** to open its detail page. Check the local expiration,
+   timezone, time remaining and allowance/usage when reported. Return with Back
+   or Escape and verify the original quota selection and focus are preserved. If
    multiple Claude connections exist, select each and verify balances remain
    attached to their original account. Cloud credits should also remain
    selectable alongside the quota windows.
@@ -125,7 +134,7 @@ endpoint (`/v1/organizations/me`) returns organization identity, not billing
 balance. These permissions do not establish access to private Console billing
 endpoints.
 
-### Candidate Console source remains unconfirmed
+### Console balance implementation evidence
 
 The upstream [codexbar-ios investigation](https://github.com/hemsoft-dev/codexbar-ios/issues/34)
 identifies this private candidate:
@@ -137,10 +146,19 @@ GET https://platform.claude.com/api/organizations/{organization_id}/prepaid/cred
 That issue requires validation of authentication and wallet scope; it does not
 provide a verified monthly-grant schema or live eligible response. The
 [Claude Spend Tracker author's guide](https://marketplace.visualstudio.com/items?itemName=MichalHradil.claude-spend-tracker)
-describes Console balance collection with an explicitly supplied or captured
-`sessionKey` browser cookie on `platform.claude.com`, but does not publish the
-endpoint or response contract. Neither source confirms that the current Claude
-Code OAuth credential or an Admin API key can read the candidate.
+describes Console balance collection with an explicitly supplied `sessionKey`
+browser cookie on `platform.claude.com`.
+
+Inspecting the author's [published extension 0.9.7](https://marketplace.visualstudio.com/_apis/public/gallery/publishers/MichalHradil/vsextensions/claude-spend-tracker/0.9.7/vspackage)
+without executing it provides further implementation evidence: `out/api.js`
+reads `/api/bootstrap` for `account.memberships[].organization` identity and API
+capabilities, then queries the candidate endpoint with a `sessionKey` cookie
+and `anthropic-client-platform: web_console`. Its individual-account collector
+treats the response's `amount` as remaining prepaid cents. This establishes a
+public implementation and its expected shape, not an independently verified
+monthly promotional-grant balance. It does not identify monthly grants or their
+expiration, or establish that prepaid amounts include promotional credits.
+Claude Code OAuth and Admin API credentials are not shown accessing this source.
 
 Do not confuse this candidate with
 `https://claude.ai/api/organizations/{organization_id}/prepaid/credits`:

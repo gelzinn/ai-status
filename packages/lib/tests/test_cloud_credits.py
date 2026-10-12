@@ -1,6 +1,8 @@
 import copy
 import json
+import os
 import subprocess
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -110,6 +112,42 @@ class CloudCreditParsingTests(unittest.TestCase):
 
 
 class CloudCreditFreshnessTests(unittest.TestCase):
+    @unittest.skipUnless(hasattr(time, "tzset"), "Local timezone override needs tzset")
+    def test_detail_dates_use_local_offsets_at_expiry_and_observation(self):
+        try:
+            with patch.dict(os.environ, {"TZ": "America/New_York"}):
+                time.tzset()
+                row = usage_credits.presentation(entry(), NOW)[0]
+                self.assertEqual(row["expires"], "Nov 05, 2026 02:59")
+                self.assertEqual(row["timezone"], "UTC-05:00")
+                self.assertEqual(row["observed"], "Oct 12, 2026 08:00 · UTC-04:00")
+                self.assertEqual(row["remaining"], "23d 19h left")
+                self.assertEqual((row["limit_value"], row["used_value"]), ("$100.00", "$0.00"))
+        finally:
+            time.tzset()
+
+    def test_details_keep_unreported_fields_and_stale_balance_distinct(self):
+        source = {"_observed_at": NOW.timestamp(), "monetary_credits": [
+            {"id": "claude-cloud", "title": "Cloud credits", "currency": "USD", "balance": 12.25}]}
+        row = usage_credits.presentation(source, NOW)[0]
+        self.assertEqual((row["expires"], row["remaining"], row["timezone"]), ("Not reported", "", ""))
+        self.assertEqual((row["limit_value"], row["used_value"]), ("Not reported", "Not reported"))
+        self.assertEqual(row["status_note"], "")
+        row = usage_credits.presentation(source, NOW + timedelta(seconds=601))[0]
+        self.assertEqual((row["value"], row["observed_value"]), ("Unavailable", "$12.25"))
+        self.assertEqual(row["status_note"], "Observation is stale")
+        source["monetary_credits"][0]["expires_at"] = "2026-10-12T12:02:00Z"
+        row = usage_credits.presentation(source, NOW + timedelta(minutes=2))[0]
+        self.assertEqual((row["value"], row["remaining"]), ("Expired", "Expired"))
+        self.assertIsNone(row["balance"])
+
+    def test_detail_heading_keeps_plan_credit_and_account_in_order(self):
+        source = {**entry(), "provider": "Claude (Max)", "_account_label": "Personal"}
+        row = usage_credits.presentation(source, NOW)[0]
+        self.assertEqual(row["heading"], "Claude (Max) · Cloud credits · Personal")
+        del source["_account_label"]
+        self.assertEqual(usage_credits.presentation(source, NOW)[0]["heading"], "Claude (Max) · Cloud credits")
+
     def test_offline_expiration_is_recomputed_without_mutating_cached_balance(self):
         source = entry({"limit_dollars": 100, "remaining_dollars": 75,
                         "resets_at": "2026-10-12T12:02:00Z"})

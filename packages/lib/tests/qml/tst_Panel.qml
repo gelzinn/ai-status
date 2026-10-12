@@ -35,6 +35,247 @@ Item {
             wait(20)
         }
         function cleanup() { Plugin.Model.settingsSaving = false; panel.close(); panel.bar = null }
+        function cloudCredit(overrides) {
+            return Object.assign({id: "claude-cloud", title: "Cloud credits", currency: "USD",
+                status: "available", value: "$75.25", balance: 75.25, limit: 250, used: 174.75,
+                limit_value: "$250.00", used_value: "$174.75", expires: "Nov 5, 2099 at 07:59",
+                remaining: "12d 2h left", timezone: "UTC+00:00", stale: false,
+                observed: "Oct 24, 2099 at 05:59", observed_value: "$75.25", status_note: ""}, overrides || {})
+        }
+        function withCloud(provider, credit) {
+            const result = JSON.parse(JSON.stringify(provider))
+            result.monetaryCredits = [credit || cloudCredit()]
+            result.metrics.push({key: "credits:claude-cloud", name: "Cloud credits", type: "credits",
+                value: result.monetaryCredits[0].value, percentage: null, hasPercentage: false,
+                isAmount: result.monetaryCredits[0].status === "available", detail: "Expires 2099-11-05T07:59:00Z"})
+            return result
+        }
+        function prepareCloud() {
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.providers[0] = withCloud(snapshot.providers[0])
+            Plugin.Model.snapshot = snapshot
+            wait(20)
+            return findChild(panel, "usage-metric-claude-0-credits:claude-cloud")
+        }
+        function test_cloud_link_opens_details_and_back_restores_focus_without_selecting_credit() {
+            const link = prepareCloud()
+            const selected = JSON.stringify(Plugin.Model.snapshot.selected)
+            const scroller = findChild(panel, "panel-scroller")
+            const scrollPosition = scroller.contentY
+            verify(!findChild(panel, "usage-detail-claude-0-credits:claude-cloud").visible)
+            verify(findChild(panel, "usage-credit-arrow-claude-0-credits:claude-cloud").visible)
+            mouseClick(findChild(panel, "usage-value-claude-0-credits:claude-cloud"))
+            wait(20)
+            compare(panel.creditSelection.id, "claude")
+            compare(panel.creditSelection.idx, 0)
+            compare(panel.creditSelection.creditId, "claude-cloud")
+            compare(findChild(panel, "panel-title").text, "AI Status")
+            compare(findChild(panel, "usage-credits-provider").text, "Claude (Max) · Cloud credits")
+            compare(findChild(panel, "usage-credits-balance").text, "$75.25")
+            compare(findChild(panel, "usage-credits-limit").text, "$250.00")
+            compare(findChild(panel, "usage-credits-used").text, "$174.75")
+            compare(findChild(panel, "usage-credits-expires").text, "Nov 5, 2099 at 07:59")
+            compare(findChild(panel, "usage-credits-remaining").text, "12d 2h left")
+            compare(findChild(panel, "usage-credits-timezone").text, "Local time · UTC+00:00")
+            verify(findChild(panel, "panel-back").activeFocus)
+            compare(JSON.stringify(Plugin.Model.snapshot.selected), selected)
+            compare(Plugin.Model.chosen, null)
+            keyClick(Qt.Key_Escape)
+            wait(20)
+            compare(panel.creditSelection, null)
+            verify(link.activeFocus)
+            compare(scroller.contentY, scrollPosition)
+            keyClick(Qt.Key_Return)
+            wait(20)
+            verify(panel.creditSelection !== null)
+            mouseClick(findChild(panel, "panel-back"))
+            wait(20)
+            verify(link.activeFocus)
+            keyClick(Qt.Key_Space)
+            wait(20)
+            verify(panel.creditSelection !== null)
+            compare(JSON.stringify(Plugin.Model.snapshot.selected), selected)
+            compare(Plugin.Model.chosen, null)
+        }
+        function test_cloud_back_preserves_manually_scrolled_usage() {
+            const link = prepareCloud()
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            const original = snapshot.providers[1].metrics[0]
+            for (let index = 0; index < 25; index++) snapshot.providers[1].metrics.push(Object.assign({}, original, {key: "rolling:long-" + index}))
+            Plugin.Model.snapshot = snapshot
+            wait(20)
+            const scroller = findChild(panel, "panel-scroller")
+            link.forceActiveFocus(Qt.TabFocusReason)
+            wait(20)
+            scroller.contentY = 200
+            wait(20)
+            keyClick(Qt.Key_Return)
+            wait(20)
+            compare(panel.usageScrollPosition, 200)
+            keyClick(Qt.Key_Escape)
+            wait(20)
+            verify(link.activeFocus)
+            compare(scroller.contentY, 200)
+            const next = link.nextItemInFocusChain(true)
+            keyClick(Qt.Key_Tab)
+            tryVerify(() => next.activeFocus)
+            verifyControlInViewport(next, scroller)
+        }
+        function test_cloud_open_details_refresh_exhausted_expired_and_unavailable_states() {
+            const link = prepareCloud()
+            mouseClick(link)
+            wait(20)
+            const selected = JSON.stringify(Plugin.Model.snapshot.selected)
+            const states = [
+                {status: "exhausted", value: "$0.00", balance: 0, used: 250, used_value: "$250.00", observed_value: "$0.00"},
+                {status: "expired", value: "Expired", balance: null, remaining: "Expired"},
+                {status: "unavailable", value: "Unavailable", balance: null, stale: true, status_note: "Cached data is too old to confirm the balance."}
+            ]
+            for (const state of states) {
+                const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+                snapshot.providers[0].monetaryCredits = [cloudCredit(state)]
+                Plugin.Model.snapshot = snapshot
+                wait(20)
+                verify(panel.creditSelection !== null)
+                compare(findChild(panel, "usage-credits-balance").text, state.value)
+                compare(findChild(panel, "usage-credits-status").text.toLowerCase(), state.status)
+                compare(JSON.stringify(Plugin.Model.snapshot.selected), selected)
+                verify(findChild(panel, "panel-back").activeFocus)
+                if (state.status === "expired" || state.status === "unavailable") {
+                    compare(findChild(panel, "usage-credits-observed-balance").text, "$75.25")
+                    compare(findChild(panel, "usage-credits-observed").text, "Oct 24, 2099 at 05:59")
+                }
+            }
+            compare(findChild(panel, "usage-credits-unavailable").text, states[2].status_note)
+            verify(findChild(panel, "usage-credits-unavailable").visible)
+            const refresh = findChild(panel, "panel-refresh")
+            mouseClick(refresh)
+            compare(Plugin.Model.actions[0], "refresh")
+            verify(panel.creditSelection !== null)
+        }
+        function test_cloud_details_keep_connection_account_index_and_credit_identity() {
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            const original = snapshot.providers[0]
+            snapshot.providers = [
+                withCloud(Object.assign({}, original, {id: "account:work", idx: 0, name: "Claude · Work"}), cloudCredit({value: "$10.00"})),
+                withCloud(Object.assign({}, original, {id: "account:work", idx: 1, name: "Claude · Work second"}), cloudCredit({value: "$20.00"})),
+                withCloud(Object.assign({}, original, {id: "account:personal", idx: 0, name: "Claude · Personal"}), cloudCredit({value: "$30.00"}))
+            ]
+            snapshot.providers[1].monetaryCredits.push(Object.assign({}, cloudCredit(), {id: "other-credit", title: "Other credit", value: "$40.00"}))
+            Plugin.Model.snapshot = snapshot
+            wait(20)
+            const link = findChild(panel, "usage-metric-account:work-1-credits:claude-cloud")
+            mouseClick(link)
+            wait(20)
+            compare(panel.creditSelection.id, "account:work")
+            compare(panel.creditSelection.idx, 1)
+            compare(findChild(panel, "usage-credits-provider").text, "Claude · Work second · Cloud credits")
+            compare(findChild(panel, "usage-credits-balance").text, "$20.00")
+            const updated = JSON.parse(JSON.stringify(snapshot))
+            updated.providers[0].monetaryCredits[0].value = "$5.00"
+            updated.providers[1].monetaryCredits.reverse()
+            Plugin.Model.snapshot = updated
+            wait(20)
+            compare(findChild(panel, "usage-credits-balance").text, "$20.00")
+            keyClick(Qt.Key_Escape)
+            wait(20)
+            verify(link.activeFocus)
+            const personal = findChild(panel, "usage-metric-account:personal-0-credits:claude-cloud")
+            personal.forceActiveFocus(Qt.TabFocusReason)
+            wait(20)
+            mouseClick(personal)
+            wait(20)
+            compare(findChild(panel, "usage-credits-balance").text, "$30.00")
+            compare(findChild(panel, "usage-credits-provider").text, "Claude · Personal · Cloud credits")
+        }
+        function test_removed_cloud_credit_or_account_returns_to_usage_without_changing_selection() {
+            for (const removeProvider of [false, true]) {
+                const link = prepareCloud()
+                const selected = JSON.stringify(Plugin.Model.snapshot.selected)
+                mouseClick(link)
+                wait(20)
+                const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+                if (removeProvider) snapshot.providers.shift()
+                else {
+                    snapshot.providers[0].monetaryCredits = []
+                    snapshot.providers[0].metrics.pop()
+                }
+                Plugin.Model.snapshot = snapshot
+                tryCompare(panel, "creditSelection", null)
+                verify(panel.opened)
+                verify(!findChild(panel, "panel-usage-credits-page").visible)
+                compare(JSON.stringify(Plugin.Model.snapshot.selected), selected)
+                compare(Plugin.Model.chosen, null)
+                Plugin.Model.reset()
+                wait(20)
+            }
+        }
+        function test_cloud_unknown_expiry_and_grant_values_are_not_invented() {
+            prepareCloud()
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.providers[0].monetaryCredits = [cloudCredit({expires: "", remaining: "", timezone: "", limit_value: "", used_value: ""})]
+            Plugin.Model.snapshot = snapshot
+            panel.showUsageCredits("claude", 0, "claude-cloud")
+            wait(20)
+            for (const id of ["limit", "used", "expires", "remaining"]) compare(findChild(panel, "usage-credits-" + id).text, "Not reported")
+            verify(!findChild(panel, "usage-credits-timezone").visible)
+        }
+        function test_cloud_label_column_matches_reset_header_fill_and_has_right_border() {
+            prepareCloud()
+            const radius = Style.cornerRadius
+            Style.cornerRadius = 8
+            try {
+                panel.showUsageCredits("claude", 0, "claude-cloud")
+                wait(20)
+                const table = findChild(panel, "usage-credits-table")
+                const background = findChild(panel, "usage-credits-label-background")
+                const divider = findChild(panel, "usage-credits-column-divider")
+                const resetHeader = findChild(panel, "reset-column-header")
+                compare(background.color, resetHeader.color)
+                compare(background.color.a, 0.04)
+                compare(background.x, 1)
+                compare(background.y, 1)
+                compare(background.radius, table.radius - 1)
+                compare(background.height, table.height - 2)
+                compare(divider.x, background.x + background.width)
+                compare(divider.y, background.y)
+                compare(divider.width, 1)
+                compare(divider.height, background.height)
+                compare(divider.color.a, 0.09)
+                verify(findChild(panel, "usage-credits-status").x > background.width)
+                compare(findChild(panel, "usage-credits-status").x, findChild(panel, "usage-credits-expires").x)
+            } finally {
+                Style.cornerRadius = radius
+            }
+        }
+        function test_cloud_heading_places_credit_after_plan_and_balance_summary_has_small_gap() {
+            prepareCloud()
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.providers[0].name = "Claude (Max) · Personal"
+            snapshot.providers[0].monetaryCredits[0].heading = "Claude (Max) · Cloud credits · Personal"
+            Plugin.Model.snapshot = snapshot
+            panel.showUsageCredits("claude", 0, "claude-cloud")
+            wait(20)
+            compare(findChild(panel, "usage-credits-provider").text, "Claude (Max) · Cloud credits · Personal")
+            compare(findChild(panel, "usage-credits-title"), null)
+            const summary = findChild(panel, "usage-credits-balance-summary")
+            const label = findChild(panel, "usage-credits-balance-label")
+            const balance = findChild(panel, "usage-credits-balance")
+            compare(label.text, "Available balance")
+            compare(balance.text, "$75.25")
+            compare(balance.parent, summary)
+            compare(balance.y - label.y - label.height, Style.space(4))
+            compare(balance.font.pixelSize, 24)
+            compare(summary.parent, findChild(panel, "usage-credits-table").parent)
+            const expired = JSON.parse(JSON.stringify(snapshot))
+            expired.providers[0].monetaryCredits[0].status = "expired"
+            expired.providers[0].monetaryCredits[0].value = "Expired"
+            Plugin.Model.snapshot = expired
+            wait(20)
+            compare(label.text, "Current balance")
+            compare(balance.text, "Expired")
+            compare(balance.y - label.y - label.height, Style.space(4))
+        }
         function test_codex_usage_credits_are_selectable_and_separate_from_resets() {
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
             const codex = snapshot.providers[1]

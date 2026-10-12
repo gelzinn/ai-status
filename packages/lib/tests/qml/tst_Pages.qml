@@ -7,9 +7,11 @@ Item {
     width: 380
     height: 800
     property var openedReset: null
+    property var openedCredit: null
     Connections {
         target: usage
         function onResetRequested(provider, idx) { openedReset = {provider: provider, idx: idx} }
+        function onCreditRequested(provider, idx, creditId) { openedCredit = {provider: provider, idx: idx, creditId: creditId} }
     }
     Plugin.ResetCreditsPage {
         id: credits
@@ -42,6 +44,7 @@ Item {
             settings.visible = true
             credits.visible = false
             openedReset = null
+            openedCredit = null
             initialBar.visible = false
             staggeredBar.visible = false
         }
@@ -152,10 +155,10 @@ Item {
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
             const identity = "account:cloud-work"
             const states = [
-                {value: "$75.25", detail: "Available · Expires Nov 5, 2099", isAmount: true},
-                {value: "$0.00", detail: "Exhausted · Expires Nov 5, 2099", isAmount: true},
-                {value: "Expired", detail: "Expired Nov 5, 2000", isAmount: false},
-                {value: "Unavailable", detail: "Balance could not be confirmed", isAmount: false}
+                {status: "available", value: "$75.25", detail: "Available · Expires Nov 5, 2099", isAmount: true},
+                {status: "exhausted", value: "$0.00", detail: "Exhausted · Expires Nov 5, 2099", isAmount: true},
+                {status: "expired", value: "Expired", detail: "Expired Nov 5, 2000", isAmount: false},
+                {status: "unavailable", value: "Unavailable", detail: "Balance could not be confirmed", isAmount: false}
             ]
             snapshot.selected = {provider: identity, idx: 0, metric: "credits:claude-cloud"}
             snapshot.providers = [{id: identity, providerId: "claude", idx: 0,
@@ -163,6 +166,7 @@ Item {
                 resetCredits: {available: 1, rows: []}, metrics: []}]
             usage.visible = true
             for (const state of states) {
+                snapshot.providers[0].monetaryCredits = [Object.assign({id: "claude-cloud", title: "Cloud credits"}, state)]
                 snapshot.providers[0].metrics = [
                     {key: "rolling", name: "Rolling Usage", percentage: 9, hasPercentage: true, value: "9%", detail: "Resets in 34m"},
                     {key: "credits:claude-cloud", name: "Cloud credits", percentage: null, hasPercentage: false,
@@ -177,16 +181,20 @@ Item {
                 const progress = findChild(usage, "usage-bar-" + suffix)
                 verify(!progress.visible)
                 verify(!progress.parent.visible)
-                compare(findChild(usage, "usage-detail-" + suffix).text, state.detail)
+                verify(!findChild(usage, "usage-detail-" + suffix).visible)
+                verify(findChild(usage, "usage-credit-arrow-" + suffix).visible)
                 verify(findChild(usage, "usage-bar-" + identity + "-0-rolling").visible)
                 const reset = findChild(usage, "reset-credits-" + identity + "-0")
                 verify(reset.visible)
                 mouseClick(value)
-                compare(Plugin.Model.chosen.provider, identity)
-                compare(Plugin.Model.chosen.metric, "credits:claude-cloud")
+                compare(openedCredit.provider, identity)
+                compare(openedCredit.idx, 0)
+                compare(openedCredit.creditId, "claude-cloud")
+                compare(Plugin.Model.chosen, null)
+                compare(Plugin.Model.snapshot.selected.metric, "credits:claude-cloud")
                 mouseClick(reset)
                 compare(openedReset.provider, identity)
-                compare(Plugin.Model.chosen.metric, "credits:claude-cloud")
+                compare(Plugin.Model.chosen, null)
                 verifyMetricAlignment(snapshot.providers[0])
             }
         }

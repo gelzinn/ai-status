@@ -66,8 +66,10 @@ same usage response's `iguana_necktie` block. The dollar fields are already USD,
 including fractional amounts and a zero balance. The source determines
 availability; AI Status does not assume a grant from the plan name. Missing or
 malformed credit data leaves ordinary quota windows available. Cloud credits use
-the existing amount row across Quickshell, Waybar, Windows and macOS, scoped to
-each configured account. Exhausted, expired and unavailable states are distinct;
+the existing amount row, scoped to each configured account. Click the row in
+Quickshell, Windows or native macOS to open a detail page with local expiration,
+time remaining and timezone; Waybar and SwiftBar retain tooltip/menu details.
+Exhausted, expired and unavailable states are distinct;
 known expiration is checked while displaying cached data, including offline.
 These monetary credits are separate from subscription **Extra usage**, Console
 API credits and saved **Reset credits**. `resets_at` in the Cloud block means

@@ -1,6 +1,7 @@
 """macOS uses the shared native model without network logo or Waybar effects."""
 
 import contextlib
+from datetime import datetime, timedelta, timezone
 import io
 import json
 from pathlib import Path
@@ -12,7 +13,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from core import accounts, cli, config, daemon, fetch, macos, paths, quickshell, state
+from core import accounts, cli, config, daemon, fetch, macos, paths, quickshell, state, usage_credits
 
 
 DATA = [
@@ -166,6 +167,20 @@ class MacOSFrontendTests(unittest.TestCase):
                 self.assertEqual(len(snapshot["providers"]), 1)
                 provider = snapshot["providers"][0]
                 self.assertEqual(provider["resetCredits"]["available"], 1)
+                self.assertEqual(len(provider["monetaryCredits"]), 1)
+                credit = provider["monetaryCredits"][0]
+                self.assertEqual(credit["id"], "claude-cloud")
+                self.assertEqual(credit["heading"], "Claude (Max) · Cloud credits")
+                self.assertEqual(credit["value"], value)
+                self.assertEqual(credit["observed_value"], f"${balance:.2f}")
+                self.assertEqual(credit["limit_value"], "$100.00")
+                self.assertEqual(credit["used_value"], f"${100 - balance:.2f}")
+                self.assertIn(expires[:4], credit["expires"])
+                self.assertNotIn("T07:59", credit["expires"])
+                self.assertRegex(credit["timezone"], r"^UTC[+-]\d{2}:\d{2}$")
+                self.assertTrue(credit["observed"])
+                if value == "Expired":
+                    self.assertEqual(credit["remaining"], "Expired")
                 metric = provider["metrics"][0]
                 self.assertEqual(metric["key"], "credits:claude-cloud")
                 self.assertEqual(metric["value"], value)
@@ -205,6 +220,55 @@ class MacOSFrontendTests(unittest.TestCase):
         for provider in snapshot["providers"]:
             self.assertEqual([metric["key"] for metric in provider["metrics"]], ["rolling", "credits:claude-cloud"])
             self.assertEqual(provider["resetCredits"]["available"], 1)
+        self.assertEqual([(provider["id"], provider["monetaryCredits"][0]["value"], provider["monetaryCredits"][0]["heading"])
+                          for provider in snapshot["providers"]],
+                         [("account:cloud-work", "$75.25", "Claude (Max) · Cloud credits · Work"),
+                          ("account:cloud-personal", "$8.50", "Claude (Max) · Cloud credits · Personal")])
+
+    def test_cloud_details_report_missing_fields_without_inventing_values(self):
+        entry = {"_dir": "claude", "_idx": 3, "provider": "Claude (Max)", "metrics": [],
+                 "_observed_at": time.time(), "monetary_credits": [
+                     {"id": "claude-cloud", "title": "Cloud credits", "currency": "USD", "balance": 8.5}]}
+        snapshot = quickshell.build_snapshot([entry], dict(SELECTED, idx=3, metric="credits:claude-cloud"))
+        provider = snapshot["providers"][0]
+        self.assertEqual((provider["id"], provider["idx"]), ("claude", 3))
+        credit = provider["monetaryCredits"][0]
+        self.assertEqual(credit["value"], "$8.50")
+        for field in ("limit_value", "used_value", "expires"):
+            self.assertEqual(credit[field], "Not reported")
+        self.assertEqual(credit["remaining"], "")
+        self.assertEqual(credit["timezone"], "")
+
+    def test_native_cloud_details_follow_offline_expiration_and_staleness(self):
+        now = datetime(2026, 10, 12, 12, tzinfo=timezone.utc)
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return now.astimezone(tz) if tz else now
+
+        entry = {"_dir": "claude", "_idx": 0, "provider": "Claude (Max)",
+                 "metrics": [{"type": "rolling", "percentage": 9}],
+                 "_observed_at": now.timestamp(), "monetary_credits": [
+                     {"id": "claude-cloud", "title": "Cloud credits", "currency": "USD", "balance": 42.5,
+                      "limit": 100, "used": 57.5, "expires_at": (now + timedelta(seconds=2)).isoformat()}]}
+        selected = dict(SELECTED, metric="rolling")
+        with patch.object(usage_credits, "datetime", Clock):
+            available = quickshell.build_snapshot([entry], selected)
+            now += timedelta(seconds=3)
+            expired = quickshell.build_snapshot([entry], selected)
+            entry["monetary_credits"][0]["expires_at"] = (now + timedelta(days=2)).isoformat()
+            now += timedelta(seconds=601)
+            stale = quickshell.build_snapshot([entry], selected)
+        for snapshot, status, value in ((available, "available", "$42.50"),
+                                        (expired, "expired", "Expired"),
+                                        (stale, "unavailable", "Unavailable")):
+            self.assertEqual(snapshot["selected"]["metric"], "rolling")
+            credit = snapshot["providers"][0]["monetaryCredits"][0]
+            self.assertEqual((credit["status"], credit["value"]), (status, value))
+            self.assertEqual(credit["observed_value"], "$42.50")
+        self.assertEqual(expired["providers"][0]["monetaryCredits"][0]["remaining"], "Expired")
+        self.assertEqual(stale["providers"][0]["monetaryCredits"][0]["status_note"], "Observation is stale")
 
     def test_bundled_provider_logos_are_local_pngs_and_missing_logo_is_optional(self):
         with patch.object(quickshell.urllib.request, "urlopen") as network:

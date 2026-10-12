@@ -556,15 +556,24 @@ class DesktopTests(IsolatedState):
                 self.assertEqual(row.percentage.text(), value)
                 self.assertTrue(row.bar.isHidden())
                 self.assertTrue(row.bar_container.isHidden())
-                self.assertIn(expires, row.description.text())
+                self.assertTrue(row.description.isHidden())
+                self.assertEqual(len(row.findChildren(tray.ArrowIcon)), 1)
                 heading = self.dashboard.provider_buttons[("claude", 0)]
                 self.assertFalse(heading.credits.isHidden())
+                selected = state.load_selected()
                 row.click()
-                self.assertEqual(state.load_selected()["metric"], "credits:claude-cloud")
-                self.assertIn(value, self.dashboard.tray.toolTip())
+                self.assertEqual(state.load_selected(), selected)
+                self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.monetary_scroll)
+                self.assertEqual(self.dashboard.monetary_view.balance.text(), value)
+                self.assertNotIn("T07:59:00Z", self.dashboard.monetary_view.fields["expires"].text())
+                historical = value in ("Expired", "Unavailable")
+                self.assertEqual(self.dashboard.monetary_view.field_rows["observed_value"].isHidden(), not historical)
+                self.assertEqual(self.dashboard.monetary_view.notice.isHidden(), not historical)
+                if value == "Expired":
+                    self.assertEqual(self.dashboard.monetary_view.fields["remaining"].text(), "Expired")
                 heading.credits.click()
                 self.assertEqual(self.dashboard.reset_provider, ("claude", 0))
-                self.assertEqual(state.load_selected()["metric"], "credits:claude-cloud")
+                self.assertEqual(state.load_selected(), selected)
                 self.dashboard.show_usage()
 
     def test_cloud_credit_only_accounts_are_visible_and_selectable_in_native_settings(self):
@@ -582,16 +591,23 @@ class DesktopTests(IsolatedState):
                     "balance": balance, "expires_at": "2099-11-05T07:59:00Z", "available": True}]}])
         self.assertEqual(len(self.dashboard.metric_buttons), 2)
         self.assertEqual([row.percentage.text() for row in self.dashboard.metric_buttons], ["$8.50", "$75.25"])
+        selected = state.load_selected()
         self.dashboard.metric_buttons[-1].click()
-        self.assertEqual(state.load_selected()["provider"], "account:cloud-work")
-        self.assertEqual(state.load_selected()["metric"], "credits:claude-cloud")
+        self.assertEqual(state.load_selected(), selected)
+        self.assertIn("Work", self.dashboard.monetary_view.provider_label.text())
+        self.assertEqual(self.dashboard.monetary_view.balance.text(), "$75.25")
         self.dashboard.configure()
         settings = self.dashboard.settings_view
         self.assertEqual(settings.active.count(), 2)
         choices = [settings.active.itemData(index) for index in range(settings.active.count())]
         self.assertIn(["account:cloud-work", 0, "credits:claude-cloud"], choices)
+        settings.active.setCurrentIndex(settings.active.findData(["account:cloud-work", 0, "credits:claude-cloud"]))
+        with patch.object(self.dashboard, "refresh"):
+            settings.save()
+        self.assertEqual(state.load_selected()["provider"], "account:cloud-work")
+        self.assertEqual(state.load_selected()["metric"], "credits:claude-cloud")
 
-    def test_cloud_display_expires_and_becomes_stale_without_collecting_again(self):
+    def test_cloud_details_countdown_expiry_and_staleness_update_without_collecting_again(self):
         from core import usage_credits
 
         class Clock(datetime):
@@ -604,7 +620,7 @@ class DesktopTests(IsolatedState):
         config.save_config(["claude"])
         self.dashboard.last_config = config.load_config()
         self.dashboard.last_refresh = paths.read_json(state.REFRESH_FILE)
-        for seconds, expiry_delay, value in ((2, 1, "Expired"), (601, 3600, "Unavailable")):
+        for seconds, expiry_delay, value in ((2, 1, "Expired"), (601, 3600, "Unavailable"), (120, 3600, "$75.25")):
             with self.subTest(value=value), patch.object(usage_credits, "datetime", Clock), \
                     patch.object(self.dashboard, "refresh") as refresh:
                 Clock.current = datetime.now(timezone.utc)
@@ -617,14 +633,227 @@ class DesktopTests(IsolatedState):
                 self.dashboard.metric_buttons[0].click()
                 self.dashboard.poll_state()
                 self.assertEqual(self.dashboard.metric_buttons[0].percentage.text(), "$75.25")
+                remaining = self.dashboard.monetary_view.fields["remaining"].text()
                 Clock.current += timedelta(seconds=seconds)
                 self.dashboard.poll_state()
                 row = self.dashboard.metric_buttons[0]
                 self.assertEqual(row.percentage.text(), value)
                 self.assertTrue(row.bar_container.isHidden())
+                self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.monetary_scroll)
+                self.assertEqual(self.dashboard.monetary_view.balance.text(), value)
+                self.assertEqual(self.dashboard.monetary_view.fields["observed_value"].text(), "$75.25")
+                self.assertNotEqual(self.dashboard.monetary_view.fields["remaining"].text(), remaining)
                 self.assertEqual(state.load_selected()["metric"], "credits:claude-cloud")
                 self.assertIn(value, self.dashboard.tray.toolTip())
                 refresh.assert_not_called()
+
+    @staticmethod
+    def cloud_entry(idx=0, balance=75.25, **overrides):
+        return {"provider": "Claude (Max)", "_dir": "claude", "_idx": idx,
+                "_observed_at": time.time(), "metrics": [{"type": "rolling", "percentage": 9}],
+                "monetary_credits": [{"id": "claude-cloud", "title": "Cloud credits", "currency": "USD",
+                    "balance": balance, "limit": 250, "used": 250 - balance,
+                    "expires_at": "2099-11-05T07:59:00Z", "available": True}], **overrides}
+
+    def test_cloud_details_display_balance_validity_and_account_without_selecting_the_amount(self):
+        config.save_config(["claude"])
+        entry = self.cloud_entry(_account_label="Personal")
+        self.dashboard.on_result("claude", [entry])
+        selected = state.load_selected()
+        row = next(button for button in self.dashboard.metric_buttons if button.credit_id)
+        row.click()
+        view = self.dashboard.monetary_view
+        self.assertEqual(self.dashboard.monetary_credit, ("claude", 0, "claude-cloud"))
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.monetary_scroll)
+        self.assertEqual(view.provider_label.text(), "Claude (Max) · Cloud credits · Personal")
+        self.assertNotIn("Cloud credits", [label.text() for label in view.findChildren(QLabel)])
+        self.assertEqual(view.balance.text(), "$75.25")
+        self.dashboard.show()
+        self.app.processEvents()
+        self.assertEqual(view.balance.geometry().top() - view.balance_label.geometry().bottom() - 1, 4)
+        self.assertEqual(view.fields["status"].text(), "Available")
+        self.assertEqual(view.fields["limit_value"].text(), "$250.00")
+        self.assertEqual(view.fields["used_value"].text(), "$174.75")
+        self.assertIn("2099", view.fields["expires"].text())
+        self.assertNotIn("T07:59:00Z", view.fields["expires"].text())
+        self.assertTrue(view.fields["remaining"].text())
+        self.assertIn("Local time · UTC", view.timezone_note.text())
+        self.assertTrue(view.field_rows["observed_value"].isHidden())
+        self.assertTrue(view.field_rows["observed"].isHidden())
+        self.assertTrue(view.notice.isHidden())
+        self.assertFalse(self.dashboard.back_button.isHidden())
+        self.assertFalse(self.dashboard.refresh_button.isHidden())
+        self.assertTrue(self.dashboard.settings_button.isHidden())
+        self.assertEqual(state.load_selected(), selected)
+        self.assertEqual(self.dashboard.tray.toolTip(), "Claude (Max) · Personal 9%")
+
+    def test_cloud_details_isolate_accounts_subaccounts_and_credit_ids(self):
+        from core import accounts
+        accounts.save_document({"version": 1, "accounts": [
+            {"id": "cloud-home", "provider": "claude", "label": "Home"},
+            {"id": "cloud-work", "provider": "claude", "label": "Work"},
+        ]}, config.accounts_file())
+        config.save_config(["codex"])
+        self.dashboard.on_result("codex", [{"provider": "Codex", "_dir": "codex",
+                                            "metrics": [{"type": "weekly", "percentage": 23}]}])
+        self.dashboard.on_result("account:cloud-home", [self.cloud_entry(balance=8.5,
+            _connection_id="account:cloud-home", _account_label="Home")])
+        primary = self.cloud_entry(balance=20, _connection_id="account:cloud-work", _account_label="Work")
+        secondary = self.cloud_entry(idx=1, balance=60.5, _connection_id="account:cloud-work", _account_label="Work")
+        secondary["monetary_credits"].append({**secondary["monetary_credits"][0],
+            "id": "another-promotion", "title": "Another credit", "balance": 9.75})
+        self.dashboard.on_result("account:cloud-work", [primary, secondary])
+        selected = state.load_selected()
+        row = next(button for button in self.dashboard.metric_buttons
+                   if button.value == ("account:cloud-work", 1, "credits:another-promotion"))
+        row.click()
+        self.assertEqual(self.dashboard.monetary_credit, ("account:cloud-work", 1, "another-promotion"))
+        self.assertIn("Work", self.dashboard.monetary_view.provider_label.text())
+        self.assertNotIn("Home", self.dashboard.monetary_view.provider_label.text())
+        self.assertIn("Another credit", self.dashboard.monetary_view.provider_label.text())
+        self.assertEqual(self.dashboard.monetary_view.balance.text(), "$9.75")
+        self.assertEqual(state.load_selected(), selected)
+        self.assertEqual(self.dashboard.tray.toolTip(), "Codex 23%")
+
+    def test_cloud_details_table_matches_reset_header_and_has_only_one_top_border(self):
+        config.save_config(["claude"])
+        entry = self.cloud_entry(reset_credits={"available": 1})
+        self.dashboard.on_result("claude", [entry])
+        self.dashboard.show()
+        self.dashboard.show_monetary_credit(("claude", 0, "claude-cloud"))
+        self.app.processEvents()
+        view = self.dashboard.monetary_view
+        table_image = view.table.grab().toImage()
+        first_row = view.field_rows["status"]
+        value_top = first_row.mapTo(view.table, tray.QPoint(first_row.width() * 3 // 4, 0))
+        self.assertEqual(table_image.pixelColor(value_top.x(), 0), tray.QColor("#262626"))
+        self.assertEqual(table_image.pixelColor(value_top).alpha(), 0)
+        cell = view.label_cells["status"]
+        cell_image = cell.grab().toImage()
+        cell_point = cell.mapTo(self.dashboard, tray.QPoint(cell.width() // 2, 3))
+        dashboard_image = self.dashboard.grab().toImage()
+        cell_background = dashboard_image.pixelColor(cell_point)
+        self.assertEqual(cell_background, tray.QColor("#1a1a1a"))
+        self.assertEqual(cell_image.pixelColor(cell.width() - 1, cell.height() // 2), tray.QColor("#262626"))
+        first_corner = cell.mapTo(self.dashboard, tray.QPoint(0, 0))
+        self.assertEqual(dashboard_image.pixelColor(first_corner), tray.QColor("#111111"))
+        last_cell = view.label_cells["remaining"]
+        self.assertTrue(last_cell.property("lastRow"))
+        last_corner = last_cell.mapTo(self.dashboard, tray.QPoint(0, last_cell.height() - 1))
+        self.assertEqual(dashboard_image.pixelColor(last_corner), tray.QColor("#111111"))
+        self.dashboard.show_reset_credits(("claude", 0))
+        self.app.processEvents()
+        header = self.dashboard.credits_view.table.findChild(tray.QWidget, "creditTableHeader")
+        header_point = header.mapTo(self.dashboard, tray.QPoint(header.width() // 2, 3))
+        header_color = self.dashboard.grab().toImage().pixelColor(header_point)
+        self.assertEqual(cell_background, header_color)
+        entry["monetary_credits"][0]["expires_at"] = "2000-11-05T07:59:00Z"
+        self.dashboard.on_result("claude", [entry])
+        self.dashboard.show_monetary_credit(("claude", 0, "claude-cloud"))
+        self.app.processEvents()
+        self.assertFalse(view.label_cells["remaining"].property("lastRow"))
+        self.assertTrue(view.label_cells["observed"].property("lastRow"))
+
+    def test_cloud_details_refresh_in_place_and_back_restores_focus_and_scroll(self):
+        config.save_config(["claude"])
+        entries = [self.cloud_entry(idx=index, balance=index + 0.25) for index in range(9)]
+        self.dashboard.on_result("claude", entries)
+        self.dashboard.show()
+        self.app.processEvents()
+        self.dashboard.move(80, self.dashboard.screen().availableGeometry().bottom() - self.dashboard.height() - 20)
+        scroll = self.dashboard.scroll.verticalScrollBar()
+        scroll.setValue(scroll.maximum())
+        position = scroll.value()
+        self.assertGreater(position, 0)
+        row = next(button for button in self.dashboard.metric_buttons
+                   if button.value == ("claude", 8, "credits:claude-cloud"))
+        bottom = self.dashboard.geometry().bottom()
+        row.click()
+        self.app.processEvents()
+        view = self.dashboard.monetary_view
+        self.assertIs(self.dashboard.focusWidget(), self.dashboard.back_button)
+        self.assertEqual(self.dashboard.geometry().bottom(), bottom)
+        selected = state.load_selected()
+        entries[8] = self.cloud_entry(idx=8, balance=7.5)
+        self.dashboard.on_result("claude", entries)
+        self.app.processEvents()
+        self.assertIs(self.dashboard.monetary_view, view)
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.monetary_scroll)
+        self.assertIs(self.dashboard.focusWidget(), self.dashboard.back_button)
+        self.assertEqual(view.balance.text(), "$7.50")
+        self.assertEqual(view.fields["used_value"].text(), "$242.50")
+        self.assertEqual(self.dashboard.geometry().bottom(), bottom)
+        self.assertEqual(state.load_selected(), selected)
+        self.dashboard.back_button.click()
+        self.app.processEvents()
+        self.assertIsNone(self.dashboard.monetary_credit)
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
+        self.assertTrue(row.hasFocus())
+        self.assertEqual(scroll.value(), position)
+        self.assertEqual(self.dashboard.geometry().bottom(), bottom)
+
+    def test_cloud_details_keyboard_navigation_preserves_selection_and_returns_to_the_row(self):
+        config.save_config(["claude"])
+        self.dashboard.on_result("claude", [self.cloud_entry()])
+        self.dashboard.show()
+        self.app.processEvents()
+        row = next(button for button in self.dashboard.metric_buttons if button.credit_id)
+        selected = state.load_selected()
+        row.setFocus()
+        QTest.keyClick(row, tray.Qt.Key.Key_Return)
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.monetary_scroll)
+        QTest.keyClick(self.dashboard.back_button, tray.Qt.Key.Key_Down)
+        QTest.keyClick(self.dashboard.back_button, tray.Qt.Key.Key_Up)
+        self.assertEqual(state.load_selected(), selected)
+        with patch.object(self.dashboard, "refresh") as refresh:
+            QTest.keyClick(self.dashboard.back_button, tray.Qt.Key.Key_R)
+        refresh.assert_called_once_with()
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.monetary_scroll)
+        QTest.keyClick(self.dashboard.back_button, tray.Qt.Key.Key_Escape)
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
+        self.assertTrue(row.hasFocus())
+        QTest.keyClick(row, tray.Qt.Key.Key_Space)
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.monetary_scroll)
+        QTest.keyClick(self.dashboard.back_button, tray.Qt.Key.Key_Escape)
+        self.assertEqual(state.load_selected(), selected)
+        QTest.keyClick(row, tray.Qt.Key.Key_Escape)
+        self.assertFalse(self.dashboard.isVisible())
+
+    def test_cloud_details_handle_absent_fields_and_removed_credit_or_provider(self):
+        config.save_config(["claude"])
+        entry = self.cloud_entry(balance=0)
+        for key in ("expires_at", "limit", "used"):
+            entry["monetary_credits"][0].pop(key)
+        self.dashboard.on_result("claude", [entry])
+        self.dashboard.show()
+        self.app.processEvents()
+        row = next(button for button in self.dashboard.metric_buttons if button.credit_id)
+        row.click()
+        view = self.dashboard.monetary_view
+        self.assertEqual(view.balance.text(), "$0.00")
+        self.assertEqual(view.fields["status"].text(), "Exhausted")
+        self.assertEqual(view.fields["limit_value"].text(), "Not reported")
+        self.assertEqual(view.fields["used_value"].text(), "Not reported")
+        self.assertEqual(view.fields["expires"].text(), "Not reported")
+        self.assertTrue(view.field_rows["remaining"].isHidden())
+        self.assertTrue(view.timezone_note.isHidden())
+        selected = state.load_selected()
+        entry.pop("monetary_credits")
+        self.dashboard.on_result("claude", [entry])
+        self.app.processEvents()
+        self.assertIsNone(self.dashboard.monetary_credit)
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
+        self.assertTrue(self.dashboard.provider_buttons[("claude", 0)].hasFocus())
+        self.assertEqual(state.load_selected(), selected)
+        self.dashboard.show_monetary_credit(("claude", 0, "claude-cloud"))
+        self.assertIsNone(self.dashboard.monetary_credit)
+        self.dashboard.on_result("claude", [self.cloud_entry()])
+        self.dashboard.show_monetary_credit(("claude", 0, "claude-cloud"))
+        self.dashboard.on_result("claude", None)
+        self.app.processEvents()
+        self.assertIsNone(self.dashboard.monetary_credit)
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
+        self.assertTrue(self.dashboard.refresh_button.hasFocus())
 
     def test_long_metric_names_keep_percentages_and_amounts_in_the_viewport(self):
         config.save_config(["openai-api"])

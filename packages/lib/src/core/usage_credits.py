@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import math
+from . import reset_credits
 
 
 MAX_OBSERVATION_AGE = 600
@@ -33,6 +34,17 @@ def _expiry(value):
 
 def _timestamp(date):
     return date.isoformat().replace("+00:00", "Z") if date else None
+
+
+def _display_date(date):
+    if date is None:
+        return "Not reported", ""
+    try:
+        local = date.astimezone()
+    except (ValueError, OverflowError, OSError):
+        local = date.astimezone(timezone.utc)
+    offset = local.strftime("%z")
+    return local.strftime("%b %d, %Y %H:%M"), f"UTC{offset[:3]}:{offset[3:]}"
 
 
 def from_claude(usage):
@@ -147,8 +159,32 @@ def presentation(entry, now=None):
             details.append(f"Observed {_timestamp(observation)}" if observation else "Observation time unavailable")
             details.append("Refresh unavailable" if entry.get("_cached") or entry.get("_error") or entry.get("error")
                            else "Observation is stale")
+        expires, zone = _display_date(date)
+        observed, observed_zone = _display_date(observation)
+        if expired:
+            remaining = "Expired"
+        elif date:
+            try:
+                remaining = reset_credits.format_expiry(date, now)[1]
+            except (ValueError, OverflowError, OSError):
+                remaining = ""
+        else:
+            remaining = ""
+        status_note = ("Refresh unavailable" if entry.get("_cached") or entry.get("_error") or entry.get("error")
+                       else "Observation time unavailable" if observation is None else "Observation is stale") if stale else (
+                           "Credit unavailable" if not item["available"] else "")
+        provider = entry.get("provider")
+        account = entry.get("_account_label")
+        heading = " · ".join([provider if isinstance(provider, str) and provider else "AI Provider", item["title"]]
+                             + ([account] if isinstance(account, str) and account else []))
         rows.append({**item, "balance": balance, "observed_balance": item["balance"], "status": status,
-                     "value": value, "detail": " · ".join(details), "stale": stale})
+                     "value": value, "detail": " · ".join(details), "stale": stale,
+                     "expires": expires, "remaining": remaining, "timezone": zone,
+                     "observed": f"{observed} · {observed_zone}" if observation else observed,
+                     "observed_value": f"${item['balance']:.2f}",
+                     "limit_value": f"${item['limit']:.2f}" if item["limit"] is not None else "Not reported",
+                     "used_value": f"${item['used']:.2f}" if item["used"] is not None else "Not reported",
+                     "status_note": status_note, "heading": heading})
     return rows
 
 
