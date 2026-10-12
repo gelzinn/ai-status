@@ -11,7 +11,32 @@ refresh, settings Save/Cancel and reordering, reset-credit and update navigation
 multiple displays, and launch at sign-in. Check both light and dark
 appearance, provider errors, missing credentials and cached results.
 
-The app's `--smoke --preview-directory /tmp/ai-status-previews` command renders
+Production builds use `-Osize`, whole-module optimization, linker dead stripping
+and symbol stripping before ad-hoc signing. They omit the developer fixture code.
+The installed app's `--smoke` validates bundled fonts/icons and constructs the
+native panel without provider requests or desktop notifications;
+`--check-runtime` checks its Python/backend configuration.
+
+For full smoke validation and screenshots, compile with `-D AI_STATUS_SMOKE`.
+After installing the checkout, run this on a Mac to build a separate temporary
+app with the same production optimization settings:
+
+```sh
+AI_STATUS_SMOKE_DIR="$(mktemp -d)"
+AI_STATUS_SMOKE_APP="$AI_STATUS_SMOKE_DIR/AI Status.app"
+cp -R "$HOME/.local/share/ai-status/AI Status.app" "$AI_STATUS_SMOKE_APP"
+swiftc -Osize -whole-module-optimization -Xlinker -dead_strip -D AI_STATUS_SMOKE \
+  -parse-as-library -target "$(uname -m)-apple-macosx13.0" \
+  -framework Cocoa -framework SwiftUI -framework UserNotifications \
+  packages/lib/macos/AIStatus.swift -o "$AI_STATUS_SMOKE_APP/Contents/MacOS/AIStatus"
+strip -u -r "$AI_STATUS_SMOKE_APP/Contents/MacOS/AIStatus"
+codesign --force --sign - "$AI_STATUS_SMOKE_APP"
+codesign --verify --strict "$AI_STATUS_SMOKE_APP"
+"$AI_STATUS_SMOKE_APP/Contents/MacOS/AIStatus" \
+  --smoke --preview-directory "$AI_STATUS_SMOKE_DIR/previews"
+```
+
+The developer app's `--smoke --preview-directory` command renders
 the update notice, compact update page, downloads with known and unknown sizes,
 verification, installation, automatic restart, completion, retry feedback and
 manual fallback alongside the other native pages. The local fixture validates
@@ -46,3 +71,24 @@ history use separate files in the same directory.
 Linux checks cover the backend and installer behavior. They do not verify
 AppKit/SwiftUI compilation or the on-screen macOS experience; those need a
 Mac.
+
+The macOS CI job verifies the signed production build and measures it before
+backend tests or preview generation. `packages/lib/macos/size_report.py` reports
+the executable, `.app` bundle, and current installed payload separately; the
+bundle and executable are included in the installed total. Initial limits are
+15 MiB, 16 MiB and 20 MiB respectively. CI compares the production executable
+with the same source/compiler built using the previous `-O` settings and
+embedded developer fixtures, signed without stripping. This comparison isolates
+the build changes; it does not reproduce an older release's source or measure a
+compressed download. The report includes architecture, Swift compiler version
+and the largest installed files in the job summary and `macos-size-report`
+artifact. The fixture app is a separate copy and never affects these totals.
+
+Measurements sum regular-file logical bytes without following symlinks. They
+exclude system frameworks, the external Python runtime, user settings and
+retained rollback sources. File allocation and Finder's size presentation can
+differ. Native installs discard other platforms' UI/test files and build caches;
+the Lucide license remains with the icons. After a successful update, rollback
+retains the previous sources and assets and recompiles the previous app when
+requested, avoiding a second installed executable. A failed installation keeps
+the active app intact.

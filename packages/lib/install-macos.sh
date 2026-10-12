@@ -125,6 +125,10 @@ cleanup() {
             fi
         fi
         echo "Installation failed; the previous version and settings were preserved." >&2
+    else
+        # Rollback rebuilds from the retained sources/assets. Keep the old app
+        # throughout failure recovery, then discard the duplicate after success.
+        rm -rf -- "$PREVIOUS_DIR/AI Status.app"
     fi
     [ -z "$STAGE_DIR" ] || rm -rf -- "$STAGE_DIR"
     [ -z "$WORK_DIR" ] || rm -rf -- "$WORK_DIR"
@@ -138,9 +142,19 @@ WORK_DIR="$(mktemp -d)"
 STAGE_DIR="$(mktemp -d "$(dirname "$INSTALL_DIR")/.ai-status-stage.XXXXXX")"
 copy_library() {
     [ -d "$1/packages/lib" ] && [ -d "$1/packages/shared" ] || { echo "Source is missing library/shared files" >&2; exit 1; }
-    mkdir -p "$STAGE_DIR/packages"
-    cp -a -- "$1/packages/lib" "$STAGE_DIR/packages/lib"
-    cp -a -- "$1/packages/shared" "$STAGE_DIR/packages/shared"
+    # Checkout/rollback copies must not bring along local build environments.
+    "$PYTHON" - "$1" "$STAGE_DIR" <<'PY'
+import shutil, sys
+from pathlib import Path
+source, destination = map(Path, sys.argv[1:])
+def ignore(directory, names):
+    return [name for name in names if name in {
+        "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "venv",
+        "node_modules", "build", "dist", ".DS_Store",
+    } or name.endswith((".pyc", ".pyo"))]
+for name in ("lib", "shared"):
+    shutil.copytree(source / "packages" / name, destination / "packages" / name, ignore=ignore, symlinks=True)
+PY
     if [ -e "$1/package.json" ] || [ -L "$1/package.json" ]; then
         cp -- "$1/package.json" "$STAGE_DIR/package.json"
     fi
@@ -216,6 +230,33 @@ with tarfile.open(archive, "r:gz") as tar:
 PY
 fi
 
+# Keep the shared backend and rebuildable rollback sources, without the other
+# platforms' UI/build files or development caches. Retain the panel icon license.
+"$PYTHON" - "$STAGE_DIR/packages" <<'PY'
+import shutil, sys
+from pathlib import Path
+packages = Path(sys.argv[1])
+lib = packages / "lib"
+for name in ("tests", "windows"):
+    shutil.rmtree(lib / name, ignore_errors=True)
+quickshell = lib / "quickshell"
+if quickshell.is_dir():
+    for item in quickshell.iterdir():
+        if item.name == "LUCIDE-LICENSE":
+            continue
+        if item.is_dir() and not item.is_symlink():
+            shutil.rmtree(item)
+        else:
+            item.unlink()
+for item in list(packages.rglob("*")):
+    if item.name in {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".venv", "venv",
+                     "node_modules", "build", "dist", ".DS_Store"} or item.suffix in {".pyc", ".pyo"}:
+        if item.is_dir() and not item.is_symlink():
+            shutil.rmtree(item, ignore_errors=True)
+        else:
+            item.unlink(missing_ok=True)
+PY
+
 # Validate imported CLI and all sources without querying a provider or touching
 # credentials. Old releases without macOS sources fail before activation.
 progress installing "Preparing the verified update. Your settings are kept…"
@@ -279,9 +320,13 @@ info["CFBundleShortVersionString"] = info["CFBundleVersion"] = sys.argv[4]
 plist.write_bytes(plistlib.dumps(info))
 PY
     ARCH="$(uname -m)"
-    swiftc -O -parse-as-library -target "$ARCH-apple-macosx13.0" \
+    swiftc -Osize -whole-module-optimization -parse-as-library -target "$ARCH-apple-macosx13.0" \
+        -Xlinker -dead_strip \
         -framework Cocoa -framework SwiftUI -framework UserNotifications "$STAGE_DIR/packages/lib/macos/AIStatus.swift" \
         -o "$APP/Contents/MacOS/AIStatus"
+    # Keep dynamic imports/references and Objective-C/Swift runtime metadata;
+    # remove debug and symbol-table bulk before signing the executable.
+    strip -u -r "$APP/Contents/MacOS/AIStatus"
     # Local builds use an ad-hoc signature; a notarized distribution is separate.
     if command -v codesign >/dev/null; then codesign --force --sign - "$APP"; fi
     "$APP/Contents/MacOS/AIStatus" --smoke
