@@ -125,22 +125,22 @@ class ConnectionViewsTests(unittest.TestCase):
         snapshot = quickshell.build_snapshot([entry], dict(provider="account:personal", idx=0, icon_mode="off",
                                               metric="credits:Account credit balance (USD)"))
         self.assertEqual([metric["name"] for metric in snapshot["providers"][0]["metrics"]],
-                         ["Account credits", "Key · monthly"])
-        self.assertEqual(snapshot["providers"][0]["metrics"][0]["detail"], "Available balance: $75.00")
+                         ["Credit balance", "Key · monthly"])
+        self.assertEqual(snapshot["providers"][0]["metrics"][0]["detail"], "$25.00 of $100.00 used (25%)")
         self.assertEqual(snapshot["selected"]["provider"], "account:personal")
         self.assertEqual(snapshot["selected"]["metric"], "credits:Account spend / total credits (USD)")
         choice = dict(provider="account:personal", idx=0, metric=snapshot["selected"]["metric"],
                       icon_mode="off", show_metric=True)
-        self.assertIn("Account credits $25.00 / $100.00", render.get_selected_metric_text([entry], choice))
+        self.assertIn("Credit balance $75.00", render.get_selected_metric_text([entry], choice))
 
     @unittest.skipIf(sys.platform == "win32", "Windows configuration uses the tray dialog")
     def test_terminal_choices_use_readable_titles_and_preserve_selection_ids(self):
         from core import tui
-        metric = dict(type="credits", name="Account credits", id="Account spend / total credits (USD)")
+        metric = dict(type="credits", name="Credit balance", id="Account spend / total credits (USD)")
         with patch.object(state, "load_cache", return_value=[dict(self.data[0], metrics=[metric])]):
             options = tui.get_selectable_items()
         self.assertEqual(options[0]["metric"], "credits:Account spend / total credits (USD)")
-        self.assertEqual(options[0]["label"], "OpenRouter · Personal · Account credits")
+        self.assertEqual(options[0]["label"], "OpenRouter · Personal · Credit balance")
 
     def test_monetary_values_keep_their_scope_and_have_no_invented_progress(self):
         values = [dict(type="balance", name=name, percentage=None, amount=amount, unit=unit)
