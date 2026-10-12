@@ -333,8 +333,10 @@ class CapturedResetAuthenticationTests(IsolatedState):
         self.write(opencode, {"anthropic": {"access": "original-fallback"}})
         connection = {"connection_id": "claude", "provider": "claude", "account_id": None,
                       "env": {}, "options": {}}
+        fixture_env = {"HOME": str(self.root), "USERPROFILE": str(self.root),
+                       "XDG_DATA_HOME": str(self.root / "data")}
         with patch("core.accounts.sys.platform", "linux"):
-            env, _, _ = accounts.prepare(connection, capture_auth=True)
+            env, _, _ = accounts.prepare(connection, fixture_env, capture_auth=True)
         self.write(opencode, {"anthropic": {"access": "rotated-fallback"}})
         module = load_provider("claude")
         with patch.object(module.sys, "platform", "linux"):

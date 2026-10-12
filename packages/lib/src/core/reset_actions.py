@@ -29,6 +29,10 @@ def _receipt_path(identity):
     return paths.CACHE_DIR / "reset-actions" / (digest + ".json")
 
 
+def _reservation_path(token):
+    return paths.CACHE_DIR / "reset-actions" / "reservations" / (token + ".json")
+
+
 def presentation(entry):
     """Offer actions only for fresh, identified inventory with usable handles."""
     if entry.get("_dir") not in SUPPORTED or entry.get("_cached") or entry.get("_error"):
@@ -38,7 +42,7 @@ def presentation(entry):
     if not token or not 0 <= time.time() - observed <= MAX_SNAPSHOT_AGE:
         return None
     receipt = paths.read_json(_receipt_path(render.connection_key(entry)))
-    if not isinstance(receipt, dict) or receipt.get("token") == token:
+    if not isinstance(receipt, dict) or receipt.get("token") == token or _reservation_path(token).exists():
         return None
     inventory = reset_credits.available_credits(entry.get("reset_credits"))
     if not any(item.get("action_id") for item in inventory["credits"]):
@@ -98,8 +102,19 @@ def apply(payload):
             nonlocal sent
             # Reserve before POST. Restarting or clicking in another frontend
             # cannot send this confirmed observation a second time.
-            paths.atomic_json(_receipt_path(identity), {"token": token, "request_id": request_id,
-                                                      "credit": handle, "submitted_at": time.time()})
+            receipt = {"token": token, "request_id": request_id, "credit": handle, "submitted_at": time.time()}
+            reservation = _reservation_path(token)
+            reservation.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                descriptor = os.open(reservation, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                raise ValueError("This reset was already submitted. Refresh and check the account.") from None
+            # The exclusive marker protects the mutation even if two processes
+            # race while recovering a stale shared refresh lock. Keep it on any
+            # write failure: an uncertain attempt must never be dispatched again.
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump(receipt, stream)
+            paths.atomic_json(_receipt_path(identity), receipt)
             sent = True
 
         provider = _provider(connection["provider"])

@@ -3,6 +3,8 @@ import contextlib
 import io
 import json
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock, patch
 
 from test_portability import IsolatedState
@@ -136,6 +138,33 @@ class ResetActionTests(IsolatedState):
         refreshed = {**self.entry, "_observed_at": self.entry["_observed_at"] + 0.001}
         with patch("core.reset_actions.time.time", return_value=refreshed["_observed_at"]):
             self.assertNotEqual(reset_actions.presentation(refreshed)["fingerprint"], self.payload["fingerprint"])
+
+    def test_concurrent_attempts_reserve_once_even_if_shared_lock_races(self):
+        ready = threading.Barrier(2)
+        dispatched = []
+
+        def consume(env, handle, request_id, verify_identity, before_send):
+            verify_identity()
+            ready.wait(timeout=5)
+            before_send()
+            dispatched.append(request_id)
+
+        def attempt():
+            try:
+                return reset_actions.apply(self.payload)
+            except ValueError as error:
+                return str(error)
+
+        self.provider.consume.side_effect = consume
+        with patch("core.reset_actions.state.acquire_lock", return_value=True), \
+                patch("core.reset_actions.state.release_lock"), ThreadPoolExecutor(max_workers=2) as workers:
+            first = workers.submit(attempt)
+            second = workers.submit(attempt)
+            results = [first.result(timeout=10), second.result(timeout=10)]
+        self.assertEqual(len(dispatched), 1)
+        self.assertEqual(sum("Reset applied" in result for result in results), 1)
+        self.assertEqual(sum("already submitted" in result for result in results), 1)
+        self.refresh.assert_called_once()
 
     def test_malformed_receipt_is_not_actionable(self):
         paths.atomic_json(reset_actions._receipt_path("account:work"), [])
