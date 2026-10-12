@@ -14,7 +14,7 @@ analysis = Analysis(
     pathex=[str(lib / "src")],
     binaries=[],
     datas=[(str(lib / "src/providers"), "lib/src/providers"),
-           (str(lib / "VERSION"), "lib"),
+           (str(lib.parents[1] / "package.json"), "."),
            (str(commit_file), "lib"),
            (str(lib / "assets"), "lib/assets"),
            (str(lib.parent / "shared/providers/providers.json"), "lib/assets"),

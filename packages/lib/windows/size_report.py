@@ -1,9 +1,13 @@
 """Track runtime/download size and fail CI if unnecessary bulk returns."""
 from pathlib import Path
 import os
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from core import __version__
 
 root = Path("dist")
-version = Path("packages/lib/VERSION").read_text().strip()
+version = __version__
 # Include the required SQLite runtime for native credentials and auth fingerprints.
 # Keep tight limits so optional Qt/OpenSSL libraries cannot return unnoticed.
 sizes = [

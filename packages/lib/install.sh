@@ -18,7 +18,8 @@ SCRIPT_IS_FILE=false
 case "$0" in */install.sh|install.sh) SCRIPT_IS_FILE=true ;; esac
 if [ "$SCRIPT_IS_FILE" = true ] && [ -f "$SCRIPT_DIR/config.sh" ]; then
     # shellcheck source=./config.sh
-    source "$SCRIPT_DIR/config.sh"
+    # Version validation uses the staged tree, including legacy workspace layouts.
+    source "$SCRIPT_DIR/config.sh" --repository-only
 fi
 : "${REPO_URL:=https://github.com/gelzinn/ai-status}"
 INSTALL_DIR="$HOME/.local/share/ai-status"
@@ -209,6 +210,9 @@ copy_library() {
     mkdir -p "$STAGE_DIR/packages"
     cp -a -- "$1/packages/lib" "$STAGE_DIR/packages/lib"
     cp -a -- "$1/packages/shared" "$STAGE_DIR/packages/shared"
+    if [ -e "$1/package.json" ] || [ -L "$1/package.json" ]; then
+        cp -- "$1/package.json" "$STAGE_DIR/package.json"
+    fi
 }
 
 RUNNING_FROM_INSTALL=false
@@ -283,7 +287,7 @@ with tarfile.open(archive, "r:gz") as tar:
             sys.exit("Unsafe path in release archive")
         if source_archive == "true":
             parts = parts[1:]
-        if len(parts) < 2 or parts[0] != "packages" or parts[1] not in ("lib", "shared"):
+        if parts != ("package.json",) and (len(parts) < 2 or parts[0] != "packages" or parts[1] not in ("lib", "shared")):
             continue
         target = root.joinpath(*parts)
         if member.isdir():
@@ -301,16 +305,28 @@ fi
 # All validation and requirement checks happen before the active files change.
 python3 - "$STAGE_DIR" "${RELEASE_TAG#v}" <<'PY'
 from pathlib import Path
-import json, sys
+import json, re, sys
 sys.dont_write_bytecode = True
 root = Path(sys.argv[1])
 lib = root / "packages/lib"
-for required in (lib / "VERSION", lib / "src/bin/ai-status", lib / "check.sh", root / "packages/shared/providers/providers.json"):
+for required in (lib / "src/bin/ai-status", lib / "check.sh", root / "packages/shared/providers/providers.json"):
     if not required.is_file():
         sys.exit(f"Release is missing {required.relative_to(root)}")
-version = (lib / "VERSION").read_text().strip()
+manifest = root / "package.json"
+if manifest.exists():
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    if isinstance(data, dict) and "version" not in data and (lib / "VERSION").is_file():
+        # Pre-migration package.json describes npm workspaces, not product versions.
+        manifest.unlink()
+        version = (lib / "VERSION").read_text(encoding="utf-8").strip()
+    else:
+        version = data.get("version") if isinstance(data, dict) else None
+else:
+    version = (lib / "VERSION").read_text(encoding="utf-8").strip()
+if not isinstance(version, str) or not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version):
+    sys.exit("Release metadata has an invalid stable version")
 if sys.argv[2] and version != sys.argv[2]:
-    sys.exit("Release tag and VERSION disagree")
+    sys.exit("Release tag and version metadata disagree")
 json.load(open(root / "packages/shared/providers/providers.json", encoding="utf-8"))
 for script in lib.rglob("*.py"):
     compile(script.read_bytes(), str(script), "exec")
@@ -318,7 +334,7 @@ sys.path.insert(0, str(lib / "src"))
 import core.cli
 import core
 if core.__version__ != version:
-    sys.exit("CLI and release VERSION disagree")
+    sys.exit("CLI and release version metadata disagree")
 PY
 if [ "$SKIP_CHECK" = false ]; then
     bash "$STAGE_DIR/packages/lib/check.sh" "$BAR"

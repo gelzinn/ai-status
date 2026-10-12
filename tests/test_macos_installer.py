@@ -1,6 +1,7 @@
 """Run the macOS installer on Linux with only native OS tools replaced."""
 
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -43,7 +44,7 @@ class MacOSInstallerTests(unittest.TestCase):
             "GIT_COMMITTER_NAME": "Installer Test", "GIT_COMMITTER_EMAIL": "test@example.com",
             "TEST_REAL_GIT": REAL_GIT, "TEST_ASSETS": str(self.root / "assets"),
             "TEST_LOG": str(self.root / "tools.jsonl"),
-            "TEST_ACTIVE_VERSION": str(self.installed / "packages/lib/VERSION"),
+            "TEST_ACTIVE_ROOT": str(self.installed),
             "TEST_RESPONSE": json.dumps({"tag_name": "v0.10.0", "draft": False, "prerelease": False}),
         }
         self.repo = self.root / "repo"
@@ -54,7 +55,12 @@ class MacOSInstallerTests(unittest.TestCase):
         self.git("init", "-b", "main")
         for version in ("0.9.0", "0.10.0", "0.11.0"):
             lib = self.repo / "packages/lib"
-            (lib / "VERSION").write_text(version + "\n")
+            if version == "0.9.0":
+                (lib / "VERSION").write_text(version + "\n")
+                (self.repo / "package.json").write_text(json.dumps({"name": "legacy-workspace", "private": True}))
+            else:
+                (lib / "VERSION").unlink(missing_ok=True)
+                (self.repo / "package.json").write_text(json.dumps({"version": version}))
             (lib / "marker").write_text(version)
             self.git("add", ".")
             self.git("-c", "commit.gpgsign=false", "commit", "-m", "feat: " + version)
@@ -87,8 +93,10 @@ with open(os.environ['TEST_LOG'], 'a') as log:
     name = pathlib.Path(sys.argv[0]).name
     log.write(json.dumps([name, *sys.argv[1:]]) + '\\n')
     if name == 'open' or (name == 'launchctl' and 'bootstrap' in sys.argv):
-        version = pathlib.Path(os.environ['TEST_ACTIVE_VERSION'])
-        log.write(json.dumps(['started-version', version.read_text().strip() if version.exists() else 'missing']) + '\\n')
+        root = pathlib.Path(os.environ['TEST_ACTIVE_ROOT'])
+        manifest = root / 'package.json'
+        version = json.loads(manifest.read_text())['version'] if manifest.exists() else (root / 'packages/lib/VERSION').read_text().strip()
+        log.write(json.dumps(['started-version', version]) + '\\n')
 """)
         self.write_tool("git", """
 import os, subprocess, sys
@@ -130,6 +138,8 @@ sys.exit(0 if exists else 22)
         archive = directory / f"ai-status-v{version}.tar.gz"
         with tarfile.open(archive, "w:gz") as package:
             package.add(self.repo / "packages", arcname="packages")
+            if (self.repo / "package.json").exists():
+                package.add(self.repo / "package.json", arcname="package.json")
         (directory / "SHA256SUMS").write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + "  " + archive.name + "\n")
 
     def run_installer(self, *arguments, local=False, start=False, autostart=True):
@@ -149,11 +159,32 @@ sys.exit(0 if exists else 22)
 
     def assert_success(self, result, version):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual((self.installed / "packages/lib/VERSION").read_text().strip(), version)
+        self.assertEqual(self.installed_version(self.installed), version)
         self.assertEqual((self.installed / "packages/lib/marker").read_text(), version)
         self.assertTrue((self.installed / "packages/shared/providers/providers.json").is_file())
         self.assertTrue((self.home / ".local/bin/ai-status").is_symlink())
         self.assertFalse((self.installed / ".git").exists())
+
+    def installed_version(self, root):
+        manifest = root / "package.json"
+        return json.loads(manifest.read_text())["version"] if manifest.exists() else (root / "packages/lib/VERSION").read_text().strip()
+
+    def rewrite_manifest(self, data):
+        self.rewrite_package_file("package.json", data)
+
+    def rewrite_package_file(self, name, data):
+        directory = self.root / "assets/v0.10.0"
+        archive = directory / "ai-status-v0.10.0.tar.gz"
+        replacement = io.BytesIO()
+        with tarfile.open(archive, "r:gz") as source, tarfile.open(fileobj=replacement, mode="w:gz") as target:
+            for member in source:
+                if member.name == name:
+                    member.size = len(data)
+                    target.addfile(member, io.BytesIO(data))
+                else:
+                    target.addfile(member, source.extractfile(member))
+        archive.write_bytes(replacement.getvalue())
+        (directory / "SHA256SUMS").write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + "  " + archive.name + "\n")
 
     def seed_existing_install(self):
         self.installed.mkdir(parents=True)
@@ -170,6 +201,10 @@ sys.exit(0 if exists else 22)
         self.assert_success(result, "0.10.0")
         info = plistlib.loads((self.bundle / "Contents/Info.plist").read_bytes())
         self.assertTrue(info["LSUIElement"])
+        self.assertEqual(info["CFBundleVersion"], "0.10.0")
+        self.assertEqual(info["CFBundleShortVersionString"], "0.10.0")
+        self.assertTrue((self.installed / "package.json").is_file())
+        self.assertFalse((self.installed / "packages/lib/VERSION").exists())
         self.assertTrue((self.bundle / "Contents/MacOS" / info["CFBundleExecutable"]).is_file())
         runtime = json.loads((self.bundle / "Contents/Resources/runtime.json").read_text())
         self.assertTrue(Path(runtime["python"]).is_absolute())
@@ -200,12 +235,20 @@ sys.exit(0 if exists else 22)
         self.assert_success(result, "0.11.0")
         self.assertTrue(self.bundle.is_dir())
 
+    def test_legacy_local_checkout_omits_its_unversioned_workspace_manifest(self):
+        self.git("checkout", "v0.9.0")
+        self.assert_success(self.run_installer(local=True), "0.9.0")
+        self.assertFalse((self.installed / "package.json").exists())
+
     def test_explicit_version_and_offline_rollback_restore_exact_versions(self):
         self.assert_success(self.run_installer("--version", "v0.9.0"), "0.9.0")
         self.assert_success(self.run_installer(), "0.10.0")
         self.env["TEST_CURL_EXIT"] = "22"
         self.assert_success(self.run_installer("--rollback"), "0.9.0")
-        self.assertEqual((self.installed.with_name("ai-status.previous") / "packages/lib/VERSION").read_text().strip(), "0.10.0")
+        previous = self.installed.with_name("ai-status.previous")
+        self.assertEqual(self.installed_version(previous), "0.10.0")
+        self.assertTrue((previous / "package.json").exists())
+        self.assertFalse((self.installed / "package.json").exists())
         self.assertEqual((self.home / "Applications/AI Status.app").resolve(), self.bundle.resolve())
         self.assertFalse((self.bundle / "AI Status.app").exists())
 
@@ -234,6 +277,22 @@ sys.exit(0 if exists else 22)
         (self.root / "assets/v0.10.0/SHA256SUMS").write_text("0" * 64 + "  ai-status-v0.10.0.tar.gz\n")
         self.assert_preserved(self.run_installer())
         self.assertFalse(self.bundle.exists())
+
+    def test_invalid_canonical_manifest_is_rejected_before_build_or_activation(self):
+        self.seed_existing_install()
+        for data in (b'{invalid json', b'{"version":"0.9.0"}', b'{"version":null}'):
+            with self.subTest(data=data):
+                self.rewrite_manifest(data)
+                self.assert_preserved(self.run_installer())
+                self.assertFalse(self.tool_calls("swiftc"))
+
+    def test_cli_version_disagreement_is_rejected_before_build_or_activation(self):
+        self.seed_existing_install()
+        self.rewrite_package_file("packages/lib/src/core/__init__.py", b'__version__ = "0.9.0"\n')
+        result = self.run_installer()
+        self.assert_preserved(result)
+        self.assertIn("CLI and release version metadata disagree", result.stderr)
+        self.assertFalse(self.tool_calls("swiftc"))
 
     def test_failed_native_build_preserves_the_existing_install(self):
         self.seed_existing_install()
@@ -281,6 +340,7 @@ sys.exit(0 if exists else 22)
                 plugins = list(plugin_dir.glob("ai-status.*.py"))
                 self.assertEqual(len(plugins), 1)
                 self.assertIn(command, plugins[0].read_text())
+                self.assertIn("<xbar.version>v0.10.0</xbar.version>", plugins[0].read_text())
                 syntax = subprocess.run([REAL_BASH, "-n", str(plugins[0])], capture_output=True, text=True)
                 self.assertEqual(syntax.returncode, 0, syntax.stderr)
                 # Execute the generated shell wrapper with a harmless installed

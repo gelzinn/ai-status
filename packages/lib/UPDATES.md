@@ -29,6 +29,12 @@ Only newer stable versions trigger the notice. Drafts, prereleases, and older
 version numbers are excluded. There are no forced updates or support-expiration
 notices.
 
+The desktop checks for a new release whenever it refreshes usage: automatically
+every five minutes and on manual refresh. The release query runs alongside the
+provider queries, so usage results can appear while GitHub is still responding.
+If GitHub is unavailable, usage still refreshes and the last known update notice
+is preserved. Checking for a release does not install it.
+
 ## Windows
 
 For an installed copy, **Download and open installer** downloads the exact
@@ -82,8 +88,8 @@ release are not installed until the next release is published. Drafts and
 prereleases are excluded. If resolving or downloading the release fails, the
 installer stops instead of falling back to `main`.
 
-New releases include a package containing only the library and shared
-provider metadata, plus a SHA-256 checksum verified by the installer. Older
+New releases include a package containing the library, shared provider
+metadata, and root `package.json`, plus a SHA-256 checksum verified by the installer. Older
 releases without a package use an archive of the exact tag. Downloading either
 format does not require git; older versions can still list it in their own
 dependency checks.
@@ -95,7 +101,7 @@ curl -fsSL https://ai-status.gelzin.com/install | bash -s -- --version v0.9.0
 ```
 
 Both `v0.9.0` and `0.9.0` are accepted. The release must contain the current
-`packages/lib` and `packages/shared` layout and a matching `VERSION` file;
+`packages/lib` and `packages/shared` layout and version metadata matching the tag;
 older releases from before the monorepo migration are not supported.
 An explicit version does not require the GitHub releases API to be available.
 
@@ -118,7 +124,7 @@ above; running its internal `install.sh` directly only repeats setup.
 ## How It Works
 
 The script installs a **lean copy** at `~/.local/share/ai-status/` — only the
-library itself (`packages/lib` plus the shared provider metadata), never the
+library itself (`packages/lib`, the shared provider metadata, and root `package.json`), never the
 website, `node_modules`, or build output. Each run re-extracts that copy, so the
 same command covers every case:
 
@@ -158,6 +164,15 @@ Release notes are available on the [web changelog](https://ai-status.gelzin.com/
 and [GitHub Releases](https://github.com/gelzinn/ai-status/releases).
 
 ## Checking Your Version
+
+The root `package.json` is the version source for the CLI, desktop apps,
+installers, and releases. Desktop installations read it with Python; Node.js
+is not required. Published archives also contain a generated
+`packages/lib/VERSION` for older installers that copy only the library and
+shared files. New installations prefer `package.json` and use the legacy
+file only when that manifest is absent. Invalid manifest metadata stops an
+installation before activation. Older releases and offline rollbacks remain
+supported with their original `VERSION` file.
 
 The current version appears at the top of the Waybar tooltip or Quickshell details panel. For the CLI installation, you can also check:
 

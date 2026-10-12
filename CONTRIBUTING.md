@@ -52,14 +52,14 @@ the latest published stable GitHub Release, so unreleased commits do not
 reach users who install or update through the public command.
 
 After CI succeeds on `main`, Release Please opens or updates a single release
-PR with the next version, `packages/lib/VERSION`,
-`.release-please-manifest.json`, and `manifest.json`. Release notes are generated
+PR that updates the root `package.json` version and synchronizes the required
+Omarchy `manifest.json` version from it. Release notes are generated
 in the PR body without creating a changelog file. Several PRs
 can accumulate before a release. Merging a normal feature or fix PR does not
 publish a version. Merging the generated release PR creates its version tag
 and a draft GitHub Release after the same CI checks succeed. The workflow
-builds `ai-status-vX.Y.Z.tar.gz` from that exact tag, containing only
-`packages/lib` and `packages/shared`, and smoke-tests the CLI. It attaches the
+builds `ai-status-vX.Y.Z.tar.gz` from that exact tag, containing the root
+`package.json`, `packages/lib` and `packages/shared`, and smoke-tests the CLI. It attaches the
 archive and `SHA256SUMS`, downloads them back to verify the checksum, then
 publishes the release as `latest`. Until publication succeeds, users keep
 receiving the previous stable release. The Release workflow can be rerun
@@ -70,6 +70,22 @@ tag and builds and tests the installer and portable ZIP. Publication waits for
 those checks, uploads the Windows files alongside the library archive and
 verifies every downloaded checksum before marking the release as `latest`.
 PR previews continue to build from the PR commit and do not publish releases.
+
+The root `package.json` is the only maintained release version. The Release
+workflow runs the pinned Release Please library through
+[a small adapter](.github/scripts/release_please.cjs): it reads the version from
+that package and retains only the library's JSON package updater and the
+Omarchy JSON version updater. Each generated release PR changes exactly those
+two files; maintainers edit only the canonical package version. The adapter
+omits separate manifest-state, lockfile and sample updates. Release Please
+still handles Conventional Commits, PR notes and overrides, lifecycle labels,
+tags and drafts.
+The existing `release-please--branches--main` branch and `vX.Y.Z` tags are kept.
+The migration starts at the existing v0.13.3 tag; exact release/tag lookup keeps
+older changes out of future notes and retains pending drafts during retries.
+Release archives include the canonical root `package.json`. A compatibility
+`packages/lib/VERSION` file may be generated inside an archive for older
+installers, but it is not maintained or tracked in the source repository.
 
 Use Conventional Commit PR titles and squash merges:
 
