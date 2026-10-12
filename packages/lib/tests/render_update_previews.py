@@ -113,10 +113,13 @@ def main():
                         view.set_guide(guide_module.update_guide(), fetch.get_version_info())
                         dashboard.on_update_finished("AI Status is already up to date.", True)
                         capture("windows-up-to-date")
-                    with patch.object(fetch, "__version__", "0.16.0"):
+                    with patch.object(fetch, "__version__", "0.16.0"), \
+                            patch.object(fetch, "get_version_info", return_value={
+                                "current": "0.16.0", "latest": "0.16.0", "has_update": False}):
                         dashboard.version.setText("v0.16.0")
                         view.completed = False
                         view.status.clear()
+                        dashboard.draw()
                         dashboard.show_usage()
                         capture("windows-reopened")
         finally:

@@ -1,122 +1,76 @@
 # Native update progress previews
 
-The images render the production views with sample data. No provider query or
-real update runs during capture. The fixture starts at v0.15.0 with v0.16.0
-available; completion and already-current examples adjust the versions to match
-their state.
+All **42 current app previews** appear directly in the tables below, alongside
+**5 baseline screenshots**. They render production views with sample data and
+never run a real update during capture. The fixture starts at v0.15.0 with
+v0.16.0 available; the reopened Usage previews show v0.16.0.
 
-Windows follows the download through checksum verification and automatic setup
-opening. The user completes the normal setup wizard. macOS follows downloading,
-verification and installation inside the app, then closes briefly and reopens.
-Linux follows release checking and terminal opening; the actual download and
-installation continue in that terminal. Unknown download sizes show transferred
-bytes and an indeterminate bar.
+Windows and macOS use the same short progress labels, including **Downloading…**,
+and the same blue loader-circle spinner. The Windows spinner rotates around its
+exact center, and the active operation displays the spinner, bar and bytes without
+a redundant Updating button. Unknown download sizes use an indeterminate bar.
 
-## Before and after
+## Before
 
-| Platform | Previous update page | New progress and next step |
-| --- | --- | --- |
-| Windows | ![Previous Windows tutorial](before/windows-guide.png) | ![Windows download progress](windows-downloading.png) |
-| macOS | ![Previous macOS Terminal guide](before/macos-guide.png) | ![Native macOS download progress](macos-downloading.png) |
-| Linux / Omarchy | ![Previous Linux tutorial](before/linux-guide.png) | ![Linux terminal handoff](linux-terminal.png) |
+| Step | Windows | macOS | Linux / Omarchy |
+| --- | --- | --- | --- |
+| Previous update notice | ![Windows: Previous update notice](before/windows-available.png) | — | — |
+| Previous update page | ![Windows: Previous update page](before/windows-guide.png) | ![macOS: Previous update page](before/macos-guide.png) | ![Linux: Previous update page](before/linux-guide.png) |
+| Previous download feedback | ![Windows: Previous download feedback](before/windows-downloading.png) | Progress continued in Terminal | Progress continued in Terminal |
 
-The previous Windows downloading state only changed the status text:
+## Every update step
 
-![Previous Windows download feedback](before/windows-downloading.png)
+| Step | Windows | macOS | Linux / Omarchy |
+| --- | --- | --- | --- |
+| Update available | ![Windows: Update available](windows-available.png) | ![macOS: Update available](macos-available.png) | ![Linux: Update available](linux-available.png) |
+| Review the update | ![Windows: Review the update](windows-guide.png) | ![macOS: Review the update](macos-guide.png) | ![Linux: Review the update](linux-guide.png) |
+| Check the stable release | ![Windows: Check the stable release](windows-checking.png) | ![macOS: Check the stable release](macos-checking.png) | ![Linux: Check the stable release](linux-checking.png) |
+| Check the published checksum | ![Windows: Check the published checksum](windows-checksum.png) | Included in the release check | Continues in Terminal |
+| Download without a known size | ![Windows: Download without a known size](windows-downloading-unknown.png) | ![macOS: Download without a known size](macos-downloading-unknown.png) | Continues in Terminal |
+| Download with a known size | ![Windows: Download with a known size](windows-downloading.png) | ![macOS: Download with a known size](macos-downloading.png) | Continues in Terminal |
+| Verify the downloaded file | ![Windows: Verify the downloaded file](windows-verifying.png) | ![macOS: Verify the downloaded file](macos-verifying.png) | Continues in Terminal |
+| Open the external updater | ![Windows: Open the external updater](windows-opening.png) | Installation stays inside the app | ![Linux: Open the external updater](linux-opening.png) |
+| External updater opened | ![Windows: External updater opened](windows-installer.png) | Installation stays inside the app | ![Linux: External updater opened](linux-terminal.png) |
+| Install the update | Finish in the Setup wizard | ![macOS: Install the update](macos-installing.png) | Continues in Terminal |
+| Restart the app or shell | Leave Launch AI Status selected in Setup | ![macOS: Restart the app or shell](macos-restarting.png) | Omarchy restarts the shell after a successful update |
+| Completion feedback | Setup finishes installation | ![macOS: Completion feedback](macos-complete.png) | Terminal finishes installation |
+| Usage after reopening (v0.16.0) | ![Windows: Usage after reopening (v0.16.0)](windows-reopened.png) | ![macOS: Usage after reopening (v0.16.0)](macos-reopened.png) | ![Linux: Usage after reopening (v0.16.0)](linux-reopened.png) |
 
-## Windows
+Windows completes installation in its Setup wizard. Linux completes download and
+installation in Terminal. Those cells name the external window used for that
+stage. The macOS completion preview renders the final CLI result in a fixture;
+during a real update the old app closes at the restart stage, and the new app
+opens on Usage, shown in the last row with sample v0.16.0.
 
-<details>
-<summary>Show all 12 Windows states</summary>
+## Other states and update paths
 
-| Stage | Production widget preview |
-| --- | --- |
-| Update notice | ![Windows: Update notice](windows-available.png) |
-| Compact update page | ![Windows: Compact update page](windows-guide.png) |
-| Check stable release | ![Windows: Check stable release](windows-checking.png) |
-| Check published checksum | ![Windows: Check published checksum](windows-checksum.png) |
-| Download without a supplied size | ![Windows: Download without a supplied size](windows-downloading-unknown.png) |
-| Download with real byte progress | ![Windows: Download with real byte progress](windows-downloading.png) |
-| Verify downloaded installer | ![Windows: Verify downloaded installer](windows-verifying.png) |
-| Open setup automatically | ![Windows: Open setup automatically](windows-opening.png) |
-| Setup opened; finish in wizard | ![Windows: Setup opened; finish in wizard](windows-installer.png) |
-| Download failed; Retry update | ![Windows: Download failed; Retry update](windows-error.png) |
-| Retry starts a new check | ![Windows: Retry starts a new check](windows-retry.png) |
-| Already up to date | ![Windows: Already up to date](windows-up-to-date.png) |
+| Step | Windows | macOS | Linux / Omarchy |
+| --- | --- | --- | --- |
+| Optional manual command | See the manual guide | ![macOS: Optional manual command](macos-manual-alternative.png) | ![Linux: Optional manual command](linux-command.png) |
+| Already up to date | ![Windows: Already up to date](windows-up-to-date.png) | ![macOS: Already up to date](macos-up-to-date.png) | ![Linux: Already up to date](linux-up-to-date.png) |
+| Download or terminal error | ![Windows: Download or terminal error](windows-error.png) | ![macOS: Download or terminal error](macos-download-error.png) | ![Linux: Download or terminal error](linux-error.png) |
+| Runtime unavailable | See the error feedback above | ![macOS: Runtime unavailable](macos-error.png) | See the error feedback above |
+| Retry the update | ![Windows: Retry the update](windows-retry.png) | ![macOS: Retry the update](macos-retry.png) | ![Linux: Retry the update](linux-retry.png) |
+| Manual installation fallback | See the manual guide | ![macOS: Manual installation fallback](macos-manual.png) | See the manual guide |
+| SwiftBar update page | — | ![macOS: SwiftBar update page](macos-terminal-guide.png) | — |
+| Open Terminal for SwiftBar | — | ![macOS: Open Terminal for SwiftBar](macos-terminal-opening.png) | — |
+| SwiftBar updater opened | — | ![macOS: SwiftBar updater opened](macos-terminal-handoff.png) | — |
 
-</details>
-
-The fixed footer stays visible while the page scrolls. After setup opens, **Done**
-returns to usage without opening another installer. If setup is cancelled, opening
-the update page again offers the update action.
-
-## macOS
-
-<details>
-<summary>Show all 17 macOS states</summary>
-
-| Stage | Native SwiftUI preview |
-| --- | --- |
-| Update notice | ![macOS: Update notice](macos-available.png) |
-| Compact update page | ![macOS: Compact update page](macos-guide.png) |
-| Optional Terminal command | ![macOS: Optional Terminal command](macos-manual-alternative.png) |
-| Check stable release | ![macOS: Check stable release](macos-checking.png) |
-| Download without a supplied size | ![macOS: Download without a supplied size](macos-downloading-unknown.png) |
-| Download with real byte progress | ![macOS: Download with real byte progress](macos-downloading.png) |
-| Verify downloaded package | ![macOS: Verify downloaded package](macos-verifying.png) |
-| Install verified package | ![macOS: Install verified package](macos-installing.png) |
-| Close briefly and reopen automatically | ![macOS: Close briefly and reopen automatically](macos-restarting.png) |
-| Completion fixture with new version | ![macOS: Completion fixture with new version](macos-complete.png) |
-| Already up to date | ![macOS: Already up to date](macos-up-to-date.png) |
-| Runtime unavailable; retry feedback | ![macOS: Runtime unavailable; retry feedback](macos-error.png) |
-| Interrupted download; retry feedback | ![macOS: Interrupted download; retry feedback](macos-download-error.png) |
-| Retry starts a new check | ![macOS: Retry starts a new check](macos-retry.png) |
-| Manual installation fallback | ![macOS: Manual installation fallback](macos-manual.png) |
-| SwiftBar Terminal alternative | ![macOS: SwiftBar Terminal alternative](macos-terminal-guide.png) |
-| SwiftBar terminal opened | ![macOS: SwiftBar terminal opened](macos-terminal-handoff.png) |
-
-</details>
-
-These are native macOS captures from the compiled SwiftUI app, including the
-shared Settings Save spinner. The completion fixture renders the final CLI result;
-during a real native update the old app closes at the restart stage, and the new
-app opens on usage. SwiftBar still hands installation to Terminal and explicitly
-shows **Updater opened**.
-
-## Linux
-
-<details>
-<summary>Show all 9 Linux / Omarchy states</summary>
-
-| Stage | Production QML preview |
-| --- | --- |
-| Update notice | ![Linux: Update notice](linux-available.png) |
-| Compact update page | ![Linux: Compact update page](linux-guide.png) |
-| Optional copyable command | ![Linux: Optional copyable command](linux-command.png) |
-| Check stable release | ![Linux: Check stable release](linux-checking.png) |
-| Open terminal automatically | ![Linux: Open terminal automatically](linux-opening.png) |
-| Terminal opened; continue there | ![Linux: Terminal opened; continue there](linux-terminal.png) |
-| Terminal unavailable; command expanded | ![Linux: Terminal unavailable; command expanded](linux-error.png) |
-| Retry starts a new check | ![Linux: Retry starts a new check](linux-retry.png) |
-| Already up to date | ![Linux: Already up to date](linux-up-to-date.png) |
-
-</details>
-
-The spinner is the same loader-circle used by Saving. The bar is indeterminate
-while checking the release and opening the terminal. The footer explains where to
-follow the remaining work and when the shell restarts. **Done** returns to usage.
+The fixed footer remains visible while content scrolls. Progress survives
+navigation and reopening the panel. **Done** returns to Usage after Windows/Linux
+handoff; errors offer retry. SwiftBar keeps its Terminal update path.
 
 ## Capture sources and reproduction
 
 - Windows: production Qt widgets rendered offscreen on Linux with PySide6 6.12,
-  bundled fonts and artwork. Source: commit `818fab6`. Baselines render the old
+  bundled fonts and artwork. Source: commit `cad99ad`. Baselines render the old
   widgets and guide from `38df1df` with the same sample versions.
 - Linux: production QML rendered offscreen with Qt Quick's software renderer and
   the test daemon/Omarchy theme (dark surface, blue accent, 6px corners). Source:
-  commit `818fab6`; this does not capture a running Omarchy desktop.
+  commit `cad99ad`; this does not capture a running Omarchy desktop.
 - macOS: unmodified `update-*.png` files from the `macos-panel-preview` artifact
-  for commit `818fab6` in the
-  [native macOS CI run](https://github.com/gelzinn/ai-status/actions/runs/38299549938/job/114978908864).
+  for commit `cad99ad` in the
+  [native macOS CI run](https://github.com/gelzinn/ai-status/actions/runs/38312006541/job/115019771382).
 - The Linux and macOS baselines are the existing tracked
   [Linux guide](../updates-linux-guide.png) and
   [native macOS guide](../updates-macos-guide.png), copied without alteration.
