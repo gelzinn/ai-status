@@ -10,6 +10,13 @@ USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 
 
+def _auth_document(path, env):
+    if "AI_STATUS_RESET_AUTH_SNAPSHOTS" in env:
+        from core.accounts import auth_document
+        return auth_document(path, env)
+    return read_json(path)
+
+
 def authentication(env=None):
     """Capture one account's credentials without changing the process environment."""
     env = os.environ if env is None else env
@@ -25,7 +32,7 @@ def authentication(env=None):
             home = env.get("HOME") or env.get("USERPROFILE")
             root = Path(configured_root) if configured_root else Path(home or Path.home()) / ".codex"
             path = root / "auth.json"
-        stored = read_json(path)
+        stored = _auth_document(path, env)
         tokens = stored.get("tokens") if isinstance(stored, dict) else None
         tokens = tokens if isinstance(tokens, dict) else {}
     token = require_token(direct or tokens.get("access_token"), "Sign in to Codex with your ChatGPT account.")

@@ -85,7 +85,7 @@ def apply(payload):
         inventory = reset_credits.available_credits(entry.get("reset_credits"))
         if not any(item.get("action_id") == handle for item in inventory["credits"]):
             raise ValueError("This reset credit is no longer available. Refresh the account.")
-        env, fingerprint, _ = accounts.prepare(connection)
+        env, fingerprint, _ = accounts.prepare(connection, capture_auth=True)
         if fingerprint != entry.get("_fingerprint"):
             raise ValueError("The account login changed. Refresh and confirm again.")
 

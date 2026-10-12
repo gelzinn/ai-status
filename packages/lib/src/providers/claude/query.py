@@ -11,6 +11,13 @@ USAGE_URL = "https://api.anthropic.com/api/oauth/usage?cedar_ember=1"
 USAGE_USER_AGENT = "claude-cli/2.1.281 (external, cli)"
 
 
+def _auth_document(path, env):
+    if "AI_STATUS_RESET_AUTH_SNAPSHOTS" in env:
+        from core.accounts import auth_document
+        return auth_document(path, env)
+    return read_json(path)
+
+
 def authentication(env=None):
     """Capture one account's credentials without changing the process environment."""
     env = os.environ if env is None else env
@@ -23,7 +30,7 @@ def authentication(env=None):
     creds = {}
     if not direct or auth_file or configured_root:
         if auth_file:
-            stored = read_json(auth_file)
+            stored = _auth_document(auth_file, env)
             creds = stored.get("claudeAiOauth") if isinstance(stored, dict) else None
         elif sys.platform == "darwin" and not direct:
             prepared = env.get("AI_STATUS_CLAUDE_CREDENTIALS")
@@ -47,7 +54,7 @@ def authentication(env=None):
         else:
             home = env.get("HOME") or env.get("USERPROFILE")
             root = Path(configured_root) if configured_root else Path(home or Path.home()) / ".claude"
-            stored = read_json(root / ".credentials.json")
+            stored = _auth_document(root / ".credentials.json", env)
             creds = stored.get("claudeAiOauth") if isinstance(stored, dict) else None
     creds = creds if isinstance(creds, dict) else {}
     token = direct or creds.get("accessToken")
@@ -66,7 +73,7 @@ def authentication(env=None):
             home = env.get("HOME") or env.get("USERPROFILE")
             data_root = env.get("XDG_DATA_HOME") or Path(home or Path.home()) / ".local/share"
             auth_path = Path(data_root) / "opencode/auth.json"
-        auth = read_json(auth_path)
+        auth = _auth_document(auth_path, env)
         session = (auth.get("anthropic") or auth.get("claude")) if isinstance(auth, dict) else None
         token = session.get("access") if isinstance(session, dict) else None
         plan = ""

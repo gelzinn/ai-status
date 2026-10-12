@@ -7,7 +7,8 @@ from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
-from test_portability import load_provider
+from test_portability import IsolatedState, load_provider
+from core import accounts, paths
 from core.provider_http import QueryError
 
 REQUEST_ID = "be2febc8-0b73-4e1d-829c-0313533f1819"
@@ -293,6 +294,71 @@ class ResetAuthenticationAndProjectionTests(unittest.TestCase):
         self.assertEqual(credits[0]["action_id"], handle("grant-fixture"))
         self.assertNotIn("action_id", credits[1])
         self.assertNotIn("grant-fixture", json.dumps(parsed))
+
+
+class CapturedResetAuthenticationTests(IsolatedState):
+    def test_auth_file_aba_rotation_uses_fingerprinted_login_for_both_providers(self):
+        for provider in ("codex", "claude"):
+            path = self.root / (provider + "-login.json")
+            original = ({"tokens": {"access_token": "original-token", "account_id": "original-account"}}
+                        if provider == "codex" else {"claudeAiOauth": {"accessToken": "original-token"}})
+            rotated = ({"tokens": {"access_token": "rotated-token", "account_id": "rotated-account"}}
+                       if provider == "codex" else {"claudeAiOauth": {"accessToken": "rotated-token"}})
+            self.write(path, original)
+            connection = accounts.connection(accounts.normalize({"id": "fixture", "provider": provider,
+                                                                   "auth_file": str(path)}))
+            env, fingerprint, _ = accounts.prepare(connection, capture_auth=True)
+            self.assertEqual(accounts.prepare(connection)[1], fingerprint)
+            self.write(path, rotated)
+            module = load_provider(provider, "reset")
+            responses = ([json.dumps(codex_details()), '{"code":"reset"}'] if provider == "codex"
+                         else [json.dumps({"organization": {"uuid": ORGANIZATION}}),
+                               json.dumps(claude_usage()), '{"result":"reset"}'])
+
+            def verify_identity():
+                # The file returned to A after the provider captured its headers.
+                self.write(path, original)
+                self.assertEqual(accounts.prepare(connection)[1], fingerprint)
+
+            with self.subTest(provider=provider), patch.object(module, "request", side_effect=responses) as api:
+                module.consume(env, handle("credit-fixture" if provider == "codex" else "grant-fixture"),
+                               REQUEST_ID, verify_identity=verify_identity)
+            for call in api.call_args_list:
+                self.assertEqual(call.args[1]["Authorization"], "Bearer original-token")
+                if provider == "codex":
+                    self.assertEqual(call.args[1]["ChatGPT-Account-Id"], "original-account")
+
+    def test_default_claude_fallback_uses_captured_opencode_document(self):
+        opencode = self.root / "data/opencode/auth.json"
+        self.write(opencode, {"anthropic": {"access": "original-fallback"}})
+        connection = {"connection_id": "claude", "provider": "claude", "account_id": None,
+                      "env": {}, "options": {}}
+        with patch("core.accounts.sys.platform", "linux"):
+            env, _, _ = accounts.prepare(connection, capture_auth=True)
+        self.write(opencode, {"anthropic": {"access": "rotated-fallback"}})
+        module = load_provider("claude")
+        with patch.object(module.sys, "platform", "linux"):
+            headers, _ = module.authentication(env)
+        self.assertEqual(headers["Authorization"], "Bearer original-fallback")
+
+    def test_unknown_path_or_malformed_snapshot_never_falls_back_to_disk(self):
+        path = self.root / "login.json"
+        self.write(path, {"tokens": {"access_token": "disk-token"}})
+        for snapshot in ("{}", "[]", "invalid JSON", None):
+            with self.subTest(snapshot=snapshot), patch.object(paths, "read_json") as read:
+                with self.assertRaises(accounts.AccountError):
+                    accounts.auth_document(path, {"AI_STATUS_RESET_AUTH_SNAPSHOTS": snapshot})
+                read.assert_not_called()
+
+    def test_capture_is_optional_and_internal_snapshots_never_leak_to_next_connection(self):
+        path = self.root / "login.json"
+        self.write(path, {"tokens": {"access_token": "fixture-token", "account_id": "fixture-account"}})
+        connection = accounts.connection(accounts.normalize({"id": "fixture", "provider": "codex", "auth_file": str(path)}))
+        captured, fingerprint, _ = accounts.prepare(connection, capture_auth=True)
+        ordinary, ordinary_fingerprint, _ = accounts.prepare(connection, captured)
+        self.assertEqual(fingerprint, ordinary_fingerprint)
+        self.assertIn("AI_STATUS_RESET_AUTH_SNAPSHOTS", captured)
+        self.assertNotIn("AI_STATUS_RESET_AUTH_SNAPSHOTS", ordinary)
 
 
 if __name__ == "__main__":
