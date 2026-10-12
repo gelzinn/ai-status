@@ -15,20 +15,19 @@ estimate. The active operation hides the action button.
 All three platforms use a full-width outlined **Update now** button in the fixed
 footer. Checking uses **Checking for updates…**, and external updater opening uses
 **Opening updater…**, with a blue spinner and progress bar. Linux shows only this
-feedback while running, and a short Terminal handoff message afterward.
+feedback while running, and **Updater opened** afterward.
 
 Every alternate state follows the same footer layout. Success shows a blue check
 and **Up to date**, **Updater opened** or **Update complete**, then a full-width
-**Done** button. Handoffs add only **Finish the update in Setup.** or **Finish the
-update in Terminal.** Errors show an info icon and **Update failed**, a compact
-reason in neutral text, and the outlined **Retry update** button. Redundant download
-failure prefixes are removed from the displayed reason; the original error stays
-available in tooltips or accessibility descriptions. Manual alternatives keep
+**Done** button. Errors use the same red (**#f5a3a3**) for the info icon and
+a short failure-and-cause label in one status row, above **Retry update**. Examples
+include **Download failed: transfer interrupted** and **Update failed: Terminal
+unavailable**. The original error stays available in tooltips or accessibility
+descriptions. Manual alternatives keep
 their command and links in the page, without duplicate footer instructions.
 
-The page uses **Latest stable version**, one compact version row, and a short
-description of the platform's update path. Installation instructions no longer
-repeat across the body and footer, including already-current and completed states.
+The page uses **Latest stable version**, one compact version row, links and the
+optional manual command. Descriptions have been removed from every update state.
 
 ## Before
 
@@ -83,14 +82,14 @@ handoff; errors offer retry. SwiftBar keeps its Terminal update path.
 ## Capture sources and reproduction
 
 - Windows: production Qt widgets rendered offscreen on Linux with PySide6 6.12,
-  bundled fonts and artwork. Source: commit `3f2ab14`. Baselines render the old
+  bundled fonts and artwork. Source: commit `844d95f`. Baselines render the old
   widgets and guide from `38df1df` with the same sample versions.
 - Linux: production QML rendered offscreen with Qt Quick's software renderer and
   the test daemon/Omarchy theme (dark surface, blue accent, 6px corners). Source:
-  commit `4f690da`; this does not capture a running Omarchy desktop.
+  commit `844d95f`; this does not capture a running Omarchy desktop.
 - macOS: unmodified `update-*.png` files from the `macos-panel-preview` artifact
-  for commit `3f2ab14` in the
-  [native macOS CI run](https://github.com/gelzinn/ai-status/actions/runs/38316201442/job/115033365729).
+  for commit `844d95f` in the
+  [native macOS CI run](https://github.com/gelzinn/ai-status/actions/runs/38318471038/job/115040705457).
 - The Linux and macOS baselines are the existing tracked
   [Linux guide](../updates-linux-guide.png) and
   [native macOS guide](../updates-macos-guide.png), copied without alteration.
