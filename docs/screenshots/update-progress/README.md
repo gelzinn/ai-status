@@ -17,17 +17,27 @@ footer. Checking uses **Checking for updates…**, and external updater opening 
 **Opening updater…**, with a blue spinner and progress bar. Linux shows only this
 feedback while running, and **Updater opened** afterward.
 
-Every alternate state follows the same footer layout. Success shows a blue check
-and **Up to date**, **Updater opened** or **Update complete**, then a full-width
-**Done** button. Errors use the same red (**#f5a3a3**) for the info icon and
-a short failure-and-cause label in one status row, above **Retry update**. Examples
+Every result uses two columns: the notice fills the left side, while an outlined
+**Done** or **Retry** button on the right fits its text. Success shows a blue check
+and **Up to date**, **Updater opened** or **Update complete**. Errors use the same
+red (**#f5a3a3**) for the info icon and a short failure-and-cause label. Examples
 include **Download failed: transfer interrupted** and **Update failed: Terminal
 unavailable**. The original error stays available in tooltips or accessibility
 descriptions. Manual alternatives keep
 their command and links in the page, without duplicate footer instructions.
 
-The page uses **Latest stable version**, one compact version row, links and the
-optional manual command. Descriptions have been removed from every update state.
+The page uses **Latest stable version**, one compact version row and **What's
+new** with the new GitHub release's notes, matching the source used by the web
+changelog. The existing release check supplies the notes without another network
+request. Headings, lists and inline formatting make the changes readable before
+updating. Long notes scroll while the action footer stays visible.
+
+**Release notes**, **Update manually…** and **Installation guide** use full-width
+outlined controls with consistent padding. Generic platform descriptions and
+extra completion instructions have been removed. The optional manual command
+stays collapsed until requested. Missing notes keep the GitHub link available;
+notes from another version and already-installed releases are hidden. The sample
+notes in these previews are fixtures, not a published v0.16.0 release.
 
 ## Before
 
@@ -82,14 +92,14 @@ handoff; errors offer retry. SwiftBar keeps its Terminal update path.
 ## Capture sources and reproduction
 
 - Windows: production Qt widgets rendered offscreen on Linux with PySide6 6.12,
-  bundled fonts and artwork. Source: commit `844d95f`. Baselines render the old
+  bundled fonts and artwork. Source: commit `34eec1f`. Baselines render the old
   widgets and guide from `38df1df` with the same sample versions.
 - Linux: production QML rendered offscreen with Qt Quick's software renderer and
   the test daemon/Omarchy theme (dark surface, blue accent, 6px corners). Source:
-  commit `844d95f`; this does not capture a running Omarchy desktop.
+  commit `34eec1f`; this does not capture a running Omarchy desktop.
 - macOS: unmodified `update-*.png` files from the `macos-panel-preview` artifact
-  for commit `844d95f` in the
-  [native macOS CI run](https://github.com/gelzinn/ai-status/actions/runs/38318471038/job/115040705457).
+  for commit `34eec1f` in the
+  [native macOS CI run](https://github.com/gelzinn/ai-status/actions/runs/38320781770/job/115048142321).
 - The Linux and macOS baselines are the existing tracked
   [Linux guide](../updates-linux-guide.png) and
   [native macOS guide](../updates-macos-guide.png), copied without alteration.
