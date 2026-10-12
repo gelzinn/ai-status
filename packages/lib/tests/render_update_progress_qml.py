@@ -114,6 +114,18 @@ Item {
         Plugin.Model.updateMessage = "AI Status is already up to date."
         Plugin.Model.updateRunning = false
     }
+    function reopened() {
+        const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+        snapshot.version = {current: "0.16.0", latest: "0.16.0", has_update: false}
+        Plugin.Model.snapshot = snapshot
+        Plugin.Model.updateRunning = false
+        Plugin.Model.updateStage = "idle"
+        Plugin.Model.updateMessage = ""
+        Plugin.Model.updateError = ""
+        findUpdatePage().commandExpanded = false
+        panel.showUsage()
+        panel.open()
+    }
 }
 """)
         view.engine().addImportPath(str(root))
@@ -127,7 +139,8 @@ Item {
         stages = [(None, "linux-available.png"), ("guide", "linux-guide.png"), ("command", "linux-command.png"),
                   ("checking", "linux-checking.png"), ("opening", "linux-opening.png"),
                   ("terminal", "linux-terminal.png"), ("error", "linux-error.png"),
-                  ("retry", "linux-retry.png"), ("current", "linux-up-to-date.png")]
+                  ("retry", "linux-retry.png"), ("current", "linux-up-to-date.png"),
+                  ("reopened", "linux-reopened.png")]
         retained = []
 
         def next_stage():

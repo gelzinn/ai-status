@@ -719,6 +719,10 @@ final class Model: ObservableObject {
     var updateGuide: UpdateGuide { snapshot?.update ?? .manualMacOS }
     var updateHandedOff: Bool { updateOpenedInTerminal && updateProgress?.stage == "complete" }
     var updateCompletionLabel: String { updateHandedOff ? "Updater opened" : "Update complete" }
+    var updateStatusLabel: String {
+        if updateGuide.updatesInTerminal && updateProgress?.stage == "opening" { return "Opening terminal…" }
+        return updateProgress?.label ?? "Updating…"
+    }
     var panelHeight: CGFloat {
         switch page {
         case .settings:
@@ -2069,7 +2073,7 @@ struct UpdateActions: View {
                 HStack(spacing: 8) {
                     ActionSpinner()
                     Text(model.updateProgress?.stage == "complete" ? model.updateCompletionLabel :
-                         (model.updateProgress?.label ?? "Updating…"))
+                         model.updateStatusLabel)
                     Spacer(minLength: 0)
                     if let percent = model.updateProgress?.downloadPercent {
                         Text(String(format: "%.0f%%", percent)).monospacedDigit()
@@ -2266,7 +2270,7 @@ struct PanelScrollContent: View {
                             HoverButton(hoverColor: Palette.update.opacity(0.10), action: model.showUpdate) {
                                 HStack {
                                     if model.updateStarting { ActionSpinner() }
-                                    Text(model.updateStarting ? (model.updateProgress?.label ?? "Updating…") :
+                                    Text(model.updateStarting ? model.updateStatusLabel :
                                          "Update available: v" + (model.snapshot?.version.latest ?? ""))
                                     Spacer()
                                     PanelIcon(name: "arrow-right")
@@ -3203,6 +3207,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         completedDocument["version"] = ["current": "0.16.0", "latest": "0.16.0", "has_update": false] as [String: Any]
         model.accept(try JSONSerialization.data(withJSONObject: completedDocument))
         try renderSmokePage(model, name: "update-complete", directory: directory)
+        // Restart creates a new host on Usage; the old host's progress state
+        // never carries into the reopened application.
+        let reopenedModel = Model()
+        reopenedModel.accept(try JSONSerialization.data(withJSONObject: completedDocument))
+        reopenedModel.isPresented = true
+        guard reopenedModel.page == .usage, reopenedModel.updateProgress == nil, !reopenedModel.updateStarting,
+              reopenedModel.snapshot?.version.current == "0.16.0", reopenedModel.snapshot?.version.hasUpdate == false,
+              reopenedModel.snapshot?.selected == model.snapshot?.selected,
+              reopenedModel.snapshot?.settings.enabled == model.snapshot?.settings.enabled,
+              reopenedModel.snapshot?.settings.display == model.snapshot?.settings.display else {
+            throw AppError.message("The reopened host did not show the current version with preserved preferences and clean update state.")
+        }
+        try renderSmokePage(reopenedModel, name: "update-reopened", directory: directory)
         model.accept(try JSONSerialization.data(withJSONObject: document))
         try """
         printf '%s\\n' '{"stage":"downloading","message":"Downloading…","downloadedBytes":1024,"totalBytes":4096}'
@@ -3264,10 +3281,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         try renderSmokePage(terminalModel, name: "update-terminal-guide", directory: directory)
         try """
         printf '%s\\n' '{"stage":"opening","message":"Opening the updater in a terminal…"}'
+        sleep 0.4
         printf '%s\\n' '{"stage":"complete","message":"The updater is open in a terminal. Follow its progress there; your menu bar refreshes after installation."}'
 
         """.write(to: script, atomically: true, encoding: .utf8)
         terminalModel.startUpdate()
+        try awaitSmokeUpdateStage(terminalModel) { $0?.stage == "opening" }
+        guard terminalModel.updateOpenedInTerminal else {
+            throw AppError.message("The live terminal-opening stage did not identify the updater handoff.")
+        }
+        try renderSmokePage(terminalModel, name: "update-terminal-opening", directory: directory)
         try awaitSmokeUpdateResult(terminalModel)
         guard terminalModel.updateError.isEmpty, terminalModel.updateHandedOff,
               terminalModel.updateCompletionLabel == "Updater opened" else {

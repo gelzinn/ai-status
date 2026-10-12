@@ -113,6 +113,12 @@ def main():
                         view.set_guide(guide_module.update_guide(), fetch.get_version_info())
                         dashboard.on_update_finished("AI Status is already up to date.", True)
                         capture("windows-up-to-date")
+                    with patch.object(fetch, "__version__", "0.16.0"):
+                        dashboard.version.setText("v0.16.0")
+                        view.completed = False
+                        view.status.clear()
+                        dashboard.show_usage()
+                        capture("windows-reopened")
         finally:
             test.doCleanups()
 

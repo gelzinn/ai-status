@@ -1952,10 +1952,12 @@ class OperationSpinner(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.translate(self.rect().center())
+        rect = QRectF(self.rect())
+        center = rect.center()
+        painter.translate(center)
         painter.rotate(self.rotation)
-        painter.translate(-self.rect().center())
-        draw_control_icon(painter, QRectF(self.rect()), "loader-circle")
+        painter.translate(-center)
+        draw_control_icon(painter, rect, "loader-circle", color="#89b4fa")
 
 
 class UpdateWorker(QObject):
@@ -2106,10 +2108,9 @@ class UpdateView(QWidget):
 
     def update_action(self):
         available = bool(self.guide.get("canUpdate") and self.version.get("has_update"))
-        self.action.setVisible(available or self.running or self.failed)
+        self.action.setVisible(not self.running and (available or self.failed))
         self.action.setEnabled(available and not self.running)
-        self.action.setText("Updating…" if self.running else
-                            "Retry update" if self.failed else "Done" if self.completed else
+        self.action.setText("Retry update" if self.failed else "Done" if self.completed else
                             self.guide.get("actionLabel", "Update now"))
         self.spinner.set_running(self.running)
         if not self.running:
@@ -2126,7 +2127,13 @@ class UpdateView(QWidget):
     def show_progress(self, event):
         event = {"message": event} if isinstance(event, str) else event
         message = event.get("message", "")
-        self.status.setText(message)
+        label = {
+            "checking": "Checking for updates…", "downloading": "Downloading…",
+            "verifying": "Verifying download…", "installing": "Installing…",
+            "opening": "Opening installer…", "restarting": "Restarting AI Status…",
+        }.get(event.get("stage"), message)
+        self.status.setText(label)
+        self.status.setToolTip(message)
         self.status.setStyleSheet("color: #89b4fa;")
         self.status.setVisible(bool(message))
         self.spinner.set_running(self.running)
