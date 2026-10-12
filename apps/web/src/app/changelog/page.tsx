@@ -49,6 +49,7 @@ export default async function ChangelogPage({ searchParams }: {
 						return (
 							<article key={release.id} id={id} className="changelog-entry" aria-labelledby={`${id}-title`}>
 								<div className="changelog-article">
+									<div className="changelog-entry-date"><a href={`#${id}`}><time dateTime={day}>{date}</time></a></div>
 									<h2 id={`${id}-title`} className="changelog-release-title"><a href={release.url}>{release.name}</a></h2>
 									{release.name !== release.tagName && <p className="changelog-version">{release.tagName}</p>}
 									<div className="changelog-prose">

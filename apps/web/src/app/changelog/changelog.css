@@ -28,6 +28,7 @@
 .changelog-date a::before { content: ""; position: absolute; left: 6px; top: 9px; height: 7px; width: 7px; border-radius: 50%; background: var(--foreground); }
 .changelog-day-releases { grid-column: 4 / span 6; min-width: 0; }
 .changelog-entry { position: relative; padding-bottom: 96px; scroll-margin-top: 96px; }
+.changelog-entry-date { display: none; }
 .changelog-article { min-width: 0; }
 .changelog-release-title { font-size: 32px; line-height: 36px; font-weight: 590; letter-spacing: -.704px; margin: 0; }
 .changelog-version { font-size: 14px; color: var(--muted-foreground); margin-top: 8px; }
@@ -76,8 +77,8 @@
 	.changelog-search { flex: 1; width: auto; min-width: 0; }
 	.changelog-day { display: flex; flex-direction: column; gap: 32px; }
 	.changelog-entry { padding-bottom: 80px; }
-	.changelog-day::before, .changelog-date a::before { display: none; }
-	.changelog-date a { position: static; padding: 0; color: var(--muted-foreground); }
+	.changelog-day::before, .changelog-date { display: none; }
+	.changelog-entry-date { display: block; margin-bottom: 32px; color: var(--muted-foreground); font-size: 14px; line-height: 24px; letter-spacing: -.182px; }
 	.changelog-prose :is(h1, h2, h3, h4) { margin-top: 40px; }
 	.changelog-pagination { flex-wrap: wrap; gap: 12px; padding-bottom: 64px; }
 	.changelog-pagination > span { width: 100%; }
