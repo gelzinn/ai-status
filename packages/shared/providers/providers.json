@@ -91,7 +91,7 @@
     "name": "OpenRouter",
     "logo": "https://www.google.com/s2/favicons?sz=64&domain=openrouter.ai",
     "tracks": "Key usage and limits; account spend, total credits and remaining balance",
-    "auth": "OPENROUTER_API_KEY for key usage; OPENROUTER_MANAGEMENT_KEY for account credits",
+    "auth": "OPENROUTER_API_KEY; optional OPENROUTER_MANAGEMENT_KEY",
     "authType": "apiKey",
     "category": "apis"
   },
