@@ -24,8 +24,17 @@ Ui.BarWidget {
     implicitWidth: vertical ? barSize : content.implicitWidth + Style.space(17)
     implicitHeight: vertical ? content.implicitWidth + Style.space(17) : barSize
     onBarChanged: injectPanel()
-    Component.onCompleted: Plugin.Model.acquire()
-    Component.onDestruction: Plugin.Model.release()
+    Component.onCompleted: Plugin.Model.acquire(root)
+    Component.onDestruction: Plugin.Model.release(root)
+
+    Connections {
+        target: Plugin.Model
+        function onNotificationActivated() {
+            if (Plugin.Model.notificationOwner !== root || !panelLoader.item) return
+            panelLoader.item.showUsage()
+            root.open()
+        }
+    }
 
     Loader {
         id: panelLoader

@@ -12,12 +12,12 @@ from PySide6.QtCore import QEasingCurve, QEvent, QModelIndex, QObject, QPoint, Q
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout,
-    QLabel, QListWidget, QListWidgetItem, QMenu,
+    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
     QPushButton, QScrollArea, QSizePolicy, QSpacerItem, QStackedWidget, QStyledItemDelegate, QStyle,
     QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
-from . import __version__, about, config, fetch, paths, render, reset_credits, state, updates
+from . import __version__, about, config, fetch, notifications, paths, render, reset_credits, state, updates
 
 RELEASE_URL = "https://github.com/gelzinn/ai-status/releases/latest"
 ASSETS = paths.LIB_DIR / "assets"
@@ -689,6 +689,7 @@ class ProviderSettings(QWidget):
             QCheckBox { padding: 5px 0; }
             QPushButton { border: 1px solid #303030; border-radius: 6px; }
             QComboBox { border: 1px solid #303030; border-radius: 6px; padding: 6px 8px; }
+            QLineEdit { border: 1px solid #303030; border-radius: 6px; padding: 6px 8px; }
             QComboBox QAbstractItemView { background: #111111; selection-background-color: #252525; }
             QListWidget::indicator, QCheckBox::indicator {
                 width: 16px; height: 16px; border: 1px solid #888888;
@@ -757,6 +758,8 @@ class ProviderSettings(QWidget):
         self.startup.setChecked(startup_enabled())
         layout.addWidget(self.startup)
         layout.addSpacing(14)
+        self.add_notification_controls(layout)
+        layout.addSpacing(14)
         self.about_button = QPushButton("About AI Status")
         self.about_button.clicked.connect(self.about_requested)
         layout.addWidget(self.about_button)
@@ -787,12 +790,144 @@ class ProviderSettings(QWidget):
         self.icon_mode.currentIndexChanged.connect(self.clear_message)
         self.usage_display.currentIndexChanged.connect(self.update_choices)
         self.active.currentIndexChanged.connect(self.clear_message)
+        self.active.currentIndexChanged.connect(self.notification_choice_changed)
         self.startup.toggled.connect(self.clear_message)
+
+    def add_notification_controls(self, layout):
+        self.notification_settings = notifications.load_settings()
+        self.notification_rule_choice = None
+        self.notification_rule_drafts = {
+            (rule["connection_id"], rule["metric"]): {
+                "custom": True, "enabled": rule.get("enabled", True),
+                "text": ", ".join(str(value) for value in rule["thresholds"]),
+            }
+            for rule in self.notification_settings.get("rules", [])
+        }
+        layout.addWidget(plain_label("Quota notifications", "#eeeeee"))
+        self.notifications_enabled = QCheckBox("Notify before quota limits")
+        self.notifications_enabled.setChecked(self.notification_settings["enabled"])
+        layout.addWidget(self.notifications_enabled)
+        self.notifications_recovery = QCheckBox("Notify when quota is available again")
+        self.notifications_recovery.setChecked(self.notification_settings["recovery"])
+        layout.addWidget(self.notifications_recovery)
+        self.notifications_recent_only = QCheckBox("Recovery for recent accounts only")
+        self.notifications_recent_only.setToolTip("Only notify recovery for accounts used in the last 24 hours.")
+        self.notifications_recent_only.setChecked(self.notification_settings.get("recent_only", False))
+        layout.addWidget(self.notifications_recent_only)
+        layout.addWidget(plain_label("Default thresholds (% used)", "#666666"))
+        self.notification_thresholds = QLineEdit(", ".join(str(value) for value in self.notification_settings["thresholds"]))
+        self.notification_thresholds.setAccessibleName("Default notification thresholds")
+        self.notification_thresholds.setPlaceholderText("80, 95, 100")
+        layout.addWidget(self.notification_thresholds)
+        self.notification_mute = QCheckBox("Mute notifications for one hour")
+        self.notification_mute.setChecked(self.notification_settings.get("muted_until", 0) > time.time())
+        layout.addWidget(self.notification_mute)
+        hint = plain_label("Uncheck to resume. Quiet hours use your local time; leave both times empty to disable.", "#666666")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        quiet = self.notification_settings.get("quiet_hours", {})
+        times = QHBoxLayout()
+        self.notification_quiet_start = QLineEdit(quiet.get("start", ""))
+        self.notification_quiet_start.setAccessibleName("Quiet hours start")
+        self.notification_quiet_start.setPlaceholderText("Start HH:MM")
+        self.notification_quiet_end = QLineEdit(quiet.get("end", ""))
+        self.notification_quiet_end.setAccessibleName("Quiet hours end")
+        self.notification_quiet_end.setPlaceholderText("End HH:MM")
+        times.addWidget(self.notification_quiet_start)
+        times.addWidget(self.notification_quiet_end)
+        layout.addLayout(times)
+        layout.addWidget(plain_label("Notification work hours (optional)", "#666666"))
+        work = self.notification_settings.get("work_hours", {})
+        work_times = QHBoxLayout()
+        self.notification_work_start = QLineEdit(work.get("start", ""))
+        self.notification_work_start.setAccessibleName("Notification work hours start")
+        self.notification_work_start.setPlaceholderText("Start HH:MM")
+        self.notification_work_end = QLineEdit(work.get("end", ""))
+        self.notification_work_end.setAccessibleName("Notification work hours end")
+        self.notification_work_end.setPlaceholderText("End HH:MM")
+        work_times.addWidget(self.notification_work_start)
+        work_times.addWidget(self.notification_work_end)
+        layout.addLayout(work_times)
+        self.notification_rule_label = plain_label("", "#666666")
+        self.notification_rule_label.setWordWrap(True)
+        layout.addWidget(self.notification_rule_label)
+        self.notification_rule_custom = QCheckBox("Customize this account and limit")
+        layout.addWidget(self.notification_rule_custom)
+        self.notification_rule_enabled = QCheckBox("Notify for this account and limit")
+        layout.addWidget(self.notification_rule_enabled)
+        self.notification_rule_thresholds = QLineEdit()
+        self.notification_rule_thresholds.setAccessibleName("Active account and limit thresholds")
+        self.notification_rule_thresholds.setPlaceholderText("80, 95, 100")
+        layout.addWidget(self.notification_rule_thresholds)
+        self.notification_rule_custom.toggled.connect(self.update_notification_rule_controls)
+        for widget in (self.notifications_enabled, self.notifications_recovery, self.notifications_recent_only, self.notification_mute,
+                       self.notification_rule_custom, self.notification_rule_enabled):
+            widget.toggled.connect(self.clear_message)
+        for widget in (self.notification_thresholds, self.notification_quiet_start,
+                       self.notification_quiet_end, self.notification_work_start,
+                       self.notification_work_end, self.notification_rule_thresholds):
+            widget.textChanged.connect(self.clear_message)
+
+    def store_notification_rule(self):
+        if self.notification_rule_choice is not None:
+            self.notification_rule_drafts[self.notification_rule_choice] = {
+                "custom": self.notification_rule_custom.isChecked(),
+                "enabled": self.notification_rule_enabled.isChecked(),
+                "text": self.notification_rule_thresholds.text(),
+            }
+
+    def notification_choice_changed(self):
+        self.store_notification_rule()
+        choice = self.active.currentData()
+        self.notification_rule_choice = (choice[0], choice[2]) if choice else None
+        self.notification_rule_label.setText("Alerts for " + self.active.currentText() if choice else "Select an active account and limit above.")
+        draft = self.notification_rule_drafts.get(self.notification_rule_choice, {})
+        self.notification_rule_custom.setChecked(draft.get("custom", False))
+        self.notification_rule_enabled.setChecked(draft.get("enabled", True))
+        self.notification_rule_thresholds.setText(draft.get("text", self.notification_thresholds.text()))
+        self.update_notification_rule_controls()
+
+    def update_notification_rule_controls(self):
+        available = self.notification_rule_choice is not None
+        self.notification_rule_custom.setEnabled(available)
+        custom = available and self.notification_rule_custom.isChecked()
+        self.notification_rule_enabled.setEnabled(custom)
+        self.notification_rule_thresholds.setEnabled(custom)
+
+    @staticmethod
+    def parse_notification_thresholds(text):
+        try:
+            values = [int(value.strip()) for value in text.split(",")]
+        except ValueError as error:
+            raise ValueError("Enter whole-number notification thresholds separated by commas, such as 80, 95, 100.") from error
+        return values
+
+    def collect_notification_settings(self):
+        self.store_notification_rule()
+        settings = dict(self.notification_settings)
+        settings.update(
+            enabled=self.notifications_enabled.isChecked(),
+            recovery=self.notifications_recovery.isChecked(),
+            recent_only=self.notifications_recent_only.isChecked(),
+            thresholds=self.parse_notification_thresholds(self.notification_thresholds.text()),
+            muted_until=((self.notification_settings["muted_until"]
+                          if self.notification_settings.get("muted_until", 0) > time.time() else time.time() + 3600)
+                         if self.notification_mute.isChecked() else 0),
+            quiet_hours={"start": self.notification_quiet_start.text().strip(),
+                         "end": self.notification_quiet_end.text().strip()},
+            work_hours={"start": self.notification_work_start.text().strip(),
+                        "end": self.notification_work_end.text().strip()},
+            rules=[{"connection_id": connection_id, "metric": metric,
+                    "enabled": draft["enabled"], "thresholds": self.parse_notification_thresholds(draft["text"])}
+                   for (connection_id, metric), draft in self.notification_rule_drafts.items() if draft["custom"]],
+        )
+        return notifications.validate_settings(settings)
 
     def clear_message(self):
         self.message.hide()
 
     def update_choices(self):
+        self.store_notification_rule()
         choice = self.active.currentData()
         if choice is None:
             selected = state.load_selected() or {}
@@ -818,6 +953,7 @@ class ProviderSettings(QWidget):
         self.active.setCurrentIndex(index if index >= 0 else 0)
         self.active.setEnabled(self.active.count() > 0)
         self.active.blockSignals(False)
+        self.notification_choice_changed()
         self.clear_message()
 
     def keyPressEvent(self, event):
@@ -839,6 +975,12 @@ class ProviderSettings(QWidget):
             self.message.setText("Choose Used or Remaining for usage display.")
             self.message.show()
             return
+        try:
+            notification_settings = self.collect_notification_settings()
+        except ValueError as error:
+            self.message.setText(str(error))
+            self.message.show()
+            return
         selected = dict(state.load_selected() or {})
         choice = self.active.currentData()
         if choice:
@@ -849,10 +991,12 @@ class ProviderSettings(QWidget):
                 set_startup(self.startup.isChecked())
             config.save_connection_order(order)
             state._save_json(state.SELECTED_FILE, selected)
+            notifications.save_settings(notification_settings)
         except OSError:
             self.message.setText("Unable to save settings. Check access to your user configuration directory.")
             self.message.show()
             return
+        self.notification_settings = notification_settings
         self.message.setText("Saved")
         self.message.show()
         self.saved.emit()
@@ -1068,6 +1212,7 @@ class Dashboard(QWidget):
         self.last_config = config.load_config()
         self.last_refresh = paths.read_json(state.REFRESH_FILE)
         self.last_activation = paths.read_json(paths.RUNTIME_DIR / "desktop-request.json")
+        self.last_notification = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         panel = QWidget()
@@ -1157,6 +1302,7 @@ class Dashboard(QWidget):
         self.menu = menu
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self.activate)
+        self.tray.messageClicked.connect(self.open_notification)
         self.tray.show()
         self.poll = QTimer(self)
         self.poll.timeout.connect(self.poll_state)
@@ -1480,6 +1626,34 @@ class Dashboard(QWidget):
         else:
             self.data.pop(name, None)
         self.draw()
+        # Startup snapshots are displayed for continuity, but only newly collected
+        # results reach the evaluator; it rejects cache fallbacks and invalid data.
+        try:
+            notifications.process(providers, deliver=self.deliver_notification)
+        except (OSError, ValueError):
+            logging.exception("Unable to process quota notifications")
+
+    def deliver_notification(self, event):
+        if not QSystemTrayIcon.supportsMessages():
+            return False
+        icon = (QSystemTrayIcon.MessageIcon.Information if event["kind"] != "threshold"
+                else QSystemTrayIcon.MessageIcon.Warning)
+        try:
+            self.tray.showMessage(event["title"], event["body"], icon, 10_000)
+        except Exception:
+            logging.exception("Unable to display quota notification")
+            return False
+        self.last_notification = dict(event)
+        return True
+
+    def open_notification(self):
+        event = self.last_notification
+        if event:
+            value = (event["provider"], event.get("idx", 0), event["metric"])
+            if value in self.metric_values:
+                self.choose_metric(value)
+        self.show_usage()
+        self.show_dashboard()
 
     def on_error(self, name, message):
         self.errors[name] = message
@@ -1494,6 +1668,8 @@ class Dashboard(QWidget):
         self.refresh_button.set_loading(False)
         self.worker.deleteLater()
         self.status.setText("Last checked " + time.strftime("%H:%M:%S") + " · updates every 5 minutes")
+        providers = [provider for entries in self.data.values() for provider in entries]
+        self.auto_refresh.setInterval(int(notifications.next_check_delay(providers) * 1000))
         if fetch.get_version_info()["has_update"]:
             self.status.setText(self.status.text() + " · update available")
         self.draw()

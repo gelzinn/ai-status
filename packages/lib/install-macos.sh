@@ -245,7 +245,7 @@ plist.write_bytes(plistlib.dumps(info))
 PY
     ARCH="$(uname -m)"
     swiftc -O -parse-as-library -target "$ARCH-apple-macosx13.0" \
-        -framework Cocoa -framework SwiftUI "$STAGE_DIR/packages/lib/macos/AIStatus.swift" \
+        -framework Cocoa -framework SwiftUI -framework UserNotifications "$STAGE_DIR/packages/lib/macos/AIStatus.swift" \
         -o "$APP/Contents/MacOS/AIStatus"
     # Local builds use an ad-hoc signature; a notarized distribution is separate.
     if command -v codesign >/dev/null; then codesign --force --sign - "$APP"; fi

@@ -1,9 +1,10 @@
 // Native macOS adapter. Provider collection and preferences remain in Python.
-// Build with swiftc -parse-as-library -framework Cocoa -framework SwiftUI.
+// Build with swiftc -parse-as-library -framework Cocoa -framework SwiftUI -framework UserNotifications.
 import Cocoa
 import CoreText
 import Darwin
 import SwiftUI
+import UserNotifications
 
 private let commandNotification = Notification.Name("com.gelzin.ai-status.command")
 
@@ -145,6 +146,74 @@ struct Settings: Decodable {
     let display: [String: Bool]
     let iconMode: String
     let usageDisplay: String?
+    let notifications: NotificationPreferences?
+}
+
+struct NotificationHours: Codable {
+    var start = ""
+    var end = ""
+}
+
+struct NotificationRule: Codable {
+    var connectionID: String
+    var metric: String
+    var thresholds: [Int]
+    var enabled: Bool
+    enum CodingKeys: String, CodingKey { case connectionID = "connection_id"; case metric, thresholds, enabled }
+}
+
+struct NotificationPreferences: Codable {
+    var enabled = true
+    var thresholds = [80, 95, 100]
+    var recovery = true
+    var recentOnly = false
+    var mutedUntil: Double = 0
+    var quietHours = NotificationHours()
+    var workHours = NotificationHours()
+    var rules: [NotificationRule] = []
+    enum CodingKeys: String, CodingKey {
+        case enabled, thresholds, recovery, rules
+        case recentOnly = "recent_only", mutedUntil = "muted_until"
+        case quietHours = "quiet_hours", workHours = "work_hours"
+    }
+    init() {}
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        thresholds = try values.decodeIfPresent([Int].self, forKey: .thresholds) ?? [80, 95, 100]
+        recovery = try values.decodeIfPresent(Bool.self, forKey: .recovery) ?? true
+        recentOnly = try values.decodeIfPresent(Bool.self, forKey: .recentOnly) ?? false
+        mutedUntil = try values.decodeIfPresent(Double.self, forKey: .mutedUntil) ?? 0
+        quietHours = try values.decodeIfPresent(NotificationHours.self, forKey: .quietHours) ?? NotificationHours()
+        workHours = try values.decodeIfPresent(NotificationHours.self, forKey: .workHours) ?? NotificationHours()
+        rules = try values.decodeIfPresent([NotificationRule].self, forKey: .rules) ?? []
+    }
+    func isSilent(at now: Date = Date()) -> Bool {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: now)
+        let current = String(format: "%02d:%02d", components.hour ?? 0, components.minute ?? 0)
+        func inHours(_ hours: NotificationHours) -> Bool {
+            guard !hours.start.isEmpty else { return false }
+            return hours.start < hours.end
+                ? hours.start <= current && current < hours.end
+                : current >= hours.start || current < hours.end
+        }
+        return !enabled || now.timeIntervalSince1970 < mutedUntil || inHours(quietHours)
+            || (!workHours.start.isEmpty && !inHours(workHours))
+    }
+}
+
+struct QuotaNotification: Decodable {
+    let id: String
+    let title: String
+    let body: String
+    let kind: String
+    let provider: String
+    let idx: Int
+    let metric: String
+    let queuedAt: Double
+    enum CodingKeys: String, CodingKey { case id, title, body, kind, provider, idx, metric; case queuedAt = "queued_at" }
+    var selection: Selection { Selection(provider: provider, idx: idx, metric: metric) }
+    var fresh: Bool { (0...300).contains(Date().timeIntervalSince1970 - queuedAt) }
 }
 
 struct ProjectInfo: Decodable {
@@ -201,6 +270,7 @@ struct Snapshot: Decodable {
     let about: ProjectInfo
     let version: VersionInfo
     let update: UpdateGuide?
+    let notifications: [QuotaNotification]?
 }
 
 enum Page: Equatable {
@@ -222,6 +292,9 @@ struct SettingsDraft {
     var iconMode = "bot"
     var usageDisplay = "used"
     var selected = Selection()
+    var notifications = NotificationPreferences()
+    var notificationThresholds = "80, 95, 100"
+    var notificationRuleThresholds: [String: String] = [:]
     var saved = false
 }
 
@@ -324,6 +397,7 @@ final class Model: ObservableObject {
     @Published var updateMessage = ""
     @Published var isPresented = false
     @Published var keyboardFocusVisible = false
+    @Published var notificationPermission = ""
     var changed: (() -> Void)?
     private let runtime: RuntimeConfig?
     private var backend: Process?
@@ -367,7 +441,47 @@ final class Model: ObservableObject {
     }
 
     var settingsValid: Bool {
-        !draft.enabled.isEmpty && draft.display.values.contains(true) && ["used", "remaining"].contains(draft.usageDisplay) && choices.contains { $0.selection == draft.selected }
+        !draft.enabled.isEmpty && draft.display.values.contains(true) && ["used", "remaining"].contains(draft.usageDisplay)
+            && choices.contains { $0.selection == draft.selected }
+            && Self.parseThresholds(draft.notificationThresholds) != nil
+            && draft.notificationRuleThresholds.values.allSatisfy { Self.parseThresholds($0) != nil }
+    }
+    static func parseThresholds(_ text: String) -> [Int]? {
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }
+        let parts = text.split(separator: ",", omittingEmptySubsequences: false)
+        let parsed = parts.compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        guard parsed.count == parts.count, parsed.allSatisfy({ (1...100).contains($0) }) else { return nil }
+        return Array(Set(parsed)).sorted()
+    }
+    var notificationRuleKey: String { draft.selected.provider + "\u{001f}" + draft.selected.metric }
+    var notificationRule: NotificationRule? {
+        draft.notifications.rules.first { $0.connectionID == draft.selected.provider && $0.metric == draft.selected.metric }
+    }
+    func setNotificationOverride(_ enabled: Bool) {
+        if enabled && notificationRule == nil {
+            let thresholds = Self.parseThresholds(draft.notificationThresholds) ?? [80, 95, 100]
+            draft.notifications.rules.append(NotificationRule(connectionID: draft.selected.provider,
+                                                               metric: draft.selected.metric,
+                                                               thresholds: thresholds, enabled: true))
+            draft.notificationRuleThresholds[notificationRuleKey] = thresholds.map(String.init).joined(separator: ", ")
+        } else if !enabled {
+            draft.notifications.rules.removeAll { $0.connectionID == draft.selected.provider && $0.metric == draft.selected.metric }
+            draft.notificationRuleThresholds.removeValue(forKey: notificationRuleKey)
+        }
+        draft.saved = false
+    }
+    func setNotificationRuleEnabled(_ enabled: Bool) {
+        if let index = draft.notifications.rules.firstIndex(where: {
+            $0.connectionID == draft.selected.provider && $0.metric == draft.selected.metric
+        }) { draft.notifications.rules[index].enabled = enabled }
+        draft.saved = false
+    }
+    func muteNotifications(_ seconds: Double) {
+        draft.notifications.mutedUntil = seconds > 0 ? Date().timeIntervalSince1970 + seconds : 0
+        draft.saved = false
+    }
+    func acknowledgeNotification(_ identity: String) {
+        enqueue(["notification-ack", "--id", identity]) { _ in }
     }
     func providerName(_ name: String) -> String { snapshot?.settings.names[name] ?? name }
     func logoProviderID(_ connection: String) -> String {
@@ -480,6 +594,11 @@ final class Model: ObservableObject {
                               display: snapshot.settings.display, iconMode: snapshot.settings.iconMode,
                               usageDisplay: snapshot.settings.usageDisplay == "remaining" ? "remaining" : "used",
                               selected: snapshot.selected)
+        draft.notifications = snapshot.settings.notifications ?? NotificationPreferences()
+        draft.notificationThresholds = draft.notifications.thresholds.map(String.init).joined(separator: ", ")
+        draft.notificationRuleThresholds = Dictionary(uniqueKeysWithValues: draft.notifications.rules.map {
+            ($0.connectionID + "\u{001f}" + $0.metric, $0.thresholds.map(String.init).joined(separator: ", "))
+        })
         settingsError = ""
         page = .settings
         changed?()
@@ -497,9 +616,21 @@ final class Model: ObservableObject {
     func saveSettings() {
         guard settingsValid, !settingsSaving else { return }
         let selection = ["provider": draft.selected.provider, "idx": draft.selected.idx, "metric": draft.selected.metric] as [String: Any]
+        var alerts = draft.notifications
+        alerts.thresholds = Self.parseThresholds(draft.notificationThresholds) ?? []
+        for index in alerts.rules.indices {
+            let rule = alerts.rules[index]
+            let key = rule.connectionID + "\u{001f}" + rule.metric
+            if let text = draft.notificationRuleThresholds[key], let values = Self.parseThresholds(text) {
+                alerts.rules[index].thresholds = values
+            }
+        }
+        guard let alertsData = try? JSONEncoder().encode(alerts),
+              let alertsObject = try? JSONSerialization.jsonObject(with: alertsData) else { return }
         let payload: [String: Any] = ["enabled": draft.order.filter { draft.enabled.contains($0) },
                                      "display": draft.display, "iconMode": draft.iconMode,
-                                     "usageDisplay": draft.usageDisplay, "selected": selection]
+                                     "usageDisplay": draft.usageDisplay, "selected": selection,
+                                     "notifications": alertsObject]
         guard let data = try? JSONSerialization.data(withJSONObject: payload), let json = String(data: data, encoding: .utf8) else { return }
         settingsSaving = true
         settingsError = ""
@@ -849,6 +980,7 @@ struct SettingsPage: View {
                     Text("Remaining").tag("remaining")
                 }.labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
             }
+            NotificationSettingsView(model: model)
             VStack(alignment: .leading, spacing: 8) {
                 Text("Bar display").foregroundColor(Palette.bright)
                 ForEach(fields, id: \.0) { key, label in
@@ -884,13 +1016,101 @@ struct SettingsPage: View {
                 }
             }
             if !model.settingsError.isEmpty || !model.settingsValid {
-                Text(model.settingsError.isEmpty ? "Enable a provider and at least one bar text field, then choose a limit." : model.settingsError)
+                Text(model.settingsError.isEmpty ? "Choose a provider, limit and bar text field. Alert thresholds must be whole percentages from 1 to 100, separated by commas." : model.settingsError)
                     .font(.custom("GeistMono-Regular", size: 11)).foregroundColor(.orange)
             }
             HoverButton(bordered: true, action: model.showAbout) {
                 HStack { Text("About AI Status"); Spacer(); PanelIcon(name: "arrow-right") }
             }
         }.disabled(model.settingsSaving)
+    }
+}
+
+struct NotificationSettingsView: View {
+    @ObservedObject var model: Model
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Group {
+                Text("Quota notifications").foregroundColor(Palette.bright)
+                Toggle("Enable quota alerts", isOn: Binding(get: { model.draft.notifications.enabled }, set: {
+                    model.draft.notifications.enabled = $0; model.draft.saved = false
+                })).toggleStyle(.checkbox)
+                HStack {
+                    Text("Thresholds (%)")
+                    TextField("80, 95, 100", text: Binding(get: { model.draft.notificationThresholds }, set: {
+                        model.draft.notificationThresholds = $0; model.draft.saved = false
+                    })).textFieldStyle(.roundedBorder)
+                }
+            }
+            Toggle("Notify when quota recovers", isOn: Binding(get: { model.draft.notifications.recovery }, set: {
+                model.draft.notifications.recovery = $0; model.draft.saved = false
+            })).toggleStyle(.checkbox)
+            Toggle("Recovery only for accounts used in the last day", isOn: Binding(get: { model.draft.notifications.recentOnly }, set: {
+                model.draft.notifications.recentOnly = $0; model.draft.saved = false
+            })).toggleStyle(.checkbox)
+            HStack {
+                Text("Silence")
+                Button("1 hour") { model.muteNotifications(3600) }
+                Button("Until tomorrow") {
+                    if let next = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date())) {
+                        model.muteNotifications(next.timeIntervalSinceNow)
+                    }
+                }
+                Button("Resume") { model.muteNotifications(0) }
+            }.buttonStyle(.borderless)
+            if model.draft.notifications.mutedUntil > Date().timeIntervalSince1970 {
+                Text("Silenced until " + Date(timeIntervalSince1970: model.draft.notifications.mutedUntil).formatted(date: .abbreviated, time: .shortened))
+                    .font(.custom("GeistMono-Regular", size: 11))
+            }
+            Group {
+                HStack {
+                    Text("Quiet hours")
+                    TextField("HH:MM", text: Binding(get: { model.draft.notifications.quietHours.start }, set: {
+                        model.draft.notifications.quietHours.start = $0; model.draft.saved = false
+                    })).textFieldStyle(.roundedBorder)
+                    Text("to")
+                    TextField("HH:MM", text: Binding(get: { model.draft.notifications.quietHours.end }, set: {
+                        model.draft.notifications.quietHours.end = $0; model.draft.saved = false
+                    })).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("Work hours")
+                    TextField("HH:MM", text: Binding(get: { model.draft.notifications.workHours.start }, set: {
+                        model.draft.notifications.workHours.start = $0; model.draft.saved = false
+                    })).textFieldStyle(.roundedBorder)
+                    Text("to")
+                    TextField("HH:MM", text: Binding(get: { model.draft.notifications.workHours.end }, set: {
+                        model.draft.notifications.workHours.end = $0; model.draft.saved = false
+                    })).textFieldStyle(.roundedBorder)
+                }
+                Text("Times use your local timezone. Leave both fields empty to disable a schedule.")
+                    .font(.custom("GeistMono-Regular", size: 11))
+            }
+            Toggle("Customize alerts for the active account & limit", isOn: Binding(get: {
+                model.notificationRule != nil
+            }, set: model.setNotificationOverride)).toggleStyle(.checkbox)
+            if model.notificationRule != nil {
+                Toggle("Enable this limit's alerts", isOn: Binding(get: {
+                    model.notificationRule?.enabled ?? true
+                }, set: model.setNotificationRuleEnabled)).toggleStyle(.checkbox)
+                HStack {
+                    Text("Thresholds (%)")
+                    TextField("80, 95, 100", text: Binding(get: {
+                        model.draft.notificationRuleThresholds[model.notificationRuleKey] ?? ""
+                    }, set: {
+                        model.draft.notificationRuleThresholds[model.notificationRuleKey] = $0; model.draft.saved = false
+                    })).textFieldStyle(.roundedBorder)
+                }
+            }
+            if !model.notificationPermission.isEmpty {
+                Text(model.notificationPermission).font(.custom("GeistMono-Regular", size: 11))
+                Button("macOS notification settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }.buttonStyle(.borderless)
+            }
+        }
     }
 }
 
@@ -1110,7 +1330,7 @@ struct PanelView: View {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNUserNotificationCenterDelegate {
     private let model: Model
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
@@ -1119,6 +1339,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var spinnerTimer: Timer?
     private var spinnerFrame = 0
     private let showSettingsOnLaunch: Bool
+    private var notificationCheckRunning = false
+    private var notificationPermissionRequested = false
+    private var submittedNotificationIDs: Set<String> = []
+    private var inFlightNotificationIDs: Set<String> = []
+    private var notificationSelection: Selection?
 
     init(runtime: RuntimeConfig, settings: Bool) {
         model = Model(runtime: runtime)
@@ -1126,6 +1351,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        UNUserNotificationCenter.current().delegate = self
         Assets.registerFonts()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.target = self
@@ -1140,6 +1366,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             guard let self = self else { return }
             self.updateStatus()
             self.resize()
+            self.checkNotifications()
+            if let selection = self.notificationSelection, self.model.snapshot != nil {
+                self.notificationSelection = nil
+                self.model.select(selection)
+            }
             if self.showSettingsOnLaunch && self.model.snapshot != nil && !self.didShowInitialSettings {
                 self.didShowInitialSettings = true
                 self.configure(nil)
@@ -1160,6 +1391,101 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         updateStatus()
         model.start()
+    }
+    private func checkNotifications() {
+        guard !notificationCheckRunning, let snapshot = model.snapshot,
+              snapshot.settings.notifications?.enabled != false else { return }
+        notificationCheckRunning = true
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { [weak self] settings in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                switch settings.authorizationStatus {
+                case .notDetermined:
+                    guard !self.notificationPermissionRequested else {
+                        self.notificationCheckRunning = false
+                        return
+                    }
+                    self.notificationPermissionRequested = true
+                    center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
+                        DispatchQueue.main.async {
+                            guard let self = self else { return }
+                            self.notificationCheckRunning = false
+                            self.model.notificationPermission = granted ? "" : "Allow AI Status notifications in macOS Settings to receive quota alerts."
+                            if granted { self.checkNotifications() }
+                        }
+                    }
+                case .authorized, .provisional:
+                    self.model.notificationPermission = ""
+                    // Stable request IDs plus Notification Center's existing IDs
+                    // close the restart gap between submission and outbox ack.
+                    center.getDeliveredNotifications { delivered in
+                        center.getPendingNotificationRequests { pending in
+                            let existing = Set(delivered.map { $0.request.identifier } + pending.map { $0.identifier })
+                            DispatchQueue.main.async {
+                                guard let self = self else { return }
+                                self.notificationCheckRunning = false
+                                self.submitNotifications(existing: existing)
+                            }
+                        }
+                    }
+                default:
+                    self.notificationCheckRunning = false
+                    self.model.notificationPermission = "Allow AI Status notifications in macOS Settings to receive quota alerts."
+                }
+            }
+        }
+    }
+    private func submitNotifications(existing: Set<String>) {
+        guard let snapshot = model.snapshot,
+              !(snapshot.settings.notifications ?? NotificationPreferences()).isSilent() else { return }
+        let center = UNUserNotificationCenter.current()
+        for event in snapshot.notifications ?? [] {
+            guard event.fresh else { continue }
+            if ["recovery", "partial_recovery"].contains(event.kind) && snapshot.settings.notifications?.recovery == false { continue }
+            if existing.contains(event.id) || submittedNotificationIDs.contains(event.id) {
+                model.acknowledgeNotification(event.id)
+                continue
+            }
+            guard !inFlightNotificationIDs.contains(event.id) else { continue }
+            inFlightNotificationIDs.insert(event.id)
+            let content = UNMutableNotificationContent()
+            content.title = event.title
+            content.body = event.body
+            content.sound = .default
+            content.threadIdentifier = "quota:" + event.provider
+            content.userInfo = ["provider": event.provider, "idx": event.idx, "metric": event.metric]
+            center.add(UNNotificationRequest(identifier: event.id, content: content, trigger: nil)) { [weak self] error in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    self.inFlightNotificationIDs.remove(event.id)
+                    if error == nil {
+                        self.submittedNotificationIDs.insert(event.id)
+                        self.model.acknowledgeNotification(event.id)
+                    }
+                }
+            }
+        }
+    }
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
+    }
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let info = response.notification.request.content.userInfo
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { completionHandler(); return }
+            if let provider = info["provider"] as? String, let idx = info["idx"] as? Int,
+               let metric = info["metric"] as? String {
+                let selection = Selection(provider: provider, idx: idx, metric: metric)
+                if self.model.snapshot == nil { self.notificationSelection = selection }
+                else { self.model.select(selection) }
+            }
+            self.model.page = .usage
+            self.show()
+            completionHandler()
+        }
     }
     private var didShowInitialSettings = false
     private func resize() {
@@ -1375,6 +1701,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         model.accept(malformed)
         guard model.snapshot?.schemaVersion == 1 else { throw AppError.message("Invalid snapshot replaced usable data.") }
         try smokeAccounts(sample: sample, directory: previewDirectory)
+        try smokeNotifications(sample: sample)
         try smokeUpdate(sample: sample, directory: previewDirectory)
         model.isPresented = true
         let pages: [(String, Page)] = [("usage", .usage), ("settings", .settings),
@@ -1383,7 +1710,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             model.page = page
             try renderSmokePage(model, name: name, directory: previewDirectory)
         }
-        print("AI Status macOS smoke OK: usage, settings, reset credits, update guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+        print("AI Status macOS smoke OK: usage, settings, quota notifications, reset credits, update guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+    }
+
+    private static func smokeNotifications(sample: String) throws {
+        guard var document = try JSONSerialization.jsonObject(with: Data(sample.utf8)) as? [String: Any],
+              var settings = document["settings"] as? [String: Any] else { throw AppError.message("Notification sample failed.") }
+        settings["notifications"] = ["enabled": true, "thresholds": [80, 95, 100], "recovery": true,
+                                     "recent_only": true, "muted_until": 0,
+                                     "quiet_hours": ["start": "22:00", "end": "08:00"],
+                                     "work_hours": ["start": "09:00", "end": "18:00"],
+                                     "rules": [["connection_id": "claude", "metric": "weekly:Fable",
+                                                "thresholds": [90, 100], "enabled": false]]]
+        document["settings"] = settings
+        document["notifications"] = [["id": "smoke-event", "title": "AI Status · Quota alert", "body": "Codex weekly: 95% used.",
+                                      "kind": "threshold", "provider": "codex", "idx": 0, "metric": "weekly",
+                                      "queued_at": Date().timeIntervalSince1970]]
+        let model = Model()
+        model.accept(try JSONSerialization.data(withJSONObject: document))
+        model.showSettings()
+        guard model.settingsValid, model.snapshot?.notifications?.first?.fresh == true,
+              model.snapshot?.notifications?.first?.selection == Selection(provider: "codex", metric: "weekly"),
+              model.draft.notifications.recentOnly, model.draft.notifications.workHours.start == "09:00",
+              model.draft.notifications.rules.first?.enabled == false else {
+            throw AppError.message("Native notification settings or queue decoding failed.")
+        }
+        model.draft.notificationThresholds = "80, invalid"
+        guard !model.settingsValid else { throw AppError.message("Invalid notification thresholds were accepted.") }
+        model.draft.notificationThresholds = "95, 80, 95, 100"
+        guard model.settingsValid, Model.parseThresholds(model.draft.notificationThresholds) == [80, 95, 100],
+              Model.parseThresholds("101") == nil, Model.parseThresholds("80,") == nil else {
+            throw AppError.message("Notification threshold validation failed.")
+        }
+        model.setNotificationOverride(true)
+        model.setNotificationRuleEnabled(false)
+        guard model.notificationRule?.enabled == false, model.draft.notifications.rules.count == 2 else {
+            throw AppError.message("Account and limit notification override failed.")
+        }
+        model.setNotificationOverride(false)
+        guard model.draft.notifications.rules.count == 1, model.draft.notifications.rules.first?.connectionID == "claude" else {
+            throw AppError.message("Editing a notification override changed another account's rule.")
+        }
+        model.muteNotifications(3600)
+        guard model.draft.notifications.mutedUntil > Date().timeIntervalSince1970 else {
+            throw AppError.message("Notification silence deadline failed.")
+        }
+        model.muteNotifications(0)
+        let roundtrip = try JSONDecoder().decode(NotificationPreferences.self, from: JSONEncoder().encode(model.draft.notifications))
+        guard roundtrip.mutedUntil == 0, roundtrip.recentOnly, roundtrip.rules.count == 1,
+              roundtrip.quietHours.end == "08:00", roundtrip.workHours.end == "18:00" else {
+            throw AppError.message("Saving notifications lost recovery, schedule or account preferences.")
+        }
+        guard let quiet = Calendar.current.date(bySettingHour: 23, minute: 15, second: 0, of: Date()),
+              let working = Calendar.current.date(bySettingHour: 11, minute: 0, second: 0, of: Date()),
+              let offWork = Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: Date()),
+              roundtrip.isSilent(at: quiet), !roundtrip.isSilent(at: working), roundtrip.isSilent(at: offWork) else {
+            throw AppError.message("Native quiet and working hours did not protect delayed notification delivery.")
+        }
     }
 
     private static func smokeUpdate(sample: String, directory: URL?) throws {

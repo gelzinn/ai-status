@@ -118,7 +118,21 @@ def _load_cache(provider_dir, connection=None, fingerprint=None, ttl=CACHE_TTL):
             cache = json.load(f)
         if (cache.get("connection_id") == connection["connection_id"] and cache.get("fingerprint") == fingerprint
                 and 0 <= time.time() - cache.get("timestamp", 0) < ttl):
-            return cache["data"]
+            data = cache["data"]
+            if ttl == MIN_REFRESH_SECONDS:
+                # A response from before an expected reset cannot confirm that
+                # capacity is back. Re-query even inside the request coalescing
+                # interval; failures still respect the vendor's cooldown.
+                now = time.time()
+                for entry in data if isinstance(data, list) else [data]:
+                    if not isinstance(entry, dict):
+                        continue
+                    observed = entry.get("_observed_at", cache.get("timestamp", 0))
+                    for metric in entry.get("metrics", []):
+                        deadline = metric.get("reset_at")
+                        if type(deadline) in (int, float) and type(observed) in (int, float) and observed < deadline <= now:
+                            return None
+            return data
     except Exception:
         pass
     return None
@@ -217,6 +231,7 @@ def run_provider(provider_dir, connection=None):
     try:
         env["PYTHONPATH"] = os.path.dirname(cfgmod.providers_dir()) + os.pathsep + env.get("PYTHONPATH", "")
         env["PYTHONIOENCODING"] = "utf-8"
+        notification_identity = accounts.notification_identity(connection, env, fingerprint)
         options = {"creationflags": subprocess.CREATE_NO_WINDOW} if paths.IS_WINDOWS else {}
         with _service_lock(connection["provider"]):
             # Another caller may have received a 429 while this connection was
@@ -265,6 +280,17 @@ def run_provider(provider_dir, connection=None):
         if _is_error_result(result):
             return _cached_or_error(provider_dir, _extract_error_detail(result), connection, fingerprint, secrets, use_cache)
 
+        observed = time.time()
+        for entry in result if isinstance(result, list) else [result]:
+            if not isinstance(entry, dict):
+                continue
+            entry["_observed_at"] = observed
+            entry["_fingerprint"] = fingerprint
+            entry["_notification_identity"] = notification_identity
+            for metric in entry.get("metrics", []):
+                remaining = metric.get("reset_in_seconds")
+                if "reset_at" not in metric and type(remaining) in (int, float) and math.isfinite(remaining) and remaining > 0:
+                    metric["reset_at"] = observed + remaining
         if use_cache:
             _save_cache(provider_dir, result, connection, fingerprint)
         return result

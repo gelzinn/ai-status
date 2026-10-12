@@ -17,16 +17,23 @@ Item {
     property string updateError: ""
     property string updateMessage: ""
     signal settingsSaved()
+    signal notificationActivated()
+    property var consumerWidgets: []
+    readonly property var notificationOwner: consumerWidgets.length ? consumerWidgets[0] : null
+    property string notificationActivationId: ""
+    property bool receivedSnapshot: false
     property int frame: 0
     readonly property string spinner: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][frame % 10]
     readonly property string cliPath: decodeURIComponent(Qt.resolvedUrl("../src/bin/ai-status").toString().replace(/^file:\/\//, ""))
 
-    function acquire() {
+    function acquire(widget) {
+        if (widget) consumerWidgets = consumerWidgets.concat([widget])
         consumers += 1
         if (consumers === 1 && !backend.running) backend.running = true
     }
 
-    function release() {
+    function release(widget) {
+        consumerWidgets = consumerWidgets.filter(item => item !== widget)
         consumers = Math.max(0, consumers - 1)
         if (consumers === 0) {
             retry.stop()
@@ -41,9 +48,15 @@ Item {
         try {
             const next = JSON.parse(line)
             if (next.schemaVersion !== 1 || typeof next.text !== "string" || !Array.isArray(next.providers)) return
+            const activation = next.notificationActivation
+            const identity = activation && typeof activation.id === "string" ? activation.id : ""
+            const activate = receivedSnapshot && identity && identity !== notificationActivationId
+            notificationActivationId = identity || notificationActivationId
+            receivedSnapshot = true
             snapshot = next
             errorMessage = ""
             retryDelay = 1000
+            if (activate) notificationActivated()
         } catch (error) {
             // A partial/invalid line must never replace the last usable data.
             console.warn("AI Status: ignored invalid daemon output")

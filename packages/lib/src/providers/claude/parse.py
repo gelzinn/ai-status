@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timezone
 from core.reset_credits import from_claude
+from core.metered import number
 
 GROUP_TYPES = {
     "session": "rolling",
@@ -30,6 +31,14 @@ def _seconds_until(iso_ts):
     return round(secs) if secs > 0 else None
 
 
+def _reset_at(value):
+    try:
+        parsed = datetime.fromisoformat(value)
+        return parsed.replace(tzinfo=timezone.utc).timestamp() if parsed.tzinfo is None else parsed.timestamp()
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
 def _format_reset(seconds):
     if seconds is None:
         return None
@@ -55,15 +64,16 @@ def _metrics_from_limits(limits):
     for limit in limits:
         if not isinstance(limit, dict):
             continue
-        pct = limit.get("percent")
+        pct = number(limit.get("percent"))
         if pct is None:
             continue
         mtype = "weekly" if limit.get("kind") == "weekly_scoped" else GROUP_TYPES.get(limit.get("group"), "generic")
         reset_secs = _seconds_until(limit.get("resets_at"))
         metric = {
             "type": mtype,
-            "percentage": round(float(pct)),
+            "percentage": pct,
             "reset_in_seconds": reset_secs,
+            "reset_at": _reset_at(limit.get("resets_at")),
         }
         label = _scope_label(limit)
         if label:
@@ -77,12 +87,13 @@ def _metrics_from_windows(usage):
     metrics = []
     for key, mtype in (("five_hour", "rolling"), ("seven_day", "weekly")):
         window = usage.get(key)
-        if not isinstance(window, dict) or window.get("utilization") is None:
+        if not isinstance(window, dict):
             continue
         metrics.append({
             "type": mtype,
-            "percentage": round(float(window["utilization"])),
+            "percentage": number(window.get("utilization")),
             "reset_in_seconds": _seconds_until(window.get("resets_at")),
+            "reset_at": _reset_at(window.get("resets_at")),
         })
     return metrics
 

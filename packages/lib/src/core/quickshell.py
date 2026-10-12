@@ -9,7 +9,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import about, config, fetch, logos, paths, render, state, reset_credits, updates
+from . import about, config, fetch, logos, paths, render, state, reset_credits, updates, notifications
 
 
 class _PlainText(HTMLParser):
@@ -96,6 +96,7 @@ def settings_snapshot(selected):
         )},
         "iconMode": state.get_icon_mode(selected),
         "usageDisplay": state.get_usage_display(selected),
+        "notifications": notifications.load_settings(),
     }
 
 
@@ -127,9 +128,12 @@ def save_settings(payload):
     usage_display = payload.get("usageDisplay", state.get_usage_display(selected))
     if usage_display not in state.USAGE_DISPLAY_MODES:
         raise ValueError("Invalid usage display")
+    alert_settings = notifications.validate_settings(payload["notifications"]) if "notifications" in payload else None
     selected.update({key: choice[key] for key in ("provider", "idx", "metric")})
     selected.update({key: display[key] for key in fields}, icon_mode=icon_mode, usage_display=usage_display)
     # Report I/O errors to the form instead of using the best-effort wrappers.
+    if alert_settings is not None:
+        notifications.save_settings(alert_settings)
     config.save_connection_order(enabled)
     state._save_json(state.SELECTED_FILE, selected)
     state.trigger_refresh()

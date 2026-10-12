@@ -61,9 +61,12 @@ def parse(raw_output):
         reset = window.get("reset_after_seconds")
         metrics.append({
             "type": _window_type(window.get("limit_window_seconds")),
-            "percentage": int(window.get("used_percent", 0)),
-            "reset_in_seconds": int(reset) if reset else None,
+            "percentage": number(window.get("used_percent")),
+            "reset_in_seconds": number(reset),
         })
+        absolute = number(window.get("reset_at"))
+        if absolute is not None:
+            metrics[-1]["reset_at"] = absolute
 
     usage_credits = _usage_credits(data)
     if usage_credits is not None:
