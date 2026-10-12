@@ -3,7 +3,8 @@
 These screenshots render the production Settings panels with simulated Codex
 and Claude usage, four enabled providers and the product version from the root
 manifest. They contain no live account data or credentials.
-There are 21 PNGs: ten Quickshell captures and eleven Windows adapter captures.
+There are 31 PNGs: ten Quickshell captures, eleven Windows adapter captures and
+ten native macOS captures.
 Each interface has six sections in this order: General, Appearance, Alerts,
 Providers, Guide and About. Guide presents controls and keyboard bindings in a
 table; About contains project details and links to Guide, Report a bug,
@@ -24,7 +25,7 @@ restores the top before changing tabs.
 Alerts has an additional expanded `*-alerts-advanced.png` capture and its scroll
 views. When the top and bottom views leave a gap beneath the fixed tabs, the
 helper adds a `*-middle.png` capture so the full content remains reviewable.
-Advanced, Providers and Guide have bottom views in both renderers. Guide also
+Advanced, Providers and Guide have bottom views on all three platforms. Guide also
 has a middle view on Windows. General, Appearance, collapsed Alerts and About
 fit without vertical scrolling in these fixtures.
 
@@ -44,10 +45,19 @@ fit without vertical scrolling in these fixtures.
   desktop capture. Checkboxes and selectors share the idle outline color,
   navigation links place their arrows at the right, and the General startup
   option uses a switch beside its label.
+- `macos-*.png` is copied unchanged from the `macos-panel-preview` artifact for
+  commit `e9b4fac260913b7511be134e29f2d5a012dcf567`, produced by the successful
+  [native macOS job in CI run 38304713965](https://github.com/gelzinn/ai-status/actions/runs/38304713965/job/114995883059).
+  The production SwiftUI/AppKit app runs on `macos-14`. Its smoke fixture uses
+  sixteen sample connections with the first four enabled, renders the real
+  controls and scrolls each overflowing Settings page to its end. The header and
+  About version come from the built app bundle (`v0.15.0`). General, Appearance
+  and About use their compact native panel heights.
 
 The macOS native smoke test also captures `settings-general.png`,
 `settings-appearance.png`, `settings-alerts.png`, `settings-providers.png`,
 `settings-guide.png`, `settings-about.png` and `settings-alerts-advanced.png`.
+Overflowing pages also produce `settings-*-bottom.png`.
 The `macos-native` job in `.github/workflows/ci.yml` runs that capture on
 `macos-14` and uploads it in the `macos-panel-preview` artifact. The Linux
 renderers used here do not validate the native macOS layout.

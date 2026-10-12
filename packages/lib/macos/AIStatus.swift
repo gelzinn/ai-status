@@ -3036,17 +3036,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
                 let range = max(0, document.frame.height - clip.bounds.height)
                 print("AI Status macOS \(name): native vertical scroll range \(range)")
                 if range > 0.5 {
-                    var destination = clip.bounds
-                    destination.origin.y = document.isFlipped ? document.frame.maxY - clip.bounds.height : document.frame.minY
-                    destination = clip.constrainBoundsRect(destination)
-                    clip.scroll(to: destination.origin)
-                    scroll.reflectScrolledClipView(clip)
-                    RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-                    host.view.layoutSubtreeIfNeeded()
-                    guard abs(clip.bounds.minY - destination.minY) < 1 else {
-                        throw AppError.message("The \(name) native scroll view did not reach its end.")
+                    func captureAtPosition(_ fraction: CGFloat, suffix: String) throws {
+                        var destination = clip.bounds
+                        destination.origin.y = document.isFlipped
+                            ? document.frame.minY + range * fraction
+                            : document.frame.maxY - clip.bounds.height - range * fraction
+                        destination = clip.constrainBoundsRect(destination)
+                        clip.scroll(to: destination.origin)
+                        scroll.reflectScrolledClipView(clip)
+                        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+                        host.view.layoutSubtreeIfNeeded()
+                        guard abs(clip.bounds.minY - destination.minY) < 1 else {
+                            throw AppError.message("The \(name) native scroll view did not reach its \(suffix) capture position.")
+                        }
+                        try capture(name + "-" + suffix)
                     }
-                    try capture(name + "-bottom")
+                    let usableHeight = max(1, clip.bounds.height - SettingsNavigation.height)
+                    if range > usableHeight { try captureAtPosition(0.5, suffix: "middle") }
+                    try captureAtPosition(1, suffix: "bottom")
                 }
             }
         }
