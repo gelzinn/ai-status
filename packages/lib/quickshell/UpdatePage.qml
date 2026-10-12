@@ -9,6 +9,8 @@ Column {
     readonly property color linkColor: "#89b4fa"
     readonly property var guide: Plugin.Model.snapshot.update || {}
     readonly property var version: Plugin.Model.snapshot.version || {}
+    readonly property var notes: guide.releaseNotes || {}
+    readonly property bool hasReleaseNotes: !!version.has_update && !alreadyCurrent && typeof notes.version === "string" && notes.version === version.latest && typeof notes.body === "string" && notes.body.trim() !== ""
     readonly property bool alreadyCurrent: version.has_update === false || (!Plugin.Model.updateRunning && Plugin.Model.updateError === "" && Plugin.Model.updateMessage.indexOf("already up to date") !== -1)
     property Item actionControl: null
     property bool commandExpanded: false
@@ -20,6 +22,26 @@ Column {
         if (actionControl && actionControl.visible && actionControl.enabled) actionControl.forceActiveFocus()
         else if (manualCommand.visible) manualCommand.forceActiveFocus()
         else releaseNotes.forceActiveFocus()
+    }
+
+    // Qt handles Markdown formatting. Raw HTML and inline image loading are
+    // disabled here; external links remain available through the browser.
+    function safeReleaseNotesMarkdown(body) {
+        let fence = ""
+        return body.split(/\r?\n/).map(line => {
+            const marker = line.match(/^\s{0,3}(`{3,}|~{3,})/)
+            if (marker) {
+                if (!fence) fence = marker[1]
+                else if (marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = ""
+                return line
+            }
+            if (fence) return line
+            return line.split(/(`+[^`]*`+)/).map((part, index) => index % 2 ? part : part.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/!\[/g, "[")).join("")
+        }).join("\n")
+    }
+
+    function isSafeReleaseNotesLink(link) {
+        return /^https?:\/\/[^\s/]+(?:[/?#]|$)/i.test(link) && !/[\u0000-\u0020\u007f]/.test(link)
     }
 
     component Label: Text {
@@ -44,11 +66,40 @@ Column {
     }
 
     Column {
+        objectName: "update-release-notes-content"
+        width: parent.width
+        spacing: Style.space(10)
+        visible: root.hasReleaseNotes
+        Label { text: "What's new"; font.bold: true }
+        TextEdit {
+            objectName: "update-release-notes-body"
+            width: parent.width
+            text: root.hasReleaseNotes ? root.safeReleaseNotesMarkdown(root.notes.body) : ""
+            textFormat: TextEdit.MarkdownText
+            wrapMode: TextEdit.Wrap
+            readOnly: true
+            selectByMouse: true
+            activeFocusOnTab: true
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            selectedTextColor: root.foreground
+            selectionColor: Qt.rgba(root.linkColor.r, root.linkColor.g, root.linkColor.b, 0.3)
+            Accessible.role: Accessible.StaticText
+            Accessible.name: "What's new in v" + (root.notes.version || "")
+            onLinkActivated: link => {
+                if (root.isSafeReleaseNotesLink(link)) Qt.openUrlExternally(link)
+            }
+        }
+    }
+
+    Column {
         width: parent.width
         spacing: Style.space(6)
         visible: !!root.guide.command
         Plugin.PanelButton {
             id: manualCommand
+            outlined: true
             objectName: "update-manual-command"
             width: parent.width
             visible: !!root.guide.canUpdate
@@ -125,6 +176,7 @@ Column {
         spacing: Style.space(8)
         Plugin.PanelButton {
             id: releaseNotes
+            outlined: true
             objectName: "update-release-notes"
             width: parent.width
             text: "Release notes"
@@ -132,10 +184,11 @@ Column {
             alignLeft: true
             foreground: root.foreground
             fontFamily: root.fontFamily
-            onClicked: Qt.openUrlExternally(root.guide.releaseUrl || "https://github.com/gelzinn/ai-status/releases/latest")
+            onClicked: Qt.openUrlExternally(root.hasReleaseNotes && root.isSafeReleaseNotesLink(root.notes.url || "") ? root.notes.url : root.guide.releaseUrl || "https://github.com/gelzinn/ai-status/releases/latest")
         }
         Plugin.PanelButton {
             objectName: "update-guide-link"
+            outlined: true
             width: parent.width
             text: "Installation guide"
             trailingIconName: "arrow-right"

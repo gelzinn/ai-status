@@ -26,6 +26,13 @@ def main():
          mock.patch.object(updates.fetch, "get_version_info", return_value={"current": "0.15.0", "latest": "0.16.0"}), \
          mock.patch.object(updates.shutil, "which", return_value="/usr/bin/omarchy"):
         guide = updates.update_guide()
+    # Common preview fixture: metadata normally provided by the cached GitHub
+    # release check. This renderer performs no network request or update.
+    guide["releaseNotes"] = {
+        "version": "0.16.0", "title": "v0.16.0",
+        "body": "### Features\n- Show live download progress with transferred and remaining bytes.\n- Keep update actions and error feedback consistent across desktop panels.\n\n### Fixes\n- Preserve settings and provider connections during updates.\n- Keep the updater running when the old app closes.",
+        "url": "https://github.com/gelzinn/ai-status/releases/tag/v0.16.0",
+    }
 
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     os.environ.setdefault("QT_QUICK_BACKEND", "software")

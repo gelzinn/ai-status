@@ -521,48 +521,77 @@ Ui.Panel {
                     width: parent.width
                     spacing: Style.space(8)
                     Item {
-                        id: updateStatus
-                        objectName: "update-status"
+                        id: updateActionRow
+                        objectName: "update-action-row"
                         width: parent.width
-                        height: updateFooter.failed ? Math.max(Style.space(16), updateStatusLabel.implicitHeight) : Style.space(16)
-                        visible: Plugin.Model.updateRunning || updateFooter.failed || updateFooter.finished
-                        Plugin.PanelIcon {
-                            id: updateStatusIcon
-                            objectName: "update-status-icon"
+                        readonly property bool compact: updateAction.visible && (updateFooter.failed || updateFooter.finished)
+                        height: Math.max(updateStatus.visible ? updateStatus.height : 0, updateAction.visible ? updateAction.height : 0)
+                        Item {
+                            id: updateStatus
+                            objectName: "update-status"
                             anchors.left: parent.left
                             anchors.verticalCenter: parent.verticalCenter
-                            width: Style.space(16)
-                            height: width
+                            width: updateActionRow.compact ? Math.max(0, parent.width - updateAction.width - Style.space(8)) : parent.width
+                            height: updateFooter.failed ? Math.max(Style.space(16), updateStatusLabel.implicitHeight) : Style.space(16)
                             visible: Plugin.Model.updateRunning || updateFooter.failed || updateFooter.finished
-                            name: Plugin.Model.updateRunning ? "loader-circle" : updateFooter.failed ? "info" : "check"
-                            foreground: updateFooter.failed ? "#f5a3a3" : Commons.Color.accent
-                            Accessible.description: updateFooter.failed ? Plugin.Model.updateError : ""
-                            NumberAnimation on rotation {
-                                from: 0
-                                to: 360
-                                duration: 1000
-                                loops: Animation.Infinite
-                                running: Plugin.Model.updateRunning && updateFooter.visible
-                                onRunningChanged: if (!running) updateStatusIcon.rotation = 0
+                            Plugin.PanelIcon {
+                                id: updateStatusIcon
+                                objectName: "update-status-icon"
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: Style.space(16)
+                                height: width
+                                visible: Plugin.Model.updateRunning || updateFooter.failed || updateFooter.finished
+                                name: Plugin.Model.updateRunning ? "loader-circle" : updateFooter.failed ? "info" : "check"
+                                foreground: updateFooter.failed ? "#f5a3a3" : Commons.Color.accent
+                                Accessible.description: updateFooter.failed ? Plugin.Model.updateError : ""
+                                NumberAnimation on rotation {
+                                    from: 0
+                                    to: 360
+                                    duration: 1000
+                                    loops: Animation.Infinite
+                                    running: Plugin.Model.updateRunning && updateFooter.visible
+                                    onRunningChanged: if (!running) updateStatusIcon.rotation = 0
+                                }
+                            }
+                            Text {
+                                id: updateStatusLabel
+                                objectName: "update-status-label"
+                                anchors.left: parent.left
+                                anchors.leftMargin: updateStatusIcon.visible ? updateStatusIcon.width + Style.space(6) : 0
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: Plugin.Model.updateRunning ? (Plugin.Model.updateStage === "checking" ? "Checking for updates…" : "Opening updater…") : updateFooter.failed ? root.updateFailureSummary(Plugin.Model.updateError) : updateFooter.current ? "Up to date" : "Updater opened"
+                                textFormat: Text.PlainText
+                                wrapMode: updateFooter.failed ? Text.WordWrap : Text.NoWrap
+                                elide: updateFooter.failed ? Text.ElideNone : Text.ElideRight
+                                color: updateFooter.failed ? "#f5a3a3" : Commons.Color.accent
+                                font.family: root.panelFont
+                                font.pixelSize: Style.font.body
+                                Accessible.role: Accessible.StaticText
+                                Accessible.name: text
+                                Accessible.description: updateFooter.failed ? Plugin.Model.updateError : ""
                             }
                         }
-                        Text {
-                            id: updateStatusLabel
-                            objectName: "update-status-label"
-                            anchors.left: parent.left
-                            anchors.leftMargin: updateStatusIcon.visible ? updateStatusIcon.width + Style.space(6) : 0
+                        Plugin.PanelButton {
+                            id: updateAction
+                            objectName: "update-action"
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
-                            text: Plugin.Model.updateRunning ? (Plugin.Model.updateStage === "checking" ? "Checking for updates…" : "Opening updater…") : updateFooter.failed ? root.updateFailureSummary(Plugin.Model.updateError) : updateFooter.current ? "Up to date" : "Updater opened"
-                            textFormat: Text.PlainText
-                            wrapMode: updateFooter.failed ? Text.WordWrap : Text.NoWrap
-                            elide: updateFooter.failed ? Text.ElideNone : Text.ElideRight
-                            color: updateFooter.failed ? "#f5a3a3" : Commons.Color.accent
-                            font.family: root.panelFont
-                            font.pixelSize: Style.font.body
-                            Accessible.role: Accessible.StaticText
+                            width: updateActionRow.compact ? implicitWidth : parent.width
+                            implicitHeight: Style.space(34)
+                            visible: !!updates.guide.canUpdate && !Plugin.Model.updateRunning
+                            enabled: !Plugin.Model.updateRunning
+                            text: updateFooter.finished ? "Done" : updateFooter.failed ? "Retry" : "Update now"
+                            foreground: Commons.Color.accent
+                            fontFamily: root.panelFont
+                            alignLeft: true
+                            outlined: true
                             Accessible.name: text
-                            Accessible.description: updateFooter.failed ? Plugin.Model.updateError : ""
+                            onClicked: {
+                                if (updateFooter.finished) root.showUsage()
+                                else Plugin.Model.startUpdate()
+                            }
                         }
                     }
                     Rectangle {
@@ -594,24 +623,6 @@ Ui.Panel {
                             duration: 1200
                             loops: Animation.Infinite
                             running: Plugin.Model.updateRunning && updateFooter.visible
-                        }
-                    }
-                    Plugin.PanelButton {
-                        id: updateAction
-                        objectName: "update-action"
-                        width: parent.width
-                        implicitHeight: Style.space(34)
-                        visible: !!updates.guide.canUpdate && !Plugin.Model.updateRunning
-                        enabled: !Plugin.Model.updateRunning
-                        text: updateFooter.finished ? "Done" : updateFooter.failed ? "Retry update" : "Update now"
-                        foreground: Commons.Color.accent
-                        fontFamily: root.panelFont
-                        alignLeft: true
-                        outlined: true
-                        Accessible.name: text
-                        onClicked: {
-                            if (updateFooter.finished) root.showUsage()
-                            else Plugin.Model.startUpdate()
                         }
                     }
                 }

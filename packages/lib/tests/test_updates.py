@@ -24,6 +24,18 @@ from core import cli, fetch, paths, updates
 
 
 class VersionDetectionTests(unittest.TestCase):
+    def setUp(self):
+        for item in (patch.object(fetch, "_latest_version", None), patch.object(fetch, "_latest_release_notes", None)):
+            item.start()
+            self.addCleanup(item.stop)
+
+    def release(self, version="0.13.0", **changes):
+        return {"tag_name": "v" + version, "draft": False, "prerelease": False,
+                "name": "AI Status v" + version,
+                "body": "### Features\n\n* Improved update progress.\n",
+                "html_url": updates.REPOSITORY + "/releases/tag/v" + version,
+                "published_at": "2026-10-12T12:00:00Z", **changes}
+
     def test_update_requires_a_newer_stable_semver(self):
         for latest, current, expected in (
             ("0.12.1", "0.11.0", True), ("0.10.0", "0.9.9", True),
@@ -47,6 +59,92 @@ class VersionDetectionTests(unittest.TestCase):
         with patch.object(fetch, "request", return_value=json.dumps({"tag_name": "v0.13.0"})), \
                 patch.object(fetch, "_latest_version", None):
             self.assertEqual(fetch.check_for_updates(), "0.13.0")
+
+    def test_release_notes_reuse_release_response_and_normalize_only_website_heading(self):
+        body = ("## [0.13.0](https://github.com/gelzinn/ai-status/compare/v0.12.1...v0.13.0) (2026-10-12)\n\n"
+                "### Features\n\n* **Progress** with [details](https://github.com/gelzinn/ai-status/pull/1).\n\n"
+                "### Bug Fixes\n\n* Keep `credentials`.\n\n```bash\nai-status update\n```\n\n"
+                "![Preview](https://github.com/user-attachments/assets/fixture)\n")
+        release = self.release(body=body, name="  AI Status v0.13.0  ")
+        with patch.object(fetch, "request", return_value=json.dumps(release)) as request:
+            self.assertEqual(fetch.check_for_updates(), "0.13.0")
+        notes = fetch.get_release_notes("0.13.0")
+        self.assertEqual(notes, {"version": "0.13.0", "title": "AI Status v0.13.0",
+                                 "body": body.split("\n\n", 1)[1], "url": release["html_url"]})
+        request.assert_called_once()
+        with patch.object(fetch, "request") as network:
+            self.assertEqual(updates.update_guide()["releaseNotes"], notes)
+            self.assertEqual(fetch.get_version_info()["latest"], "0.13.0")
+            fetch.get_release_notes("0.13.0")
+        network.assert_not_called()
+
+    def test_release_notes_preserve_nonredundant_first_headings(self):
+        headings = ["## 0.13.0 (2026-10-12)",
+                    "## [0.13.0](https://example.com/compare/v0.12.1...v0.13.0) (2026-10-12)",
+                    "## [0.13.0](https://github.com/gelzinn/ai-status/compare/v0.12.1...v0.13.0) (2026-10-11)",
+                    "# [0.13.0](https://github.com/gelzinn/ai-status/compare/v0.12.1...v0.13.0) (2026-10-12)",
+                    "## Highlights"]
+        for heading in headings:
+            body = heading + "\n\nActual release notes."
+            with self.subTest(heading=heading), patch.object(fetch, "request", return_value=json.dumps(self.release(body=body))):
+                fetch.check_for_updates()
+            self.assertEqual(fetch.get_release_notes("0.13.0")["body"], body)
+
+    def test_release_notes_reject_malformed_metadata_without_hiding_valid_version(self):
+        malformed = [{"body": {}}, {"body": []}, {"body": 42}, {"body": True}, {"name": []},
+                     {"published_at": []}, {"published_at": "invalid"}, {"html_url": []},
+                     {"html_url": "http://github.com/gelzinn/ai-status/releases/tag/v0.13.0"},
+                     {"html_url": updates.REPOSITORY + "/releases/tag/v0.12.1"},
+                     {"html_url": "https://other.example/releases/tag/v0.13.0"}]
+        for changes in malformed:
+            with self.subTest(changes=changes), patch.object(fetch, "request", return_value=json.dumps(self.release())):
+                fetch.check_for_updates()
+                self.assertIsNotNone(fetch.get_release_notes("0.13.0"))
+            with patch.object(fetch, "request", return_value=json.dumps(self.release(**changes))):
+                self.assertEqual(fetch.check_for_updates(), "0.13.0")
+            self.assertIsNone(fetch.get_release_notes("0.13.0"))
+            self.assertEqual(fetch.get_version_info()["latest"], "0.13.0")
+            self.assertNotIn("releaseNotes", updates.update_guide())
+
+    def test_release_notes_empty_body_never_invents_a_changelog(self):
+        for body in (None, "", " \n\t", "## [0.13.0](https://github.com/gelzinn/ai-status/commits/v0.13.0) (2026-10-12)\n"):
+            with self.subTest(body=body), patch.object(fetch, "request", return_value=json.dumps(self.release(body=body))):
+                self.assertEqual(fetch.check_for_updates(), "0.13.0")
+            self.assertIsNone(fetch.get_release_notes("0.13.0"))
+            self.assertNotIn("releaseNotes", updates.update_guide())
+        for name in (None, "", "  "):
+            with patch.object(fetch, "request", return_value=json.dumps(self.release(name=name))):
+                fetch.check_for_updates()
+            self.assertEqual(fetch.get_release_notes("0.13.0")["title"], "v0.13.0")
+
+    def test_release_notes_refresh_new_release_and_hide_stale_version(self):
+        for version in ("0.13.0", "0.14.0"):
+            with patch.object(fetch, "request", return_value=json.dumps(self.release(version, body="Notes for " + version))):
+                self.assertEqual(fetch.check_for_updates(), version)
+            self.assertEqual(updates.update_guide()["releaseNotes"]["version"], version)
+        self.assertIsNone(fetch.get_release_notes("0.13.0"))
+        with patch.object(fetch, "_latest_version", "0.15.0"):
+            self.assertNotIn("releaseNotes", updates.update_guide())
+        self.assertEqual(fetch.get_release_notes("v0.14.0")["body"], "Notes for 0.14.0")
+
+    def test_release_notes_transient_failure_preserves_last_good_response(self):
+        with patch.object(fetch, "request", return_value=json.dumps(self.release())):
+            fetch.check_for_updates()
+        good = fetch.get_release_notes("0.13.0")
+        for failure in (OSError("GitHub unavailable"), "{invalid JSON"):
+            with self.subTest(failure=failure), patch.object(fetch, "request", side_effect=failure if isinstance(failure, Exception) else None,
+                                                           return_value=failure if isinstance(failure, str) else None):
+                self.assertIsNone(fetch.check_for_updates())
+            self.assertEqual(fetch.get_version_info()["latest"], "0.13.0")
+            self.assertEqual(updates.update_guide()["releaseNotes"], good)
+
+    def test_release_notes_drafts_prereleases_and_invalid_visibility_are_discarded(self):
+        for changes in ({"draft": True}, {"prerelease": True}, {"tag_name": "v0.13.0-beta.1"},
+                        {"tag_name": 13}, {"draft": "false"}, {"prerelease": 0}):
+            with self.subTest(changes=changes), patch.object(fetch, "request", return_value=json.dumps(self.release(**changes))):
+                self.assertIsNone(fetch.check_for_updates())
+            self.assertIsNone(fetch.get_release_notes("0.13.0"))
+            self.assertIsNone(fetch.get_version_info()["latest"])
 
 
 class UpdateGuideTests(unittest.TestCase):

@@ -279,6 +279,13 @@ struct VersionInfo: Decodable {
     enum CodingKeys: String, CodingKey { case current, latest; case hasUpdate = "has_update" }
 }
 
+struct UpdateReleaseNotes: Decodable {
+    let version: String
+    let title: String
+    let body: String
+    let url: String
+}
+
 struct UpdateGuide: Decodable {
     let method: String
     let title: String
@@ -290,6 +297,7 @@ struct UpdateGuide: Decodable {
     let releaseUrl: String
     let guideUrl: String
     var mode: String? = nil
+    var releaseNotes: UpdateReleaseNotes? = nil
     var updatesInTerminal: Bool {
         guard canUpdate else { return false }
         if method == "macos-installer", let mode = mode { return ["stream", "periodic"].contains(mode) }
@@ -734,6 +742,12 @@ final class Model: ObservableObject {
         return cloudCreditProvider?.monetaryCredits.first { $0.id == id }
     }
     var updateGuide: UpdateGuide { snapshot?.update ?? .manualMacOS }
+    var updateReleaseNotes: UpdateReleaseNotes? {
+        guard let notes = updateGuide.releaseNotes, let version = snapshot?.version,
+              version.hasUpdate, !updateAlreadyCurrent, notes.version == version.latest, notes.version != version.current,
+              !notes.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return notes
+    }
     var updateHandedOff: Bool { updateOpenedInTerminal && updateProgress?.stage == "complete" }
     var updateAlreadyCurrent: Bool {
         updateProgress?.stage == "complete" && updateMessage == "AI Status is already up to date."
@@ -776,7 +790,9 @@ final class Model: ObservableObject {
             case .about: return 600
             case .alerts, .providers, .guide: return 680
             }
-        case .update: return updateGuide.canUpdate ? (updateManualVisible ? 550 : 360) : 470
+        case .update:
+            if updateReleaseNotes != nil { return updateManualVisible ? 680 : 560 }
+            return updateGuide.canUpdate ? (updateManualVisible ? 550 : 360) : 470
         case .credits: return min(680, CGFloat(310 + (creditProvider?.resetCredits?.rows.count ?? 0) * 82))
         case .cloudCredits: return 660
         case .usage:
@@ -2016,6 +2032,96 @@ struct CloudCreditsPage: View {
     }
 }
 
+struct ReleaseNotesMarkdown: View {
+    let bodyText: String
+
+    enum Kind { case heading(Int), paragraph, list(String, Int), code, quote, divider }
+    struct Block: Identifiable {
+        let id: Int
+        let kind: Kind
+        let text: String
+    }
+
+    static func blocks(_ markdown: String) -> [Block] {
+        var result: [Block] = [], paragraph: [String] = [], code: [String]? = nil, fence = ""
+        func append(_ kind: Kind, _ text: String) { result.append(Block(id: result.count, kind: kind, text: text)) }
+        func flush() {
+            if !paragraph.isEmpty { append(.paragraph, paragraph.joined(separator: " ")); paragraph.removeAll() }
+        }
+        let ordered = try! NSRegularExpression(pattern: #"^([0-9]+[.)])\s+(.*)$"#)
+        for line in markdown.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if code != nil {
+                if trimmed.hasPrefix(fence) { append(.code, code!.joined(separator: "\n")); code = nil }
+                else { code!.append(line) }
+                continue
+            }
+            if trimmed.isEmpty { flush(); continue }
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                flush(); fence = String(trimmed.prefix(3)); code = []; continue
+            }
+            let level = trimmed.prefix { $0 == "#" }.count
+            if (1...6).contains(level), trimmed.dropFirst(level).first == " " {
+                flush(); append(.heading(level), String(trimmed.dropFirst(level + 1))); continue
+            }
+            if ["---", "***", "___"].contains(trimmed) { flush(); append(.divider, ""); continue }
+            if trimmed.hasPrefix(">") {
+                flush(); append(.quote, String(trimmed.dropFirst()).trimmingCharacters(in: .whitespaces)); continue
+            }
+            let indent = line.prefix { $0 == " " || $0 == "\t" }.reduce(0) { $0 + ($1 == "\t" ? 4 : 1) }
+            if ["- ", "* ", "+ "].contains(where: { trimmed.hasPrefix($0) }) {
+                flush(); append(.list("•", indent), String(trimmed.dropFirst(2))); continue
+            }
+            let value = trimmed as NSString
+            if let match = ordered.firstMatch(in: trimmed, range: NSRange(location: 0, length: value.length)) {
+                flush(); append(.list(value.substring(with: match.range(at: 1)), indent), value.substring(with: match.range(at: 2))); continue
+            }
+            paragraph.append(trimmed)
+        }
+        flush()
+        if let code = code { append(.code, code.joined(separator: "\n")) }
+        return result
+    }
+
+    private func inline(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Self.blocks(bodyText)) { block in
+                switch block.kind {
+                case .heading(let level):
+                    Text(inline(block.text)).font(.custom("GeistMono-Medium", size: level <= 2 ? 14 : 13))
+                        .foregroundColor(Palette.bright).accessibilityAddTraits(.isHeader)
+                case .paragraph:
+                    Text(inline(block.text)).fixedSize(horizontal: false, vertical: true)
+                case .list(let marker, let indent):
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(marker).frame(minWidth: 10, alignment: .trailing)
+                        Text(inline(block.text)).frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }.padding(.leading, CGFloat(min(16, indent)) * 4)
+                case .code:
+                    Text(block.text).font(.custom("GeistMono-Regular", size: 11))
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.border))
+                case .quote:
+                    Text(inline(block.text)).fixedSize(horizontal: false, vertical: true).padding(.leading, 10)
+                        .overlay(alignment: .leading) { Rectangle().fill(Palette.border).frame(width: 2) }
+                case .divider:
+                    Rectangle().fill(Palette.border).frame(height: 1).accessibilityHidden(true)
+                }
+            }
+        }.font(.custom("GeistMono-Regular", size: 12)).textSelection(.enabled).tint(Palette.update)
+            .environment(\.openURL, OpenURLAction { url in
+                guard url.scheme == "https" else { return .discarded }
+                NSWorkspace.shared.open(url)
+                return .handled
+            })
+    }
+}
+
 struct UpdatePage: View {
     @ObservedObject var model: Model
     @State private var copiedCommand = false
@@ -2034,11 +2140,17 @@ struct UpdatePage: View {
                         .font(.custom("GeistMono-Regular", size: 11))
                 }
             }
-            HoverButton(action: { open(guide.releaseUrl) }) {
+            if let notes = model.updateReleaseNotes {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("What's new").font(.custom("GeistMono-Medium", size: 14)).foregroundColor(Palette.bright)
+                    ReleaseNotesMarkdown(bodyText: notes.body)
+                }
+            }
+            HoverButton(bordered: true, padding: 8, action: { open(model.updateReleaseNotes?.url ?? guide.releaseUrl) }) {
                 HStack { Text("Release notes"); Spacer(); PanelIcon(name: "arrow-right") }
             }
             if guide.canUpdate && !guide.command.isEmpty {
-                HoverButton(action: { model.updateManualVisible.toggle() }) {
+                HoverButton(bordered: true, padding: 8, action: { model.updateManualVisible.toggle() }) {
                     HStack {
                         Text(model.updateManualVisible ? "Hide manual update" : "Update manually…")
                         Spacer()
@@ -2060,13 +2172,13 @@ struct UpdatePage: View {
                         }).accessibilityLabel("Copy command")
                     }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.border))
-                    HoverButton(action: { open(guide.guideUrl) }) {
+                    HoverButton(bordered: true, padding: 8, action: { open(guide.guideUrl) }) {
                         HStack { Text("Installation guide"); Spacer(); PanelIcon(name: "arrow-right") }
                     }
                 }
             }
             if !guide.canUpdate && guide.command.isEmpty {
-                HoverButton(action: { open(guide.guideUrl) }) {
+                HoverButton(bordered: true, padding: 8, action: { open(guide.guideUrl) }) {
                     HStack { Text("Installation guide"); Spacer(); PanelIcon(name: "arrow-right") }
                 }
             }
@@ -2123,31 +2235,34 @@ struct UpdateActions: View {
                     }.font(.custom("GeistMono-Regular", size: 11)).monospacedDigit()
                 }
             } else {
-                if !model.updateError.isEmpty {
-                    HStack(alignment: .top, spacing: 8) {
-                        PanelIcon(name: "info").foregroundColor(Palette.error)
-                        Text(model.updateFailureLabel).foregroundColor(Palette.error)
-                            .fixedSize(horizontal: false, vertical: true).help(model.updateError)
+                let hasNotice = !model.updateError.isEmpty || model.updateProgress?.stage == "complete"
+                HStack(spacing: 12) {
+                    if !model.updateError.isEmpty {
+                        HStack(alignment: .top, spacing: 8) {
+                            PanelIcon(name: "info").foregroundColor(Palette.error)
+                            Text(model.updateFailureLabel).foregroundColor(Palette.error)
+                                .lineLimit(2).fixedSize(horizontal: false, vertical: true).help(model.updateError)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    } else if model.updateProgress?.stage == "complete" {
+                        HStack(spacing: 8) {
+                            PanelIcon(name: "check")
+                            Text(model.updateCompletionLabel)
+                        }.foregroundColor(Palette.update).frame(maxWidth: .infinity, alignment: .leading)
                     }
-                }
-                if model.updateProgress?.stage == "complete" {
-                    HStack(spacing: 8) {
-                        PanelIcon(name: "check")
-                        Text(model.updateCompletionLabel)
-                    }.foregroundColor(Palette.update)
-                }
-                if model.updateGuide.canUpdate || model.updateProgress?.stage == "complete" {
-                    Button(action: {
-                        if model.updateProgress?.stage == "complete" { model.back() }
-                        else { model.startUpdate() }
-                    }) {
-                        Text(model.updateProgress?.stage == "complete" ? "Done" :
-                             model.updateError.isEmpty ? "Update now" : "Retry update")
-                            .frame(maxWidth: .infinity, minHeight: 18, alignment: .leading).padding(8)
-                            .contentShape(Rectangle())
+                    if model.updateGuide.canUpdate || model.updateProgress?.stage == "complete" {
+                        Button(action: {
+                            if model.updateProgress?.stage == "complete" { model.back() }
+                            else { model.startUpdate() }
+                        }) {
+                            Text(model.updateProgress?.stage == "complete" ? "Done" :
+                                 model.updateError.isEmpty ? "Update now" : "Retry")
+                                .frame(maxWidth: hasNotice ? nil : .infinity, minHeight: 18, alignment: .leading).padding(8)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).foregroundColor(Palette.update)
+                        .fixedSize(horizontal: hasNotice, vertical: false)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.updateBorder))
                     }
-                    .buttonStyle(.plain).foregroundColor(Palette.update)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.updateBorder))
                 }
             }
         }.padding(.horizontal, 16).padding(.vertical, 12)
@@ -3118,6 +3233,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             "command": "curl -fsSL https://ai-status.gelzin.com/install/macos | bash",
             "actionLabel": "Update now", "canUpdate": true,
             "mode": "native",
+            "releaseNotes": [
+                "version": "0.16.0", "title": "v0.16.0",
+                "body": """
+                ### Features
+                - Show live download progress with transferred and remaining bytes.
+                - Keep update actions and error feedback consistent across desktop panels.
+
+                ### Fixes
+                - Preserve settings and provider connections during updates.
+                - Keep the updater running when the old app closes.
+                """,
+                "url": "https://github.com/gelzinn/ai-status/releases/tag/v0.16.0",
+            ],
             "releaseUrl": "https://github.com/gelzinn/ai-status/releases/latest",
             "guideUrl": "https://ai-status.gelzin.com/macos",
         ] as [String: Any]
@@ -3125,8 +3253,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         let model = Model()
         model.accept(try JSONSerialization.data(withJSONObject: document))
         guard let selection = model.snapshot?.selected, model.updateGuide.canUpdate, !model.updateGuide.updatesInTerminal,
-              model.updateGuide.steps.count == 2, model.snapshot?.version.latest == "0.16.0" else {
+              model.updateGuide.steps.count == 2, model.snapshot?.version.latest == "0.16.0",
+              model.updateReleaseNotes?.version == "0.16.0" else {
             throw AppError.message("Update guide decoding failed.")
+        }
+        let notes = ReleaseNotesMarkdown.blocks(model.updateReleaseNotes!.body)
+        guard notes.count == 6, notes.filter({ if case .heading = $0.kind { return true }; return false }).count == 2,
+              notes.filter({ if case .list = $0.kind { return true }; return false }).count == 4 else {
+            throw AppError.message("Release Markdown did not preserve heading and list structure.")
+        }
+        let richerNotes = ReleaseNotesMarkdown.blocks("## Details\nParagraph with **bold** and [a link](https://github.com/gelzinn/ai-status).\n\n1. Verify the download\n> Your settings are kept.\n```sh\nai-status update\n```")
+        guard richerNotes.count == 5, richerNotes.last?.text == "ai-status update" else {
+            throw AppError.message("Release Markdown lost a paragraph, ordered item, quote or fenced code block.")
         }
         model.isPresented = true
         try renderSmokePage(model, name: "update-available", directory: directory)
@@ -3152,7 +3290,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         manualModel.accept(try JSONSerialization.data(withJSONObject: document))
         manualModel.showUpdate()
         manualModel.startUpdate()
-        guard !manualModel.updateGuide.canUpdate, manualModel.updateError.isEmpty, !manualModel.updateStarting else {
+        guard !manualModel.updateGuide.canUpdate, manualModel.updateError.isEmpty, !manualModel.updateStarting,
+              manualModel.updateReleaseNotes == nil else {
             throw AppError.message("Manual update fallback attempted to run an updater.")
         }
         try renderSmokePage(manualModel, name: "update-manual", directory: directory)
@@ -3178,7 +3317,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         model.startUpdate()
         try awaitSmokeUpdateResult(model)
         guard model.updateError.isEmpty, model.updateMessage == "AI Status is already up to date.",
-              model.updateCompletionLabel == "Up to date" else {
+              model.updateCompletionLabel == "Up to date", model.updateReleaseNotes == nil else {
             throw AppError.message("Update result did not preserve the CLI status.")
         }
         model.isPresented = true
@@ -3257,6 +3396,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         var completedDocument = document
         completedDocument["version"] = ["current": "0.16.0", "latest": "0.16.0", "has_update": false] as [String: Any]
         model.accept(try JSONSerialization.data(withJSONObject: completedDocument))
+        guard model.updateReleaseNotes == nil else { throw AppError.message("Completed updates retained stale release notes.") }
         try renderSmokePage(model, name: "update-complete", directory: directory)
         // Restart creates a new host on Usage; the old host's progress state
         // never carries into the reopened application.

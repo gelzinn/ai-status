@@ -1,5 +1,6 @@
 """Desktop adapter. The Waybar daemon and CLI do not import Qt."""
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 import subprocess
@@ -9,7 +10,7 @@ import time
 import uuid
 
 from PySide6.QtCore import QEasingCurve, QEvent, QModelIndex, QObject, QPoint, QPointF, QRectF, QLockFile, QThread, QTimer, Qt, QUrl, Signal, QSize, QVariantAnimation
-from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen, QPixmap
+from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen, QPixmap, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QGraphicsEffect, QHBoxLayout,
     QLabel, QLayout, QLineEdit, QListWidget, QListWidgetItem, QMenu,
@@ -2005,6 +2006,26 @@ def update_failure_label(message):
     return next((line.strip() for line in message.splitlines() if line.strip()), message)
 
 
+def release_notes_markdown(body):
+    lines, fence = [], ""
+    for line in body.splitlines():
+        marker = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if marker:
+            if not fence:
+                fence = marker[1]
+            elif marker[1][0] == fence[0] and len(marker[1]) >= len(fence):
+                fence = ""
+            lines.append(line)
+        elif fence:
+            lines.append(line)
+        else:
+            parts = re.split(r"(`+[^`]*`+)", line)
+            lines.append("".join(part if index % 2 else
+                                 part.replace("<", "&lt;").replace(">", "&gt;").replace("![", "[")
+                                 for index, part in enumerate(parts)))
+    return "\n".join(lines)
+
+
 class UpdateWorker(QObject):
     progress = Signal(object)
     finished = Signal(str, bool)
@@ -2041,7 +2062,25 @@ class UpdateView(QWidget):
         self.versions = plain_label("")
         self.versions.setWordWrap(True)
         layout.addWidget(self.versions)
+        self.notes_heading = plain_label("What's new", "#eeeeee")
+        self.notes_heading.setObjectName("update-notes-heading")
+        self.notes_heading.hide()
+        layout.addWidget(self.notes_heading)
+        self.notes_body = QLabel()
+        self.notes_body.setObjectName("update-notes-body")
+        self.notes_body.setStyleSheet("color: #bbbbbb;")
+        self.notes_body.setTextFormat(Qt.TextFormat.RichText)
+        self.notes_body.setWordWrap(True)
+        self.notes_body.setMinimumWidth(1)
+        self.notes_body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse |
+                                               Qt.TextInteractionFlag.LinksAccessibleByMouse |
+                                               Qt.TextInteractionFlag.LinksAccessibleByKeyboard)
+        self.notes_body.linkActivated.connect(self.open_note_link)
+        self.notes_body.hide()
+        layout.addWidget(self.notes_body)
+        self.notes_markdown = ""
         self.manual_toggle = QPushButton("Show terminal command")
+        self.manual_toggle.setStyleSheet("border: 1px solid #303030; border-radius: 6px; padding: 8px;")
         self.manual_toggle.setCheckable(True)
         self.manual_toggle.toggled.connect(self.toggle_command)
         layout.addWidget(self.manual_toggle)
@@ -2067,6 +2106,7 @@ class UpdateView(QWidget):
         self.copy_feedback.timeout.connect(self.reset_copy_feedback)
         for title, key in (("Release notes", "releaseUrl"), ("Installation guide", "guideUrl")):
             button = QPushButton(title)
+            button.setStyleSheet("border: 1px solid #303030; border-radius: 6px; padding: 8px;")
             button.setObjectName("update-" + key)
             row = QHBoxLayout(button)
             row.setContentsMargins(8, 0, 8, 0)
@@ -2081,9 +2121,11 @@ class UpdateView(QWidget):
         self.footer.setObjectName("updateFooter")
         self.footer.setStyleSheet("QWidget#updateFooter { border-top: 1px solid #202020; }")
         footer = QVBoxLayout(self.footer)
+        self.footer_layout = footer
         footer.setContentsMargins(16, 12, 16, 12)
         footer.setSpacing(8)
         status_row = QHBoxLayout()
+        self.status_row = status_row
         status_row.setSpacing(6)
         self.spinner = OperationSpinner()
         self.spinner.setObjectName("update-spinner")
@@ -2128,6 +2170,7 @@ class UpdateView(QWidget):
         self.transfer_row.hide()
         footer.addWidget(self.transfer_row)
         self.action = QPushButton()
+        self.action_compact = False
         self.action.setObjectName("update-action")
         self.action.setStyleSheet("color: #89b4fa; border: 1px solid #294666; border-radius: 6px; padding: 8px;")
         self.action.clicked.connect(self.request_action)
@@ -2140,6 +2183,32 @@ class UpdateView(QWidget):
         current = version.get("current") or __version__
         latest = version.get("latest")
         self.versions.setText(f"v{current}" + (f" → v{latest}" if latest and latest != current else ""))
+        notes = guide.get("releaseNotes") or {}
+        body = notes.get("body", "") if (version.get("has_update") and isinstance(notes, dict)
+                                          and notes.get("version") == latest and latest != current) else ""
+        body = body if isinstance(body, str) else ""
+        if body != self.notes_markdown:
+            document = QTextDocument()
+            document.setDefaultFont(panel_font())
+            document.setMarkdown(release_notes_markdown(body), QTextDocument.MarkdownFeature.MarkdownDialectGitHub |
+                                 QTextDocument.MarkdownFeature.MarkdownNoHTML)
+            block = document.begin()
+            while block.isValid():
+                if block.blockFormat().headingLevel():
+                    cursor = QTextCursor(block)
+                    cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+                    style = QTextCharFormat()
+                    font = panel_font()
+                    font.setPixelSize(14)
+                    font.setWeight(QFont.Weight.DemiBold)
+                    style.setFont(font)
+                    style.setForeground(QColor("#eeeeee"))
+                    cursor.mergeCharFormat(style)
+                block = block.next()
+            self.notes_body.setText(document.toHtml())
+            self.notes_markdown = body
+        self.notes_heading.setVisible(bool(body.strip()))
+        self.notes_body.setVisible(bool(body.strip()))
         command = guide.get("command", "")
         if self.command.text() != command:
             self.reset_copy_feedback()
@@ -2160,12 +2229,21 @@ class UpdateView(QWidget):
         available = bool(self.guide.get("canUpdate") and self.version.get("has_update"))
         self.action.setVisible(not self.running and (available or self.failed or self.completed))
         self.action.setEnabled(not self.running and (available or self.completed))
-        self.action.setText("Retry update" if self.failed else "Done" if self.completed else
+        self.action.setText("Retry" if self.failed else "Done" if self.completed else
                             self.guide.get("actionLabel", "Update now"))
+        compact = (self.failed or self.completed) and not self.running
+        if compact != self.action_compact:
+            (self.status_row if self.action_compact else self.footer_layout).removeWidget(self.action)
+            (self.status_row if compact else self.footer_layout).addWidget(self.action)
+            self.action_compact = compact
+        self.action.setSizePolicy(QSizePolicy.Policy.Fixed if compact else QSizePolicy.Policy.Expanding,
+                                  QSizePolicy.Policy.Fixed)
+        self.status_row.setSpacing(12 if compact else 6)
         self.spinner.set_running(self.running)
         self.result_icon.icon_name = "info" if self.failed else "check"
         self.result_icon.color = "#f5a3a3" if self.failed else "#89b4fa"
         self.result_icon.setVisible((self.completed or self.failed) and not self.running)
+        self.status_row.setAlignment(self.result_icon, Qt.AlignmentFlag.AlignVCenter)
         self.result_icon.update()
         if not self.running:
             self.progress_bar.hide()
@@ -2193,6 +2271,9 @@ class UpdateView(QWidget):
         elif self.completed and not self.running:
             current = "already up to date" in message.lower()
             label = "Up to date" if current else "Updater opened"
+            if current:
+                self.notes_heading.hide()
+                self.notes_body.hide()
         self.status.setText(label)
         self.status.setToolTip(message)
         self.status.setStyleSheet("color: #f5a3a3;" if self.failed else "color: #89b4fa;")
@@ -2245,6 +2326,11 @@ class UpdateView(QWidget):
         url = self.guide.get(key)
         if url:
             QDesktopServices.openUrl(QUrl(url))
+
+    def open_note_link(self, url):
+        target = QUrl(url)
+        if target.scheme() in ("http", "https"):
+            QDesktopServices.openUrl(target)
 
 
 class Dashboard(QWidget):

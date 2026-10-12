@@ -1847,7 +1847,7 @@ class DesktopTests(IsolatedState):
             updater.assert_called_once()
             self.assertEqual(self.dashboard.update_view.status.text(), "Download failed. Check your connection.")
             self.assertIn("Check your connection", self.dashboard.update_view.status.toolTip())
-            self.assertEqual(self.dashboard.update_view.action.text(), "Retry update")
+            self.assertEqual(self.dashboard.update_view.action.text(), "Retry")
             self.assertTrue(self.dashboard.update_view.action.isEnabled())
             updater.side_effect = None
             updater.return_value = "The verified installer is open. Follow setup to update."
@@ -1882,6 +1882,42 @@ class DesktopTests(IsolatedState):
             self.dashboard.update_view.copy_button.click()
             self.assertEqual(self.app.clipboard().text(), "ai-status update")
             self.assertEqual(self.dashboard.update_view.copy_button.text(), "Copied")
+
+    def test_release_notes_match_the_update_and_keep_the_footer_visible(self):
+        version = {"current": "0.11.0", "latest": "0.12.1", "has_update": True}
+        guide = self.update_guide()
+        guide["releaseNotes"] = {
+            "version": "0.12.1", "title": "v0.12.1", "url": guide["releaseUrl"],
+            "body": "### Features\n" + "\n".join(f"- Improve **desktop feedback** {i}." for i in range(60)) +
+                    "\n![Preview](file:///tmp/private.png)\n[Details](https://github.com/gelzinn/ai-status/releases)",
+        }
+        with patch.object(tray.fetch, "get_version_info", return_value=version), \
+                patch.object(tray.updates, "update_guide", return_value=guide), \
+                patch.object(tray.QDesktopServices, "openUrl") as browser:
+            self.dashboard.show_updates()
+            self.app.processEvents()
+            view = self.dashboard.update_view
+            self.assertTrue(view.notes_body.isVisible())
+            self.assertIn("desktop feedback", view.notes_body.text())
+            self.assertNotIn("<img", view.notes_body.text())
+            self.assertGreater(self.dashboard.update_scroll.verticalScrollBar().maximum(), 0)
+            self.assertTrue(view.action.isVisible())
+            view.notes_body.linkActivated.emit("file:///tmp/private.png")
+            browser.assert_not_called()
+            view.notes_body.linkActivated.emit("https://github.com/gelzinn/ai-status/releases")
+            self.assertEqual(browser.call_args.args[0].scheme(), "https")
+            self.dashboard.on_update_finished("Installer opened.", True)
+            self.app.processEvents()
+            self.assertTrue(view.action.isVisible())
+            self.assertLess(view.action.width(), view.footer.width() / 2)
+            self.assertLess(view.status.geometry().right(), view.action.geometry().left())
+            guide["releaseNotes"]["version"] = "0.12.0"
+            view.set_guide(guide, version)
+            self.assertTrue(view.notes_body.isHidden())
+            guide["releaseNotes"]["version"] = "0.12.1"
+            version["has_update"] = False
+            view.set_guide(guide, version)
+            self.assertTrue(view.notes_heading.isHidden())
 
     def test_live_update_progress_stays_in_footer_and_survives_navigation(self):
         release = threading.Event()
@@ -1953,7 +1989,7 @@ class DesktopTests(IsolatedState):
             self.dashboard.on_update_finished("Download failed. Retry.", False)
             self.assertTrue(view.progress_bar.isHidden())
             self.assertFalse(view.spinner.running)
-            self.assertEqual(view.action.text(), "Retry update")
+            self.assertEqual(view.action.text(), "Retry")
             self.assertTrue(view.action.isEnabled())
 
     def test_provider_settings_save_disabled_providers(self):

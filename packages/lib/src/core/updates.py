@@ -103,6 +103,9 @@ def update_guide():
         "steps": [], "command": "", "actionLabel": "Open update guide",
         "canUpdate": False, "releaseUrl": release_url, "guideUrl": GUIDE_URL,
     }
+    notes = fetch.get_release_notes(latest)
+    if notes:
+        guide["releaseNotes"] = notes
     if method == "windows-installer":
         guide.update(
             title="Update on Windows", actionLabel="Update now", canUpdate=True,

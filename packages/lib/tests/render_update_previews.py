@@ -24,6 +24,16 @@ def reject_update(*args, **kwargs):
     raise AssertionError("Previews must never download or install an update")
 
 
+SAMPLE_RELEASE_NOTES = {
+    "version": "0.16.0", "title": "v0.16.0",
+    "url": "https://github.com/gelzinn/ai-status/releases/tag/v0.16.0",
+    "body": "### Features\n- Show live download progress with transferred and remaining bytes.\n"
+            "- Keep update actions and error feedback consistent across desktop panels.\n\n"
+            "### Fixes\n- Preserve settings and provider connections during updates.\n"
+            "- Keep the updater running when the old app closes.",
+}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
@@ -56,6 +66,7 @@ def main():
             with patch.object(adapter, "__version__", "0.15.0"), \
                     patch.object(fetch, "__version__", "0.15.0"), \
                     patch.object(fetch, "_latest_version", "0.16.0"), \
+                    patch.object(fetch, "_latest_release_notes", SAMPLE_RELEASE_NOTES), \
                     patch.object(guide_module, "_installation", return_value=("windows-installer", {})), \
                     patch.object(guide_module, "run_update", side_effect=reject_update), \
                     patch.object(fetch, "check_for_updates", side_effect=reject_update):
