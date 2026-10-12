@@ -1422,7 +1422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
                     center.getDeliveredNotifications { delivered in
                         center.getPendingNotificationRequests { pending in
                             let existing = Set(delivered.map { $0.request.identifier } + pending.map { $0.identifier })
-                            DispatchQueue.main.async {
+                            DispatchQueue.main.async { [weak self] in
                                 guard let self = self else { return }
                                 self.notificationCheckRunning = false
                                 self.submitNotifications(existing: existing)
