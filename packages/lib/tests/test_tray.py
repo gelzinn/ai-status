@@ -983,12 +983,59 @@ class DesktopTests(IsolatedState):
         self.app.processEvents()
         self.assertEqual(len(self.dashboard.metric_buttons), 4)
         self.assertEqual([row.description.text() for row in self.dashboard.metric_buttons if row.description.text()],
-                         ["Available balance: $75.00", "Available balance: $58.00"])
+                         ["$25.00 of $100.00 used (25%)", "$42.00 of $100.00 used (42%)"])
+        credit_rows = [row for row in self.dashboard.metric_buttons if row.title.text() == "Credit balance"]
+        self.assertEqual([row.percentage.text() for row in credit_rows], ["$75.00", "$58.00"])
+        self.assertEqual([row.bar.target for row in credit_rows], [25, 42])
         self.assertFalse(any(row.title.text().startswith("Available balance") for row in self.dashboard.metric_buttons))
         self.assertLessEqual(self.dashboard.height(), 720)
         self.assertEqual(self.dashboard.scroll.verticalScrollBar().maximum(), 0)
         self.dashboard.metric_buttons[-1].click()
         self.assertEqual(state.load_selected()["provider"], "account:work")
+
+    def test_openrouter_wallet_shows_balance_in_both_display_modes_with_spend_bar(self):
+        import json
+        from test_metered_apis import load
+        parser = load("openrouter", "parse").parse
+        config.save_config(["openrouter"])
+        parsed = parser(json.dumps({"credits": {"data": {"total_credits": 40, "total_usage": 36.1}}}))
+        entry = dict(parsed, _dir="openrouter", _idx=0)
+        self.dashboard.on_result("openrouter", [entry])
+        self.dashboard.show()
+        for mode, progress in (("used", 90.25), ("remaining", 9.75)):
+            with self.subTest(mode=mode):
+                self.dashboard.selected["usage_display"] = mode
+                self.dashboard.draw()
+                row = self.dashboard.metric_buttons[0]
+                row.click()
+                self.app.processEvents()
+                self.assertEqual(row.title.text(), "Credit balance")
+                self.assertEqual(row.percentage.text(), "$3.90")
+                self.assertEqual(row.description.text(), "$36.10 of $40.00 used (90%)")
+                self.assertAlmostEqual(row.bar.target, progress)
+                self.assertFalse(row.bar_container.isHidden())
+                self.assertEqual(self.dashboard.tray.toolTip(), "OpenRouter $3.90")
+                self.assertEqual(state.load_selected()["metric"], "credits:Account spend / total credits (USD)")
+
+    def test_openrouter_legacy_balance_selection_stays_on_account_after_rows_merge(self):
+        import json
+        from test_metered_apis import load
+        parser = load("openrouter", "parse").parse
+        config.save_config(["claude", "openrouter"])
+        self.dashboard.on_result("claude", [{"provider": "Claude (Max)", "_idx": 0,
+            "metrics": [{"type": "weekly", "percentage": 50}]}])
+        self.dashboard.selected.update(provider="openrouter", idx=0,
+            metric="credits:Account credit balance (USD)")
+        state.save_selected(self.dashboard.selected)
+        parsed = parser(json.dumps({"credits": {"data": {"total_credits": 0, "total_usage": 0}}}))
+        self.dashboard.on_result("openrouter", [dict(parsed, _dir="openrouter", _idx=0)])
+        self.assertEqual(self.dashboard.selected_value(),
+                         ("openrouter", 0, "credits:Account spend / total credits (USD)"))
+        self.assertEqual(state.load_selected()["provider"], "openrouter")
+        self.assertEqual(state.load_selected()["metric"], "credits:Account spend / total credits (USD)")
+        self.assertEqual(self.dashboard.tray.toolTip(), "OpenRouter $0.00")
+        self.assertEqual(len([row for row in self.dashboard.metric_buttons
+                             if row.value[0] == "openrouter"]), 1)
 
     def test_refresh_keeps_rows_and_geometry_while_providers_finish_independently(self):
         from core import fetch

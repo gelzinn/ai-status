@@ -1,4 +1,4 @@
-AI Status uses your configured OpenRouter key to read its spend and limits and query the account's total credits and remaining balance. When the account lookup succeeds, a progress bar shows consumed credits against total credits, with the available balance below. A key cap describes what that key may spend; account credits describe funds shared by the account's keys.
+AI Status uses your configured OpenRouter key to read its spend and limits and query the account's total credits and remaining balance. When the account lookup succeeds, **Credit balance** shows the available dollars as the main value in the top bar and panel. A progress bar and spending detail show how much of the total credit pool has been consumed. A key cap describes what that key may spend; account credits describe funds shared by the account's keys.
 
 ## Requirements
 
@@ -34,7 +34,9 @@ On macOS, use `~/.local/bin/ai-status` if `ai-status` is not on PATH; the same f
 
 Key metrics can include capped spend, separately reported monthly spend, an effective organization budget, and free-model daily request counts when returned by OpenRouter. Without a positive limit, spend has no bar. Duplicate monthly cap/spend values are consolidated.
 
-Account metrics use the [credits endpoint](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits). **$25 / $100** means $25 spent against $100 total credits, leaving **$75** available. Remaining balance appears in account-credit detail, or as an amount metric when a ratio is unavailable. It is never calculated by subtracting one key's spend from account credits. Credit consumption is not a monthly reset quota.
+Account metrics use the [credits endpoint](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits). If the account has spent $36.10 from $40.00 total credits, **Credit balance** displays **$3.90**. The default progress bar represents consumption, with **$36.10 of $40.00 used (90%)** below it. The remaining display preference inverts the progress bar while retaining the same available balance as the main value.
+
+The balance is calculated from account totals, never from one key's monthly spend. A zero total still shows the actual balance without inventing a percentage; any reported overdrawn balance stays visible. Credit consumption is not a monthly reset quota.
 
 ## Troubleshooting
 

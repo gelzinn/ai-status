@@ -65,14 +65,12 @@ def parse(raw_output):
             valid_credits = True
             # Both values are account totals. Key usage has a different scope.
             account = _display_metric(_ratio_metric(spent, "Account spend / total credits", "credits", total),
-                                      "Account credits", order=-2)
-            balance = total - spent
+                                      "Credit balance", order=-2)
+            account.update(balance=total - spent, limit=total, value_format="credit_balance")
+            account["detail"] = f"${spent:.2f} of ${total:.2f} used"
             if account["percentage"] is not None:
-                account["detail"] = f"Available balance: ${balance:.2f}"
+                account["detail"] += f" ({account['percentage']:.0f}%)"
             metrics.append(account)
-            if account["percentage"] is None:
-                metrics.append(_display_metric(amount_metric(balance, "USD", "Account credit balance", "credits"),
-                                               "Available balance", order=-1))
     metadata = raw.get("_ai_status")
     hint = metadata.get("credits_hint") if isinstance(metadata, dict) else None
     if metrics and isinstance(hint, str) and hint.strip() and not valid_credits:
