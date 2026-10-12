@@ -30,7 +30,8 @@ Column {
         {key: "general", label: "General"},
         {key: "appearance", label: "Appearance"},
         {key: "alerts", label: "Alerts"},
-        {key: "providers", label: "Providers"}
+        {key: "providers", label: "Providers"},
+        {key: "about", label: "About"}
     ]
     readonly property string validationSection: enabledProviders.length === 0 ? "providers"
         : !Object.keys(display).some(key => display[key]) || ["used", "remaining"].indexOf(usageDisplay) === -1 ? "appearance"
@@ -41,7 +42,6 @@ Column {
         : validationSection === "general" ? "Choose an active provider and limit in General."
         : validationSection === "alerts" ? "Alert thresholds must be whole percentages from 1 to 100. Review Alerts."
         : ""
-    signal aboutRequested()
     readonly property var choices: {
         const items = []
         const providerIds = (Plugin.Model.snapshot.settings || {}).providerIds || {}
@@ -164,12 +164,12 @@ Column {
     }
 
     function focusFirstControl() {
+        if (section === "about") { aboutContent.focusFirstControl(); return }
         const first = section === "appearance" ? usageDisplaySelector
             : section === "alerts" ? alertAccountButton
             : section === "providers" && providerRows.count > 0 ? providerRows.itemAt(0).firstControl : providerSelector
         if (first) first.forceActiveFocus(Qt.TabFocusReason)
     }
-    function focusAboutControl() { aboutButton.forceActiveFocus(); return aboutButton }
 
     function selectSection(key) {
         if (Plugin.Model.settingsSaving || !sections.some(item => item.key === key)) return
@@ -530,15 +530,12 @@ Column {
         outlined: true
         onClicked: root.selectSection(root.validationSection)
     }
-    Button {
-        id: aboutButton
-        objectName: "settings-about"
-        visible: root.section === "general"
+    Plugin.AboutPage {
+        id: aboutContent
+        objectName: "settings-section-about"
+        visible: root.section === "about"
         width: parent.width
-        text: "About AI Status"
-        alignLeft: true
-        trailingIconName: "arrow-right"
-        outlined: true
-        onClicked: root.aboutRequested()
+        foreground: root.foreground
+        fontFamily: root.fontFamily
     }
 }

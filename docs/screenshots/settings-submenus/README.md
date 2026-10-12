@@ -3,15 +3,21 @@
 These screenshots render the production Settings panels with simulated Codex
 and Claude usage, four enabled providers and the product version from the root
 manifest. They contain no live account data or credentials.
+The directory contains sixteen PNGs: eight Quickshell captures and eight
+Windows adapter captures.
 
-Each interface has four sections: General, Appearance, Alerts and Providers.
+Each interface has five sections: General, Appearance, Alerts, Providers and About.
 The tabs form one horizontal strip with widths determined by their labels.
 The strip scrolls horizontally when the tabs exceed the available width and
 reveals the selected tab. It remains above the scrolling section content;
 the panel header and Save/Cancel actions stay visible as well. The scrolling
 viewports reach the panel edges and separators, with padding inside their content.
 The preview fixtures use 12 px above and between tabs, 4 px between section
-titles and descriptions, and 16 px between General's selector and About action.
+titles and descriptions, and 16 px between groups of controls.
+Each section has a capture at the top. Alerts, Providers and About also have
+`*-bottom.png` captures at the end of their vertical scroll range. General and
+Appearance fit without vertical scrolling in both renderers. The helper detects
+overflow before capturing a bottom view and restores the top before changing tabs.
 
 - `quickshell-*.png` uses Qt Quick Test's offscreen software renderer and the
   unchanged dark shell fixtures in `packages/lib/tests/qml/`. The fixtures use a
@@ -25,10 +31,13 @@ titles and descriptions, and 16 px between General's selector and About action.
   option enabled, an offscreen renderer on Linux and the Fusion widget style.
   Configuration and cache files are isolated by the desktop test fixture. This
   is a rendered preview of the Windows interface, rather than a native Windows
-  desktop capture.
+  desktop capture. Checkboxes and selectors share the idle outline color,
+  navigation links place their arrows at the right, and the General startup
+  option uses a switch beside its label.
 
 The macOS native smoke test also captures `settings-general.png`,
-`settings-appearance.png`, `settings-alerts.png` and `settings-providers.png`.
+`settings-appearance.png`, `settings-alerts.png`, `settings-providers.png` and
+`settings-about.png`.
 The `macos-native` job in `.github/workflows/ci.yml` runs that capture on
 `macos-14` and uploads it in the `macos-panel-preview` artifact. The Linux
 renderers used here do not validate the native macOS layout.

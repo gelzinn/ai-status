@@ -33,6 +33,7 @@ def provider_name(key):
 
 # Colors, spacing and typography match the landing page's WaybarReplica.
 PANEL_BORDER_COLOR = "#262626"
+SETTINGS_CONTROL_BORDER_COLOR = "#303030"
 PANEL_STYLE = """
 QWidget { color: #888888; background: transparent; font-family: "Geist Mono"; font-size: 13px; }
 QDialog { background: #111111; }
@@ -793,6 +794,59 @@ class UsageWorker(QObject):
             self.finished.emit(data)
 
 
+class SettingsLinkButton(QPushButton):
+    """A native push button with the same trailing arrow as About links."""
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setAccessibleName(text)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(8, 0, 8, 0)
+        row.addStretch()
+        row.addWidget(ArrowIcon())
+
+
+class ToggleSwitch(QCheckBox):
+    """A native accessible checkbox painted as a compact track and thumb."""
+    def __init__(self, label, parent=None):
+        super().__init__(parent)
+        self.setAccessibleName(label)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFixedSize(40, 22)
+        self.keyboard_focus_visible = False
+
+    def hitButton(self, position):
+        return self.rect().contains(position)
+
+    def focusInEvent(self, event):
+        self.keyboard_focus_visible = event.reason() in (
+            Qt.FocusReason.TabFocusReason, Qt.FocusReason.BacktabFocusReason)
+        super().focusInEvent(event)
+        self.update()
+
+    def focusOutEvent(self, event):
+        self.keyboard_focus_visible = False
+        super().focusOutEvent(event)
+        self.update()
+
+    def mousePressEvent(self, event):
+        self.keyboard_focus_visible = False
+        super().mousePressEvent(event)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        border = "#888888" if self.hasFocus() and self.keyboard_focus_visible else SETTINGS_CONTROL_BORDER_COLOR
+        painter.setPen(QPen(QColor(border), 1))
+        painter.setBrush(QColor("#eeeeee" if self.isChecked() else "#161616"))
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 11, 11)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#111111" if self.isChecked() else "#aaaaaa"))
+        painter.drawEllipse(QRectF(21 if self.isChecked() else 3, 3, 16, 16))
+
+
 class SettingsHeading(QWidget):
     """A compact title and optional description shared by Settings sections."""
     def __init__(self, title, description=None, parent=None):
@@ -839,7 +893,6 @@ class SettingsNavigation(QScrollArea):
 class ProviderSettings(QWidget):
     saved = Signal()
     cancelled = Signal()
-    about_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -854,19 +907,21 @@ class ProviderSettings(QWidget):
             QListWidget::item { padding: 8px 4px; }
             QListWidget::item:selected { background: #252525; color: #eeeeee; }
             QCheckBox { padding: 5px 0; }
-            QPushButton { border: 1px solid #303030; border-radius: 6px; }
-            QComboBox { border: 1px solid #303030; border-radius: 6px; padding: 6px 8px; }
-            QLineEdit { border: 1px solid #303030; border-radius: 6px; padding: 6px 8px; }
+            QPushButton { border: 1px solid SETTINGS_CONTROL_BORDER; border-radius: 6px; }
+            QComboBox { border: 1px solid SETTINGS_CONTROL_BORDER; border-radius: 6px; padding: 6px 8px; }
+            QLineEdit { border: 1px solid SETTINGS_CONTROL_BORDER; border-radius: 6px; padding: 6px 8px; }
             QComboBox QAbstractItemView { background: #111111; selection-background-color: #252525; }
             QListWidget::indicator, QCheckBox::indicator {
-                width: 16px; height: 16px; border: 1px solid #888888;
+                width: 16px; height: 16px; border: 1px solid SETTINGS_CONTROL_BORDER;
                 border-radius: 4px; background: #161616;
             }
+            QCheckBox:focus::indicator { border-color: #888888; }
             QListWidget::indicator:checked, QCheckBox::indicator:checked {
-                background: #eeeeee; border-color: #eeeeee;
+                background: #eeeeee;
                 image: url(CHECKMARK);
             }
-        """.replace("CHECKMARK", '"' + (ASSETS / "checkmark.png").as_posix() + '"'))
+        """.replace("SETTINGS_CONTROL_BORDER", SETTINGS_CONTROL_BORDER_COLOR)
+            .replace("CHECKMARK", '"' + (ASSETS / "checkmark.png").as_posix() + '"'))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 18, 16, 18)
         layout.setSpacing(0)
@@ -877,10 +932,10 @@ class ProviderSettings(QWidget):
         self.navigation.hide()
         self.navigation.setStyleSheet("""
             QScrollArea { border: none; }
-            QPushButton { padding: 7px 16px; font-size: 12px; border: 1px solid #303030; border-radius: 6px; }
-            QPushButton:checked { color: #eeeeee; background: #252525; border-color: #303030; }
+            QPushButton { padding: 7px 16px; font-size: 12px; border: 1px solid SETTINGS_CONTROL_BORDER; border-radius: 6px; }
+            QPushButton:checked { color: #eeeeee; background: #252525; border-color: SETTINGS_CONTROL_BORDER; }
             QPushButton:focus { border-color: #888888; }
-        """)
+        """.replace("SETTINGS_CONTROL_BORDER", SETTINGS_CONTROL_BORDER_COLOR))
         navigation_content = QWidget()
         navigation_layout = QHBoxLayout(navigation_content)
         navigation_layout.setContentsMargins(16, 12, 16, 0)
@@ -890,7 +945,7 @@ class ProviderSettings(QWidget):
         self.section_group = QButtonGroup(self)
         self.section_buttons = {}
         for key, label in (("general", "General"), ("appearance", "Appearance"),
-                           ("alerts", "Alerts"), ("providers", "Providers")):
+                           ("alerts", "Alerts"), ("providers", "Providers"), ("about", "About")):
             button = QPushButton(label)
             button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             button.setCheckable(True)
@@ -901,11 +956,11 @@ class ProviderSettings(QWidget):
             self.section_buttons[key] = button
             navigation_layout.addWidget(button)
             button.installEventFilter(self.navigation)
-            section = QWidget()
+            section = AboutView() if key == "about" else QWidget()
             section.setVisible(key == self.current_section)
-            section_layout = QVBoxLayout(section)
+            section_layout = section.layout() if key == "about" else QVBoxLayout(section)
             section_layout.setContentsMargins(0, 0, 0, 0)
-            section_layout.setSpacing(8)
+            section_layout.setSpacing(12 if key == "about" else 8)
             self.sections[key] = section
             layout.addWidget(section)
         navigation_content.ensurePolished()
@@ -918,14 +973,20 @@ class ProviderSettings(QWidget):
         self.active.setIconSize(QSize(16, 16))
         self.active.setAccessibleName("Active provider and limit")
         general.addWidget(self.active)
-        self.startup = QCheckBox("Start when I sign in to Windows")
-        self.startup.setVisible(paths.IS_WINDOWS)
+        self.startup_row = QWidget()
+        startup_layout = QHBoxLayout(self.startup_row)
+        startup_layout.setContentsMargins(0, 0, 0, 0)
+        startup_layout.setSpacing(12)
+        startup_label = plain_label("Start when I sign in to Windows")
+        startup_label.setWordWrap(True)
+        startup_layout.addWidget(startup_label, 1)
+        self.startup = ToggleSwitch(startup_label.text())
         self.startup.setChecked(startup_enabled())
-        general.addWidget(self.startup)
-        general.addSpacing(8)
-        self.about_button = QPushButton("About AI Status")
-        self.about_button.clicked.connect(self.about_requested)
-        general.addWidget(self.about_button)
+        startup_layout.addWidget(self.startup)
+        self.startup_row.setVisible(paths.IS_WINDOWS)
+        if paths.IS_WINDOWS:
+            general.addSpacing(8)
+        general.addWidget(self.startup_row)
         appearance = self.sections["appearance"].layout()
         selected = state.load_selected() or {}
         appearance.addWidget(SettingsHeading("Usage display"))
@@ -983,7 +1044,7 @@ class ProviderSettings(QWidget):
         self.cancel_button.clicked.connect(self.cancelled)
         footer.addWidget(self.cancel_button)
         self.save_button = QPushButton("Save")
-        self.save_button.setStyleSheet("border: 1px solid #303030; border-radius: 6px; padding: 6px 8px;")
+        self.save_button.setStyleSheet(f"border: 1px solid {SETTINGS_CONTROL_BORDER_COLOR}; border-radius: 6px; padding: 6px 8px;")
         self.save_button.clicked.connect(self.save)
         footer.addWidget(self.save_button)
         self.providers.itemChanged.connect(self.update_choices)
@@ -1038,7 +1099,7 @@ class ProviderSettings(QWidget):
         heading = SettingsHeading("Active account & limit", "")
         self.notification_rule_label = heading.description
         layout.addWidget(heading)
-        self.notification_change_limit = QPushButton("Change in General")
+        self.notification_change_limit = SettingsLinkButton("Change in General")
         self.notification_change_limit.clicked.connect(self.change_active_limit)
         layout.addWidget(self.notification_change_limit)
         layout.addSpacing(8)
@@ -1276,7 +1337,7 @@ class AboutView(QWidget):
         for text in (
             "Tray: click to show usage; right-click for settings and other actions.",
             "Usage: click a limit to show it in the tray. Credit rows open balance and validity details. Refresh checks now.",
-            "Settings: General selects a limit; Appearance controls text and icons; Alerts configures notifications; Providers enables and reorders accounts. Save applies all sections and keeps settings open.",
+            "Settings: General selects a limit; Appearance controls text and icons; Alerts configures notifications; Providers enables and reorders accounts; About has project details and links. Save applies all sections and keeps settings open.",
             "Keyboard: R refreshes, C opens settings, Esc goes back. Tab moves between controls; Alt+Up/Down reorders providers.",
         ):
             label = plain_label(text)
@@ -1444,7 +1505,6 @@ class Dashboard(QWidget):
         self.reset_provider = None
         self.monetary_credit = None
         self.settings_view = None
-        self.settings_scroll_position = 0
         self.usage_scroll_position = 0
         self.updating = False
         self.update_thread = None
@@ -1518,12 +1578,6 @@ class Dashboard(QWidget):
         self.settings_navigation_layout.setContentsMargins(0, 0, 0, 0)
         self.settings_navigation.hide()
         self.panel_layout.insertWidget(1, self.settings_navigation)
-        self.about_scroll = QScrollArea()
-        self.about_scroll.setWidgetResizable(True)
-        self.about_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.about_view = AboutView(self)
-        self.about_scroll.setWidget(self.about_view)
-        self.pages.addWidget(self.about_scroll)
         self.update_scroll = QScrollArea()
         self.update_scroll.setWidgetResizable(True)
         self.update_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -1602,8 +1656,8 @@ class Dashboard(QWidget):
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
-            self.go_back() if self.viewing_credit_details() or self.configuring() or self.viewing_about() or self.viewing_updates() else self.hide()
-        elif self.configuring() or self.viewing_about() or self.viewing_updates():
+            self.go_back() if self.viewing_credit_details() or self.configuring() or self.viewing_updates() else self.hide()
+        elif self.configuring() or self.viewing_updates():
             super().keyPressEvent(event)
         elif event.key() == Qt.Key.Key_R:
             self.refresh()
@@ -1615,7 +1669,7 @@ class Dashboard(QWidget):
             super().keyPressEvent(event)
 
     def wheelEvent(self, event):
-        if self.viewing_credit_details() or self.configuring() or self.viewing_about() or self.viewing_updates():
+        if self.viewing_credit_details() or self.configuring() or self.viewing_updates():
             super().wheelEvent(event)
             return
         self.cycle_metric(1 if event.angleDelta().y() < 0 else -1)
@@ -1693,9 +1747,6 @@ class Dashboard(QWidget):
     def configuring(self):
         return self.pages.currentWidget() is self.settings_scroll
 
-    def viewing_about(self):
-        return self.pages.currentWidget() is self.about_scroll
-
     def viewing_updates(self):
         return self.pages.currentWidget() is self.update_scroll
 
@@ -1756,37 +1807,26 @@ class Dashboard(QWidget):
             self.app.quit()
 
     def show_about(self):
-        self.settings_scroll_position = self.settings_scroll.verticalScrollBar().value()
-        self.pages.setCurrentWidget(self.about_scroll)
-        self.about_scroll.verticalScrollBar().setValue(0)
-        self.update_header()
-        self.fit_content()
-        self.back_button.setFocus()
+        self.configure()
+        self.settings_view.select_section("about")
+        self.settings_view.section_buttons["about"].setFocus()
 
     def go_back(self):
-        if self.viewing_about():
-            self.pages.setCurrentWidget(self.settings_scroll)
-            self.update_header()
-            self.fit_content()
-            self.settings_scroll.verticalScrollBar().setValue(self.settings_scroll_position)
-            self.settings_view.about_button.setFocus()
-        else:
-            self.show_usage()
+        self.show_usage()
 
     def update_header(self):
         configuring = self.configuring()
-        about_page = self.viewing_about()
         update_page = self.viewing_updates()
-        self.brand.setText("Updates" if update_page else "About" if about_page else "Settings" if configuring else "AI Status")
-        show_back = configuring or about_page or update_page or self.viewing_credit_details()
+        self.brand.setText("Updates" if update_page else "Settings" if configuring else "AI Status")
+        show_back = configuring or update_page or self.viewing_credit_details()
         self.back_button.setVisible(show_back)
         self.back_title_gap.changeSize(8 if show_back else 0, 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
         self.back_button.parentWidget().layout().invalidate()
-        back_label = "Back to settings (Esc)" if about_page else "Back to usage (Esc)"
+        back_label = "Back to usage (Esc)"
         self.back_button.setToolTip(back_label)
         self.back_button.setAccessibleName(back_label)
-        self.refresh_button.setVisible(not configuring and not about_page and not update_page)
-        self.settings_button.setVisible(not configuring and not about_page and not update_page and not self.viewing_credit_details())
+        self.refresh_button.setVisible(not configuring and not update_page)
+        self.settings_button.setVisible(not configuring and not update_page and not self.viewing_credit_details())
         self.settings_footer.setVisible(configuring)
         self.settings_navigation.setVisible(configuring)
 
@@ -1809,8 +1849,6 @@ class Dashboard(QWidget):
             self.app.quit()
 
     def configure(self):
-        if self.viewing_about():
-            self.go_back()
         if not self.configuring():
             previous = self.settings_scroll.takeWidget()
             if previous:
@@ -1822,7 +1860,6 @@ class Dashboard(QWidget):
             self.settings_view = ProviderSettings(self)
             self.settings_view.saved.connect(self.settings_saved)
             self.settings_view.cancelled.connect(self.show_usage)
-            self.settings_view.about_requested.connect(self.show_about)
             self.settings_scroll.setWidget(self.settings_view)
             self.settings_navigation_layout.addWidget(self.settings_view.navigation)
             self.settings_view.navigation.show()

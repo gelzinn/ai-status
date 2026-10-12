@@ -12,9 +12,7 @@ Ui.Panel {
     property var anchorItem: null
     property var hostWidget: null
     property bool configurationPage: false
-    property bool aboutPage: false
     property bool updatePage: false
-    property real settingsScrollPosition: 0
     property var resetProvider: null
     property var creditSelection: null
     property real usageScrollPosition: 0
@@ -33,7 +31,6 @@ Ui.Panel {
     function configure() {
         if (!Plugin.Model.snapshot.settings || Plugin.Model.settingsSaving) return
         settings.begin()
-        aboutPage = false
         updatePage = false
         resetProvider = null
         creditSelection = null
@@ -44,7 +41,6 @@ Ui.Panel {
     function showUsage() {
         if (Plugin.Model.settingsSaving) return
         configurationPage = false
-        aboutPage = false
         const wasUpdate = updatePage
         updatePage = false
         const previous = resetProvider
@@ -71,21 +67,14 @@ Ui.Panel {
     }
 
     function showAbout() {
-        settings.closeSelectors()
-        settingsScrollPosition = scroller.contentY
-        aboutPage = true
-        scroller.contentY = 0
-        backButton.focusProgrammatically()
+        if (Plugin.Model.settingsSaving) return
+        if (!configurationPage) configure()
+        settings.selectSection("about")
+        Qt.callLater(() => settingsNavigation.focusCurrentControl())
     }
 
     function goBack() {
-        if (aboutPage) {
-            aboutPage = false
-            Qt.callLater(() => {
-                restoreScrollPosition(settingsScrollPosition)
-                restoredFocusControl = settings.focusAboutControl()
-            })
-        } else showUsage()
+        showUsage()
     }
 
     function showResetCredits(provider, idx) {
@@ -165,7 +154,7 @@ Ui.Panel {
     onCreditEntryChanged: if (creditSelection && !creditEntry) Qt.callLater(() => {
         if (creditSelection && !creditEntry) showUsage()
     })
-    onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; aboutPage = false; updatePage = false; resetProvider = null; creditSelection = null }
+    onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; updatePage = false; resetProvider = null; creditSelection = null }
 
     Connections {
         target: keyCatcher.Window.window
@@ -195,8 +184,7 @@ Ui.Panel {
                 else root.close()
             }
             onTabRequested: direction => {
-                if (root.aboutPage) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
-                else if (root.configurationPage) settingsNavigation.focusCurrentControl()
+                if (root.configurationPage) settingsNavigation.focusCurrentControl()
                 else if (root.resetProvider || root.creditSelection) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
                 else if (root.updatePage) updates.focusFirstControl()
                 else root.switchPanel(direction)
@@ -220,7 +208,7 @@ Ui.Panel {
                     anchors.verticalCenter: parent.verticalCenter
                     visible: root.configurationPage || !!root.resetProvider || !!root.creditSelection || root.updatePage
                     iconName: "arrow-left"
-                    tooltipText: root.aboutPage ? "Back to settings (Esc)" : "Back to usage (Esc)"
+                    tooltipText: "Back to usage (Esc)"
                     enabled: !Plugin.Model.settingsSaving
                     onPressed: button => { if (button === Qt.LeftButton) root.goBack() }
                 }
@@ -231,7 +219,7 @@ Ui.Panel {
                     anchors.right: controls.left
                     anchors.rightMargin: Style.space(8)
                     anchors.verticalCenter: parent.verticalCenter
-                    text: root.aboutPage ? "About" : root.configurationPage ? "Settings" : root.updatePage ? "Update AI Status" : "AI Status"
+                    text: root.configurationPage ? "Settings" : root.updatePage ? "Update AI Status" : "AI Status"
                     textFormat: Text.PlainText
                     color: root.barForeground
                     font.family: root.panelFont
@@ -300,7 +288,7 @@ Ui.Panel {
                 clip: true
                 flickableDirection: Flickable.HorizontalFlick
                 boundsBehavior: Flickable.StopAtBounds
-                visible: root.configurationPage && !root.aboutPage
+                visible: root.configurationPage
                 enabled: !Plugin.Model.settingsSaving
                 function focusCurrentControl() {
                     sectionButtons.itemAt(settings.sections.findIndex(item => item.key === settings.section)).forceActiveFocus(Qt.TabFocusReason)
@@ -438,29 +426,22 @@ Ui.Panel {
                         id: settings
                         objectName: "panel-settings-page"
                         width: parent.width
-                        visible: root.configurationPage && !root.aboutPage
+                        visible: root.configurationPage
                         foreground: root.barForeground
                         fontFamily: root.panelFont
                         popupParent: keyCatcher
                         inlineValidation: false
-                        onAboutRequested: root.showAbout()
                         onSectionChanged: {
                             scroller.cancelFlick()
                             scroller.contentY = 0
                             Qt.callLater(() => {
                                 content.forceLayout()
-                                if (!root.configurationPage || root.aboutPage) return
+                                if (!root.configurationPage) return
                                 settingsNavigation.revealTab(sectionButtons.itemAt(settings.sections.findIndex(item => item.key === settings.section)))
                                 const item = keyCatcher.Window.window ? keyCatcher.Window.window.activeFocusItem : null
                                 if (item && !item.visible) settingsNavigation.focusCurrentControl()
                             })
                         }
-                    }
-                    Plugin.AboutPage {
-                        width: parent.width
-                        visible: root.aboutPage
-                        foreground: root.barForeground
-                        fontFamily: root.panelFont
                     }
                 }
             }
@@ -470,7 +451,7 @@ Ui.Panel {
                 anchors.bottom: parent.bottom
                 width: parent.width
                 height: footerDivider.height + Style.space(12) + footerActions.height + (footerFeedback.visible ? footerFeedback.height + Style.space(8) : 0)
-                visible: root.configurationPage && !root.aboutPage
+                visible: root.configurationPage
                 Rectangle {
                     id: footerDivider
                     objectName: "settings-footer-divider"

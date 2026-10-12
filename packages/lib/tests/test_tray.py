@@ -251,7 +251,7 @@ class DesktopTests(IsolatedState):
         QTest.mouseClick(button, tray.Qt.MouseButton.LeftButton)
         self.assertEqual(clicked.call_count, 3)
 
-    def test_about_returns_to_settings_without_discarding_draft_and_opens_project_links(self):
+    def test_about_is_last_settings_tab_preserves_drafts_and_opens_project_links(self):
         with patch.object(self.dashboard, "isActiveWindow", return_value=True):
             self.dashboard.configure()
             self.app.processEvents()
@@ -259,28 +259,73 @@ class DesktopTests(IsolatedState):
             settings.icon_mode.setCurrentIndex(settings.icon_mode.findData("off"))
             settings.providers.move_provider(0, 1)
             order = [settings.providers.item(i).text() for i in range(settings.providers.count())]
+            settings.select_section("providers")
+            self.app.processEvents()
             scroll = self.dashboard.settings_scroll.verticalScrollBar()
             scroll.setValue(scroll.maximum())
             position = scroll.value()
-            settings.about_button.click()
-            self.assertTrue(self.dashboard.viewing_about())
-            self.assertEqual(self.dashboard.brand.text(), "About")
-            self.assertTrue(self.dashboard.settings_footer.isHidden())
-            self.assertTrue(self.dashboard.settings_navigation.isHidden())
-            labels = [label.text() for label in self.dashboard.about_view.findChildren(QLabel)]
+            self.assertEqual(list(settings.section_buttons), ["general", "appearance", "alerts", "providers", "about"])
+            settings.section_buttons["about"].click()
+            self.assertTrue(self.dashboard.configuring())
+            self.assertEqual(self.dashboard.brand.text(), "Settings")
+            self.assertTrue(self.dashboard.settings_footer.isVisible())
+            self.assertTrue(self.dashboard.settings_navigation.isVisible())
+            about_view = settings.sections["about"]
+            labels = [label.text() for label in about_view.findChildren(QLabel)]
             self.assertTrue(any("License: MIT" in text and "Author: gelzin.com" in text for text in labels))
             with patch.object(tray.QDesktopServices, "openUrl") as browser:
-                self.dashboard.about_view.findChild(tray.QPushButton, "about-issues").click()
+                about_view.findChild(tray.QPushButton, "about-issues").click()
                 self.assertEqual(browser.call_args.args[0].toString(), tray.about.GITHUB + "/issues/new")
-            QTest.keyClick(self.dashboard, tray.Qt.Key.Key_Escape)
-            self.assertTrue(self.dashboard.configuring())
+            settings.section_buttons["providers"].click()
             self.assertIs(self.dashboard.settings_view, settings)
-            self.assertEqual(settings.current_section, "general")
-            self.assertTrue(self.dashboard.settings_navigation.isVisible())
+            self.assertEqual(settings.current_section, "providers")
             self.assertEqual(settings.icon_mode.currentData(), "off")
             self.assertEqual([settings.providers.item(i).text() for i in range(settings.providers.count())], order)
             self.assertEqual(scroll.value(), position)
-            self.assertIs(self.dashboard.focusWidget(), settings.about_button)
+            self.dashboard.show_about()
+            self.assertIs(self.dashboard.settings_view, settings)
+            self.assertEqual(settings.current_section, "about")
+            with patch.object(self.dashboard, "refresh"):
+                settings.save_button.click()
+            self.assertEqual(settings.current_section, "about")
+            self.assertEqual(state.load_selected()["icon_mode"], "off")
+            self.assertEqual(config.enabled_order(), ["copilot", "codex"])
+            QTest.keyClick(self.dashboard, tray.Qt.Key.Key_Escape)
+            self.assertFalse(self.dashboard.configuring())
+            self.assertIs(self.dashboard.focusWidget(), self.dashboard.settings_button)
+
+    def test_startup_switch_supports_native_checkbox_api_mouse_keyboard_and_save(self):
+        with patch.object(paths, "IS_WINDOWS", True), \
+             patch.object(tray, "startup_enabled", return_value=False), \
+             patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.configure()
+            self.app.processEvents()
+            settings = self.dashboard.settings_view
+            switch = settings.startup
+            self.assertIsInstance(switch, tray.QCheckBox)
+            self.assertEqual(switch.accessibleName(), "Start when I sign in to Windows")
+            self.assertFalse(switch.isChecked())
+            toggled = MagicMock()
+            switch.toggled.connect(toggled)
+            # The entire track accepts clicks, including outside the native indicator.
+            QTest.mouseClick(switch, tray.Qt.MouseButton.LeftButton, pos=tray.QPoint(switch.width() - 3, switch.height() // 2))
+            self.assertTrue(switch.isChecked())
+            toggled.assert_called_once_with(True)
+            switch.setFocus(tray.Qt.FocusReason.TabFocusReason)
+            QTest.keyClick(switch, tray.Qt.Key.Key_Space)
+            self.assertFalse(switch.isChecked())
+            switch.setChecked(True)
+            settings.select_section("about")
+            with patch.object(tray, "set_startup") as apply_startup, patch.object(self.dashboard, "refresh"):
+                settings.save_button.click()
+            apply_startup.assert_called_once_with(True)
+            self.assertEqual(settings.current_section, "about")
+            settings.cancel_button.click()
+            with patch.object(tray, "startup_enabled", return_value=True):
+                self.dashboard.configure()
+            reopened = self.dashboard.settings_view
+            self.assertTrue(reopened.startup.isChecked())
+            self.assertEqual(reopened.current_section, "general")
 
     def test_settings_save_stays_in_panel_and_back_is_before_title(self):
         # Offscreen backends do not consistently activate Tool windows on Windows.
@@ -479,6 +524,15 @@ class DesktopTests(IsolatedState):
             self.assertTrue(navigation.viewport().rect().contains(
                 tray.QRectF(providers_tab.mapTo(navigation.viewport(), tray.QPoint()), providers_tab.size()).toRect()))
             self.assertGreater(bar.value(), 0)
+            QTest.keyClick(providers_tab, tray.Qt.Key.Key_Right)
+            self.app.processEvents()
+            self.assertEqual(settings.current_section, "about")
+            about_tab = settings.section_buttons["about"]
+            self.assertIs(self.dashboard.focusWidget(), about_tab)
+            self.assertTrue(navigation.viewport().rect().contains(
+                tray.QRectF(about_tab.mapTo(navigation.viewport(), tray.QPoint()), about_tab.size()).toRect()))
+            QTest.keyClick(about_tab, tray.Qt.Key.Key_Left)
+            self.assertEqual(settings.current_section, "providers")
             general_tab = settings.section_buttons["general"]
             general_tab.setFocus()
             self.app.processEvents()
@@ -518,7 +572,7 @@ class DesktopTests(IsolatedState):
             first_tab = settings.section_buttons["general"]
             self.assertEqual(first_tab.mapTo(viewport, tray.QPoint()).x(), 16)
             tabs_scroll.setValue(tabs_scroll.maximum())
-            last_tab = settings.section_buttons["providers"]
+            last_tab = settings.section_buttons["about"]
             last_edge = last_tab.mapTo(viewport, tray.QPoint()).x() + last_tab.width()
             self.assertEqual(viewport.width() - last_edge, 16)
             self.assertLess(first_tab.mapTo(viewport, tray.QPoint()).x(), 0)

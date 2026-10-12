@@ -11,7 +11,7 @@ import tempfile
 
 LIB = Path(__file__).resolve().parents[1]
 PROJECT = LIB.parents[1]
-SECTIONS = ("general", "appearance", "alerts", "providers")
+SECTIONS = ("general", "appearance", "alerts", "providers", "about")
 PROVIDERS = ["codex", "claude", "cursor", "opencode", "copilot", "kiro",
              "openrouter", "anthropic-api", "openai-api", "google-cloud",
              "grok-bot", "commandcode", "deepinfra", "deepseek", "kimi", "minimax"]
@@ -54,6 +54,7 @@ Item {
             Plugin.Model.reset()
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
             snapshot.version = {current: VERSION, has_update: false}
+            snapshot.about.version = VERSION
             snapshot.settings.order = PROVIDERS
             snapshot.settings.names = NAMES
             snapshot.settings.enabled = PROVIDERS.slice(0, 4)
@@ -63,17 +64,29 @@ Item {
             Plugin.Model.snapshot = snapshot
             panel.configure()
             const settings = findChild(panel, "panel-settings-page")
+            const scroller = findChild(panel, "panel-scroller")
+            const captures = []
             verify(settings !== null)
             for (const section of SECTIONS) {
                 settings.selectSection(section)
                 wait(150)
                 compare(settings.section, section)
-                grabImage(findChild(panel, "panel-surface")).save(OUTPUT + "/quickshell-" + section + ".png")
+                const top = "quickshell-" + section + ".png"
+                grabImage(findChild(panel, "panel-surface")).save(OUTPUT + "/" + top)
+                captures.push(top)
+                const range = Math.max(0, scroller.contentHeight - scroller.height)
+                console.info("SCROLL_RANGE " + section + " " + range)
+                if (range > 0) {
+                    scroller.contentY = range
+                    wait(150)
+                    const bottom = "quickshell-" + section + "-bottom.png"
+                    grabImage(findChild(panel, "panel-surface")).save(OUTPUT + "/" + bottom)
+                    captures.push(bottom)
+                    scroller.contentY = 0
+                    wait(50)
+                }
             }
-            const scroller = findChild(panel, "panel-scroller")
-            scroller.contentY = Math.max(0, scroller.contentHeight - scroller.height)
-            wait(150)
-            grabImage(findChild(panel, "panel-surface")).save(OUTPUT + "/quickshell-providers-bottom.png")
+            console.info("CAPTURE_FILES " + JSON.stringify(captures))
         }
     }
 }
@@ -84,10 +97,21 @@ Item {
         (root / "tst_Preview.qml").write_text(preview, encoding="utf-8")
         env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
                    QML_XHR_ALLOW_FILE_READ="1")
-        subprocess.run([runner, "-input", str(root), "-import", str(root)], env=env, check=True)
-        for section in (*SECTIONS, "providers-bottom"):
-            if not (output / f"quickshell-{section}.png").is_file():
-                raise RuntimeError(f"Qt did not save the {section} preview.")
+        for section in SECTIONS:
+            (output / f"quickshell-{section}-bottom.png").unlink(missing_ok=True)
+        result = subprocess.run([runner, "-input", str(root), "-import", str(root)], env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        print(result.stdout, end="")
+        result.check_returncode()
+        marker = "CAPTURE_FILES "
+        capture_line = next(line for line in result.stdout.splitlines() if marker in line)
+        captures = json.loads(capture_line.split(marker, 1)[1])
+        expected = {f"quickshell-{section}.png" for section in SECTIONS}
+        if not expected.issubset(captures):
+            raise RuntimeError("Qt did not capture every Settings section.")
+        for name in captures:
+            if not (output / name).is_file():
+                raise RuntimeError(f"Qt did not save {name}.")
 
 
 def render_windows(output):
@@ -128,9 +152,18 @@ def render_windows(output):
             panel.show()
             panel.configure()
             for section in SECTIONS:
+                (output / f"windows-{section}-bottom.png").unlink(missing_ok=True)
                 panel.settings_view.select_section(section)
                 QTest.qWait(150)
                 assert panel.grab().save(str(output / f"windows-{section}.png"))
+                scroll = panel.settings_scroll.verticalScrollBar()
+                print(f"Windows {section} scroll range: {scroll.maximum()}")
+                if scroll.maximum() > 0:
+                    scroll.setValue(scroll.maximum())
+                    QTest.qWait(150)
+                    assert panel.grab().save(str(output / f"windows-{section}-bottom.png"))
+                    scroll.setValue(0)
+                    QTest.qWait(50)
             panel.hide()
     finally:
         case.doCleanups()

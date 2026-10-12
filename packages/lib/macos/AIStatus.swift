@@ -318,11 +318,11 @@ struct Snapshot: Decodable {
 }
 
 enum Page: Equatable {
-    case usage, settings, about, update, credits(String), cloudCredits(String, String)
+    case usage, settings, update, credits(String), cloudCredits(String, String)
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, appearance, alerts, providers
+    case general, appearance, alerts, providers, about
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
     var detail: String {
@@ -331,6 +331,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: return "Customize the menu bar icon and usage text."
         case .alerts: return "Set quota notifications and account-specific rules."
         case .providers: return "Enable providers and arrange their order in Usage."
+        case .about: return "Version, project links and a quick guide."
         }
     }
 }
@@ -580,7 +581,6 @@ final class Model: ObservableObject {
     var panelHeight: CGFloat {
         switch page {
         case .settings: return 680
-        case .about: return 640
         case .update: return 600
         case .credits: return min(680, CGFloat(310 + (creditProvider?.resetCredits?.rows.count ?? 0) * 82))
         case .cloudCredits: return 660
@@ -742,7 +742,11 @@ final class Model: ObservableObject {
         page = .cloudCredits(provider.id, credit.id)
         changed?()
     }
-    func showAbout() { page = .about; changed?() }
+    func showAbout() {
+        guard !settingsSaving else { return }
+        if page != .settings { showSettings() }
+        showSettingsSection(.about)
+    }
     func showUpdate() {
         updateError = ""
         updateMessage = ""
@@ -764,7 +768,7 @@ final class Model: ObservableObject {
     }
     func back() {
         guard !settingsSaving else { return }
-        page = page == .about ? .settings : .usage
+        page = .usage
         changed?()
     }
 
@@ -1145,6 +1149,8 @@ struct SettingsPage: View {
                 NotificationSettingsView(model: model)
             case .providers:
                 providers
+            case .about:
+                if let info = model.snapshot?.about { AboutPage(info: info) }
             }
         }.disabled(model.settingsSaving)
     }
@@ -1162,9 +1168,6 @@ struct SettingsPage: View {
                             .tag(choice.selection)
                     }
                 }.labelsHidden().pickerStyle(.menu).frame(maxWidth: .infinity, alignment: .leading)
-            }
-            HoverButton(bordered: true, action: model.showAbout) {
-                HStack { Text("About AI Status"); Spacer(); PanelIcon(name: "arrow-right") }
             }
         }
     }
@@ -1524,7 +1527,7 @@ struct AboutPage: View {
                 Text("Quick guide").foregroundColor(Palette.bright)
                 Text("Menu bar: click to show usage; right-click for settings and other actions.")
                 Text("Usage: click a limit to show it in the bar. Refresh checks now; Reset credits shows the available resets. Update available opens the update guide.")
-                Text("Settings: use General, Appearance, Alerts and Providers to configure the menu bar and quota notifications. Save applies all changes and keeps settings open.")
+                Text("Settings: use General, Appearance, Alerts and Providers to configure the menu bar and quota notifications. About shows project details. Save applies all changes and keeps settings open.")
                 Text("Keyboard: R refreshes, C opens settings, Esc goes back. Tab moves between controls.")
             }.font(.custom("GeistMono-Regular", size: 11))
         }
@@ -1537,14 +1540,14 @@ struct PanelView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 if model.page != .usage {
-                    ControlButton(icon: "arrow-left", help: model.page == .about ? "Back to settings (Esc)" : "Back to usage (Esc)", action: model.back)
+                    ControlButton(icon: "arrow-left", help: "Back to usage (Esc)", action: model.back)
                         .disabled(model.settingsSaving)
                         .padding(.trailing, 4)
                 }
-                Text(model.page == .about ? "About" : model.page == .settings ? "Settings" : model.page == .update ? "Update AI Status" : "AI Status").foregroundColor(Palette.bright)
+                Text(model.page == .settings ? "Settings" : model.page == .update ? "Update AI Status" : "AI Status").foregroundColor(Palette.bright)
                 Spacer(minLength: 0)
                 Text(model.snapshot.map { "v" + $0.version.current } ?? "").font(.custom("GeistMono-Regular", size: 11))
-                if model.page != .settings && model.page != .about && model.page != .update {
+                if model.page != .settings && model.page != .update {
                     ControlButton(icon: "refresh-cw", help: "Refresh usage (R)",
                                   spinning: model.snapshot?.loading == true && model.isPresented, action: model.refresh)
                         .disabled(model.snapshot?.loading == true)
@@ -1572,7 +1575,6 @@ struct PanelView: View {
                         switch model.page {
                         case .usage: UsagePage(model: model)
                         case .settings: SettingsPage(model: model)
-                        case .about: if let info = model.snapshot?.about { AboutPage(info: info) }
                         case .update: UpdatePage(model: model)
                         case .credits: if let provider = model.creditProvider { ResetCreditsPage(provider: provider) }
                         case .cloudCredits:
@@ -1843,7 +1845,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     @objc private func openUsage(_ sender: Any?) { model.page = .usage; show() }
     @objc private func refresh(_ sender: Any?) { model.refresh() }
     @objc private func configure(_ sender: Any?) { model.showSettings(); show() }
-    @objc private func about(_ sender: Any?) { model.showSettings(); model.showAbout(); show() }
+    @objc private func about(_ sender: Any?) { model.showAbout(); show() }
     @objc private func receiveCommand(_ notification: Notification) {
         switch notification.object as? String {
         case "settings": configure(nil)
@@ -1858,7 +1860,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             return nil
         }
         guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return event }
-        if model.page != .settings && model.page != .about && model.page != .update {
+        if model.page != .settings && model.page != .update {
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "r": model.refresh(); return nil
             case "c": configure(nil); return nil
@@ -1997,11 +1999,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         try smokeUpdate(sample: sample, directory: previewDirectory)
         model.isPresented = true
         let pages: [(String, Page)] = [("usage", .usage), ("settings", .settings),
-                                      ("reset-credits", .credits(snapshot.providers[0].id)), ("about", .about)]
+                                      ("reset-credits", .credits(snapshot.providers[0].id))]
         for (name, page) in pages {
             model.page = page
             try renderSmokePage(model, name: name, directory: previewDirectory)
         }
+        model.showAbout()
+        try renderSmokePage(model, name: "about", directory: previewDirectory)
         print("AI Status macOS smoke OK: usage, settings subnavigation and shared draft, quota notifications, reset credits, Cloud credits, update guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
     }
 
@@ -2010,7 +2014,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         model.accept(Data(sample.utf8))
         model.showSettings()
         guard model.page == .settings, model.settingsSection == .general,
-              SettingsSection.allCases.map(\.rawValue) == ["general", "appearance", "alerts", "providers"] else {
+              SettingsSection.allCases.map(\.rawValue) == ["general", "appearance", "alerts", "providers", "about"] else {
             throw AppError.message("Settings did not open in General with the expected sections.")
         }
         model.draft.selected = model.choices[2].selection
@@ -2049,15 +2053,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
         model.showSettingsSection(.general)
         model.showAbout()
-        model.back()
-        guard model.page == .settings, model.settingsSection == .general,
+        guard model.page == .settings, model.settingsSection == .about,
               model.draft.selected == pending.selected, model.draft.usageDisplay == pending.usageDisplay,
               try encoder.encode(model.draft.notifications) == pendingNotifications else {
-            throw AppError.message("About navigation replaced the current settings session.")
+            throw AppError.message("About did not open as a tab in the current settings session.")
+        }
+        model.showSettingsSection(.general)
+        guard model.draft.selected == pending.selected, model.draft.usageDisplay == pending.usageDisplay else {
+            throw AppError.message("Leaving the About tab replaced pending settings edits.")
         }
         model.showSettingsSection(.alerts)
         model.settingsSaving = true
         model.showSettingsSection(.providers)
+        model.showAbout()
         model.back()
         guard model.page == .settings, model.settingsSection == .alerts else {
             throw AppError.message("Settings navigation was allowed during a save.")
@@ -2077,6 +2085,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         model.draft.enabled = []
         guard !model.settingsValid, model.settingsValidation?.section == .providers else {
             throw AppError.message("A hidden provider validation error was lost.")
+        }
+        model.showAbout()
+        model.back()
+        guard model.page == .usage else { throw AppError.message("Back from the About tab did not leave Settings.") }
+        model.showAbout()
+        guard model.page == .settings, model.settingsSection == .about,
+              model.draft.selected == model.snapshot?.selected else {
+            throw AppError.message("Opening About outside Settings did not start a saved settings session.")
         }
         model.back()
         model.showSettings()

@@ -427,6 +427,8 @@ Item {
             settings.toggleProvider("kiro")
             settings.selectSection("general")
             settings.selected = {provider: "codex", idx: 0, metric: "weekly"}
+            settings.selectSection("about")
+            verify(findChild(settings, "settings-section-about").visible)
             settings.save()
             compare(Plugin.Model.saved.usageDisplay, "remaining")
             compare(Plugin.Model.saved.iconMode, "logo")
