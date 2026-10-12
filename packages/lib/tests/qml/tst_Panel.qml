@@ -599,7 +599,7 @@ Item {
         function verifyControlInViewport(control, scroller) {
             tryVerify(() => {
                 const top = control.mapToItem(scroller, 0, 0).y
-                return top >= -0.5 && top + control.height <= scroller.height + 0.5
+                return top >= scroller.navigationInset - 0.5 && top + control.height <= scroller.height + 0.5
             }, 1000, "Focused control must be fully visible: " + control.objectName)
         }
         function tabToNextControl(control, scroller, backwards) {
@@ -695,6 +695,8 @@ Item {
             keyClick(Qt.Key_Tab)
             verify(providers.activeFocus)
             keyClick(Qt.Key_Tab)
+            verify(findChild(panel, "settings-nav-guide").activeFocus)
+            keyClick(Qt.Key_Tab)
             verify(findChild(panel, "settings-nav-about").activeFocus)
             keyClick(Qt.Key_Tab)
             verify(findChild(settings, "active-provider").activeFocus)
@@ -764,7 +766,7 @@ Item {
             compare(navigation.width, surface.width)
             compare(scroller.mapToItem(surface, 0, 0).x, 0)
             compare(scroller.width, surface.width)
-            compare(scroller.y, navigation.y + navigation.height)
+            compare(scroller.y + scroller.navigationInset, navigation.y + navigation.height)
             compare(scroller.y + scroller.height, footer.y)
             settings.selectSection("general")
             wait(20)
@@ -778,7 +780,7 @@ Item {
             compare(lastTab.mapToItem(navigation, lastTab.width, 0).x, navigation.width - 16)
             settings.selectSection("providers")
             wait(20)
-            compare(settings.mapToItem(scroller, 0, 0).y, 12)
+            compare(settings.mapToItem(scroller, 0, 0).y, scroller.navigationInset + 12)
             scroller.contentY = scroller.contentHeight - scroller.height
             compare(settings.mapToItem(scroller, 0, settings.height).y, scroller.height - 12)
             verify(settings.mapToItem(scroller, 0, 0).y < 0)
@@ -931,6 +933,8 @@ Item {
             compare(separator.width, surface.width)
             compare(scroller.mapToItem(surface, 0, scroller.height).y, separator.mapToItem(surface, 0, 0).y)
             verify(separator.mapToItem(footer, 0, separator.height).y < cancel.mapToItem(footer, 0, 0).y)
+            compare(cancel.mapToItem(footer, 0, 0).y - separator.height, 16)
+            compare(surface.height - cancel.mapToItem(surface, 0, cancel.height).y, 16)
             compare(cancel.outlined, true)
             compare(save.primary, true)
             compare(save.text, "Save")
@@ -1015,7 +1019,7 @@ Item {
             const metadata = findChild(panel, "about-metadata")
             verify(metadata.text.indexOf("12345678") !== -1)
             verify(metadata.text.indexOf("gelzin.com") !== -1)
-            const projectLink = findChild(settings, "about-link-github")
+            const projectLink = findChild(settings, "about-link-guide")
             compare(projectLink.trailingIconName, "arrow-right")
             findChild(panel, "settings-nav-about").forceActiveFocus(Qt.TabFocusReason)
             keyClick(Qt.Key_Tab)
@@ -1043,6 +1047,77 @@ Item {
             verify(panel.configurationPage)
             compare(settings.section, "about")
             compare(settings.usageDisplay, "used")
+        }
+        function test_guide_link_order_keycaps_and_tab_icons() {
+            panel.configure()
+            const settings = findChild(panel, "panel-settings-page")
+            compare(settings.sections.map(item => item.key).join(","), "general,appearance,alerts,providers,guide,about")
+            settings.selectSection("about")
+            wait(20)
+            const links = ["guide", "issues", "documentation", "github"].map(key => findChild(settings, "about-link-" + key))
+            for (let index = 1; index < links.length; index++) verify(links[index].y > links[index - 1].y)
+            mouseClick(links[0])
+            compare(settings.section, "guide")
+            wait(20)
+            verify(findChild(settings, "guide-table").visible)
+            for (const key of ["R", "C", "Tab", "Shift+Tab", "Space", "Enter", "Left", "Right", "Esc"]) {
+                const cap = findChild(settings, "guide-keycap-" + key)
+                verify(cap !== null, key)
+                compare(cap.border.width, 1)
+                verify(cap.width > 0)
+            }
+            for (const section of settings.sections) {
+                const tab = findChild(panel, "settings-nav-" + section.key)
+                compare(tab.leadingIconName, section.icon)
+                const icon = findChild(tab, "leading-icon")
+                verify(icon.visible)
+                compare(icon.width, 16)
+            }
+            findChild(panel, "settings-nav-about").forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Tab)
+            verify(findChild(panel, "settings-cancel").activeFocus)
+        }
+        function test_review_invalid_rule_reveals_field_below_fixed_tabs_and_preserves_bar_selection() {
+            panel.configure()
+            const settings = findChild(panel, "panel-settings-page")
+            settings.selected = {provider: "codex", idx: 0, metric: "weekly"}
+            settings.setRule("thresholds", [90,100])
+            settings.setRuleText("bad")
+            settings.selected = {provider: "claude", idx: 0, metric: "rolling"}
+            settings.selectSection("about")
+            wait(20)
+            mouseClick(findChild(panel, "settings-review-section"))
+            compare(settings.section, "alerts")
+            const field = findChild(settings, "alert-rule-thresholds")
+            tryVerify(() => field.inputItem.activeFocus)
+            verifyControlInViewport(field, findChild(panel, "panel-scroller"))
+            compare(settings.selected.provider, "claude")
+            settings.alertsAdvanced = false
+            wait(20)
+            verify(findChild(panel, "settings-review-section").visible)
+            mouseClick(findChild(panel, "settings-review-section"))
+            tryVerify(() => field.inputItem.activeFocus)
+            verifyControlInViewport(field, findChild(panel, "panel-scroller"))
+        }
+        function test_tab_faces_stay_above_content_without_changing_colors_during_scroll() {
+            panel.configure()
+            const settings = findChild(panel, "panel-settings-page")
+            settings.selectSection("guide")
+            wait(20)
+            const surface = findChild(panel, "panel-surface")
+            const tab = findChild(panel, "settings-nav-guide")
+            const scroller = findChild(panel, "panel-scroller")
+            compare(tab.color.a, 1)
+            waitForRendering(surface)
+            const before = grabImage(surface)
+            const position = tab.mapToItem(surface, 0, 0)
+            scroller.contentY = scroller.contentHeight - scroller.height
+            waitForRendering(surface)
+            const after = grabImage(surface)
+            for (let y = 2; y < tab.height - 2; y++) {
+                for (let x = 2; x < tab.width - 2; x++)
+                    compare(after.pixel(Math.round(position.x + x), Math.round(position.y + y)), before.pixel(Math.round(position.x + x), Math.round(position.y + y)))
+            }
         }
         function test_separator_reaches_sides_and_only_refresh_icon_spins() {
             const surface = findChild(panel, "panel-surface")

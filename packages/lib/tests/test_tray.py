@@ -10,7 +10,7 @@ from core import config, paths, state
 
 try:
     from PySide6.QtCore import QModelIndex
-    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtGui import QColor, QPixmap, QWheelEvent
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QLabel
     from core import tray
@@ -264,7 +264,7 @@ class DesktopTests(IsolatedState):
             scroll = self.dashboard.settings_scroll.verticalScrollBar()
             scroll.setValue(scroll.maximum())
             position = scroll.value()
-            self.assertEqual(list(settings.section_buttons), ["general", "appearance", "alerts", "providers", "about"])
+            self.assertEqual(list(settings.section_buttons), ["general", "appearance", "alerts", "providers", "guide", "about"])
             settings.section_buttons["about"].click()
             self.assertTrue(self.dashboard.configuring())
             self.assertEqual(self.dashboard.brand.text(), "Settings")
@@ -293,6 +293,56 @@ class DesktopTests(IsolatedState):
             QTest.keyClick(self.dashboard, tray.Qt.Key.Key_Escape)
             self.assertFalse(self.dashboard.configuring())
             self.assertIs(self.dashboard.focusWidget(), self.dashboard.settings_button)
+
+    def test_about_guide_link_opens_internal_table_preserves_draft_and_keyboard_reaches_footer(self):
+        with patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.configure()
+            self.app.processEvents()
+            settings = self.dashboard.settings_view
+            settings.select_section("appearance")
+            settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
+            settings.select_section("alerts")
+            settings.notification_levels.set_values([75, 90])
+            settings.select_section("about")
+            about_view = settings.sections["about"]
+            links = [button for button in about_view.findChildren(tray.QPushButton)
+                     if button.objectName().startswith("about-")]
+            self.assertEqual([button.text() for button in links], ["Guide", "Report a bug", "Documentation", "GitHub"])
+            self.assertNotIn("Quick guide", [label.text() for label in about_view.findChildren(QLabel)])
+            links[0].setFocus()
+            with patch.object(tray.QDesktopServices, "openUrl") as browser:
+                QTest.keyClick(links[0], tray.Qt.Key.Key_Space)
+            browser.assert_not_called()
+            self.app.processEvents()
+            self.assertIs(self.dashboard.settings_view, settings)
+            self.assertEqual(settings.current_section, "guide")
+            self.assertEqual(self.dashboard.brand.text(), "Settings")
+            self.assertIs(self.dashboard.focusWidget(), settings.section_buttons["guide"])
+            guide = settings.sections["guide"]
+            self.assertEqual([label.text() for label in guide.cells[0]], ["Feature", "Action / shortcut"])
+            self.assertEqual(guide.table.objectName(), "creditTable")
+            self.assertTrue(all(label.wordWrap() for cells in guide.cells for label in cells))
+            keycaps = {cap.text() for _, action in guide.cells[1:] for cap in action.keycaps}
+            self.assertTrue({"R", "C", "Tab", "Shift+Tab", "Left", "Right", "Space", "Enter",
+                             "Alt+Up", "Alt+Down", "Esc"}.issubset(keycaps))
+            self.assertTrue({"Save", "Cancel", "Back"}.isdisjoint(keycaps))
+            self.assertLessEqual(guide.table.width(), self.dashboard.settings_scroll.viewport().width())
+            self.assertEqual(self.dashboard.settings_scroll.horizontalScrollBar().maximum(), 0)
+            scroll = self.dashboard.settings_scroll.verticalScrollBar()
+            self.assertGreater(scroll.maximum(), 0)
+            scroll.setValue(scroll.maximum())
+            self.assertTrue(self.dashboard.settings_navigation.isVisible())
+            self.assertTrue(self.dashboard.settings_footer.isVisible())
+            QTest.keyClick(settings.section_buttons["guide"], tray.Qt.Key.Key_Tab)
+            self.assertIs(self.dashboard.focusWidget(), settings.cancel_button)
+            QTest.keyClick(settings.cancel_button, tray.Qt.Key.Key_Backtab)
+            self.assertIs(self.dashboard.focusWidget(), settings.section_buttons["guide"])
+            settings.section_buttons["appearance"].click()
+            self.assertEqual(settings.usage_display.currentData(), "remaining")
+            settings.section_buttons["alerts"].click()
+            self.assertEqual(settings.notification_levels.values(), [75, 90])
+            self.assertEqual(state.get_usage_display(state.load_selected()), "used")
+            self.assertEqual(tray.notifications.load_settings()["thresholds"], [80, 95, 100])
 
     def test_startup_switch_supports_native_checkbox_api_mouse_keyboard_and_save(self):
         with patch.object(paths, "IS_WINDOWS", True), \
@@ -394,12 +444,12 @@ class DesktopTests(IsolatedState):
         settings.section_buttons["providers"].click()
         settings.providers.move_provider(0, 1)
         settings.section_buttons["alerts"].click()
+        settings.notification_advanced_button.setChecked(True)
         self.assertIn("Weekly", settings.notification_rule_label.text())
         settings.notification_rule_custom.setChecked(True)
         settings.notification_rule_thresholds.setText("85, 99")
-        settings.notification_change_limit.click()
+        settings.section_buttons["general"].click()
         self.assertEqual(settings.current_section, "general")
-        self.assertIs(self.dashboard.focusWidget(), settings.active)
         settings.section_buttons["alerts"].click()
         self.assertEqual(settings.notification_rule_thresholds.text(), "85, 99")
         self.assertEqual(config.enabled_order(), ["codex", "copilot"])
@@ -424,7 +474,7 @@ class DesktopTests(IsolatedState):
         settings.select_section("providers")
         settings.providers.item(0).setCheckState(tray.Qt.CheckState.Unchecked)
         settings.select_section("alerts")
-        settings.notification_thresholds.setText("75, 90")
+        settings.notification_levels.set_values([75, 90])
         settings.cancel_button.click()
         self.assertFalse(self.dashboard.configuring())
         self.assertTrue(self.dashboard.settings_navigation.isHidden())
@@ -434,7 +484,7 @@ class DesktopTests(IsolatedState):
         self.assertEqual(reopened.current_section, "general")
         self.assertEqual(reopened.usage_display.currentData(), "used")
         self.assertEqual(reopened.providers.item(0).checkState(), tray.Qt.CheckState.Checked)
-        self.assertEqual(reopened.notification_thresholds.text(), "80, 95, 100")
+        self.assertEqual(reopened.notification_levels.values(), [80, 95, 100])
 
     def test_settings_keyboard_navigation_reveals_controls_and_keeps_navigation_and_footer_fixed(self):
         # Qt Tool windows need an explicit active-window fixture offscreen.
@@ -452,6 +502,8 @@ class DesktopTests(IsolatedState):
             QTest.keyClick(settings.section_buttons["alerts"], tray.Qt.Key.Key_Space)
             self.app.processEvents()
             self.assertEqual(settings.current_section, "alerts")
+            settings.notification_advanced_button.setChecked(True)
+            self.app.processEvents()
             navigation_position = self.dashboard.settings_navigation.pos()
             footer_position = self.dashboard.settings_footer.pos()
             settings.notification_rule_custom.setChecked(True)
@@ -483,13 +535,13 @@ class DesktopTests(IsolatedState):
         settings.select_section("providers")
         self.app.processEvents()
         self.assertEqual(scroll.value(), position)
-        settings.notification_thresholds.setText("invalid")
+        settings.notification_levels.set_values([80, 80])
         with patch.object(config, "save_connection_order") as save_order:
             settings.save_button.click()
         self.assertEqual(settings.current_section, "alerts")
         self.assertIn("threshold", settings.message.text())
         save_order.assert_not_called()
-        settings.notification_thresholds.setText("80, 95, 100")
+        settings.notification_levels.set_values([80, 95, 100])
         for checkbox in settings.display.values():
             checkbox.setChecked(False)
         with patch.object(config, "save_connection_order") as save_order:
@@ -526,12 +578,19 @@ class DesktopTests(IsolatedState):
             self.assertGreater(bar.value(), 0)
             QTest.keyClick(providers_tab, tray.Qt.Key.Key_Right)
             self.app.processEvents()
+            self.assertEqual(settings.current_section, "guide")
+            guide_tab = settings.section_buttons["guide"]
+            self.assertIs(self.dashboard.focusWidget(), guide_tab)
+            QTest.keyClick(guide_tab, tray.Qt.Key.Key_Right)
+            self.app.processEvents()
             self.assertEqual(settings.current_section, "about")
             about_tab = settings.section_buttons["about"]
             self.assertIs(self.dashboard.focusWidget(), about_tab)
             self.assertTrue(navigation.viewport().rect().contains(
                 tray.QRectF(about_tab.mapTo(navigation.viewport(), tray.QPoint()), about_tab.size()).toRect()))
             QTest.keyClick(about_tab, tray.Qt.Key.Key_Left)
+            self.assertEqual(settings.current_section, "guide")
+            QTest.keyClick(guide_tab, tray.Qt.Key.Key_Left)
             self.assertEqual(settings.current_section, "providers")
             general_tab = settings.section_buttons["general"]
             general_tab.setFocus()
@@ -581,12 +640,12 @@ class DesktopTests(IsolatedState):
             content = self.dashboard.settings_scroll
             content_viewport = content.viewport()
             viewport_top = content_viewport.mapTo(self.dashboard, tray.QPoint()).y()
-            self.assertEqual(viewport_top, self.dashboard.settings_navigation.y() + self.dashboard.settings_navigation.height())
+            self.assertEqual(viewport_top, self.dashboard.settings_navigation.mapTo(self.dashboard, tray.QPoint()).y())
             self.assertEqual(viewport_top + content_viewport.height(), self.dashboard.settings_footer.y())
             section = settings.sections["providers"]
             scroll = content.verticalScrollBar()
             scroll.setValue(0)
-            self.assertEqual(section.mapTo(content_viewport, tray.QPoint()).y(), 18)
+            self.assertEqual(section.mapTo(content_viewport, tray.QPoint()).y(), self.dashboard.settings_scroll.covered_height + 18)
             scroll.setValue(scroll.maximum())
             section_bottom = section.mapTo(content_viewport, tray.QPoint(0, section.height())).y()
             self.assertEqual(content_viewport.height() - section_bottom, 18)
@@ -666,7 +725,8 @@ class DesktopTests(IsolatedState):
         self.app.processEvents()
         settings = self.dashboard.settings_view
         self.assertLessEqual(settings.width(), self.dashboard.settings_scroll.viewport().width())
-        settings.notification_thresholds.setText("75, 90, 100")
+        settings.notification_advanced_button.setChecked(True)
+        settings.notification_levels.set_values([75, 90, 100])
         settings.notifications_recovery.setChecked(False)
         settings.notifications_recent_only.setChecked(True)
         settings.notification_quiet_start.setText("22:00")
@@ -704,11 +764,126 @@ class DesktopTests(IsolatedState):
             settings.save()
         self.assertEqual(tray.notifications.load_settings()["muted_until"], 0)
 
+    def test_alerts_switches_and_native_level_sliders_support_keyboard_add_remove_and_save(self):
+        with patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.configure()
+            settings = self.dashboard.settings_view
+            settings.select_section("alerts")
+            self.app.processEvents()
+            self.assertIsInstance(settings.notifications_enabled, tray.ToggleSwitch)
+            self.assertIsInstance(settings.notification_mute, tray.ToggleSwitch)
+            self.assertTrue(settings.notification_advanced.isHidden())
+            self.assertFalse(hasattr(settings, "notification_change_limit"))
+            visible_labels = [label.text() for label in settings.sections["alerts"].findChildren(QLabel)
+                              if label.isVisible()]
+            self.assertIn("Quota notifications", visible_labels)
+            self.assertNotIn("Active account & limit", visible_labels)
+            levels = settings.notification_levels
+            self.assertEqual(levels.values(), [80, 95, 100])
+            first = levels.sliders[0]
+            first.setFocus()
+            QTest.keyClick(first, tray.Qt.Key.Key_Home)
+            self.assertEqual(first.value(), 1)
+            QTest.keyClick(first, tray.Qt.Key.Key_End)
+            self.assertEqual(first.value(), 100)
+            QTest.keyClick(first, tray.Qt.Key.Key_Left)
+            self.assertEqual(first.value(), 99)
+            self.assertIs(self.dashboard.focusWidget(), first)
+            self.assertIn("99%", [label.text() for label in levels.level_rows[0].findChildren(QLabel)])
+            QTest.keyClick(first, tray.Qt.Key.Key_Tab)
+            remove = levels.level_rows[0].findChild(tray.QPushButton)
+            self.assertIs(self.dashboard.focusWidget(), remove)
+            QTest.keyClick(remove, tray.Qt.Key.Key_Space)
+            self.assertEqual(levels.values(), [95, 100])
+            self.assertIs(self.dashboard.focusWidget(), levels.sliders[0])
+            self.assertEqual(levels.sliders[0].accessibleName(), "Notification level 1")
+            levels.add_button.setFocus()
+            QTest.keyClick(levels.add_button, tray.Qt.Key.Key_Space)
+            self.assertEqual(len(levels.sliders), 3)
+            self.assertEqual(len(set(levels.values())), 3)
+            self.assertIs(self.dashboard.focusWidget(), levels.sliders[-1])
+            levels.set_values([75, 90, 100])
+            settings.notifications_enabled.setFocus()
+            QTest.keyClick(settings.notifications_enabled, tray.Qt.Key.Key_Space)
+            settings.notification_mute.setFocus()
+            QTest.keyClick(settings.notification_mute, tray.Qt.Key.Key_Space)
+            with patch.object(self.dashboard, "refresh"):
+                settings.save_button.click()
+            saved = tray.notifications.load_settings()
+            self.assertEqual(saved["thresholds"], [75, 90, 100])
+            self.assertFalse(saved["enabled"])
+            self.assertGreater(saved["muted_until"], time.time())
+
+    def test_advanced_notification_disclosure_preserves_drafts_and_opens_on_invalid_save(self):
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        settings.select_section("alerts")
+        settings.notification_advanced_button.setFocus()
+        QTest.keyClick(settings.notification_advanced_button, tray.Qt.Key.Key_Space)
+        self.assertFalse(settings.notification_advanced.isHidden())
+        settings.notification_quiet_start.setText("22:00")
+        settings.notification_quiet_end.setText("07:00")
+        settings.notification_rule_custom.setChecked(True)
+        settings.notification_rule_thresholds.setText("85, 99")
+        QTest.keyClick(settings.notification_advanced_button, tray.Qt.Key.Key_Space)
+        self.assertTrue(settings.notification_advanced.isHidden())
+        settings.select_section("appearance")
+        settings.select_section("alerts")
+        settings.notification_advanced_button.click()
+        self.assertEqual(settings.notification_quiet_start.text(), "22:00")
+        self.assertEqual(settings.notification_rule_thresholds.text(), "85, 99")
+        settings.notification_quiet_start.setText("25:00")
+        settings.notification_advanced_button.click()
+        self.assertTrue(settings.notification_advanced.isHidden())
+        with patch.object(tray.notifications, "save_settings") as save:
+            settings.save_button.click()
+        save.assert_not_called()
+        self.assertFalse(settings.notification_advanced.isHidden())
+        self.assertIn("quiet_hours", settings.message.text())
+
+    def test_settings_content_alpha_fade_preserves_color_and_overlay_routes_clicks_and_focus(self):
+        sample = QPixmap(40, 100)
+        original = QColor(240, 80, 30)
+        sample.fill(original)
+        masked = tray.SettingsFadeEffect.masked_source(sample, 10, 20).toImage()
+        self.assertEqual(masked.pixelColor(20, 15).alpha(), 0)
+        fading = masked.pixelColor(20, 39)
+        self.assertGreater(fading.alpha(), 0)
+        self.assertLess(fading.alpha(), 255)
+        self.assertLessEqual(abs(fading.red() - original.red()), 1)
+        self.assertLessEqual(abs(fading.green() - original.green()), 1)
+        self.assertLessEqual(abs(fading.blue() - original.blue()), 1)
+        self.assertEqual(masked.pixelColor(20, 70), original)
+        with patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.configure()
+            settings = self.dashboard.settings_view
+            settings.select_section("providers")
+            self.app.processEvents()
+            scroll = self.dashboard.settings_scroll
+            self.assertIs(settings.graphicsEffect(), scroll.fade)
+            self.assertEqual(settings.layout().contentsMargins().top(), scroll.covered_height + 18)
+            self.assertEqual(scroll.viewport().mapTo(self.dashboard, tray.QPoint()).y(),
+                             self.dashboard.settings_navigation.mapTo(self.dashboard, tray.QPoint()).y())
+            scroll.verticalScrollBar().setValue(100)
+            self.app.processEvents()
+            tab = settings.section_buttons["providers"]
+            point = tab.mapTo(scroll, tab.rect().center())
+            self.assertIs(scroll.childAt(point), tab)
+            QTest.mouseClick(tab, tray.Qt.MouseButton.LeftButton)
+            self.assertEqual(settings.current_section, "providers")
+            settings.providers.setCurrentRow(0)
+            settings.providers.setFocus(tray.Qt.FocusReason.TabFocusReason)
+            self.app.processEvents()
+            rect = settings.providers.visualItemRect(settings.providers.item(0))
+            top = settings.providers.viewport().mapTo(scroll.viewport(), rect.topLeft()).y()
+            self.assertGreaterEqual(top, scroll.covered_height + 18)
+            self.assertGreaterEqual(self.dashboard.settings_footer.height(), 49)
+
     def test_invalid_notification_settings_are_rejected_before_any_save(self):
         self.dashboard.configure()
         settings = self.dashboard.settings_view
-        for thresholds in ("eighty", "80, 101", "0", "80, 80"):
-            settings.notification_thresholds.setText(thresholds)
+        for thresholds in ([80, 80], [75, 90, 90]):
+            settings.notification_levels.set_values(thresholds)
             with patch.object(config, "save_connection_order") as save_order, \
                  patch.object(state, "_save_json") as save_selection, \
                  patch.object(tray.notifications, "save_settings") as save_notifications:
@@ -718,7 +893,7 @@ class DesktopTests(IsolatedState):
             save_notifications.assert_not_called()
             self.assertTrue(settings.message.text())
             self.assertNotEqual(settings.message.text(), "Saved")
-        settings.notification_thresholds.setText("80, 95, 100")
+        settings.notification_levels.set_values([80, 95, 100])
         settings.notification_quiet_start.setText("25:00")
         settings.notification_quiet_end.setText("07:00")
         with patch.object(tray.notifications, "save_settings") as save_notifications:
@@ -730,6 +905,7 @@ class DesktopTests(IsolatedState):
             {"type": "rolling", "percentage": 2}, {"type": "weekly", "percentage": 23}]}])
         self.dashboard.configure()
         settings = self.dashboard.settings_view
+        settings.notification_advanced_button.setChecked(True)
         settings.active.setCurrentIndex(settings.active.findData(["codex", 0, "weekly"]))
         settings.notification_rule_custom.setChecked(True)
         settings.notification_rule_thresholds.setText("unfinished")
@@ -740,7 +916,59 @@ class DesktopTests(IsolatedState):
         with patch.object(tray.notifications, "save_settings") as save_notifications:
             settings.save()
         save_notifications.assert_not_called()
-        self.assertIn("threshold", settings.message.text())
+        self.assertIn("levels", settings.message.text())
+
+    def test_invalid_other_account_rules_are_reviewed_without_changing_the_bar_selection(self):
+        config.save_config(["codex", "claude"])
+        for provider in ("codex", "claude"):
+            self.dashboard.on_result(provider, [{"provider": provider.title(), "metrics": [
+                {"type": "weekly", "percentage": 2}]}])
+        with patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.configure()
+            settings = self.dashboard.settings_view
+            settings.select_section("alerts")
+            settings.notification_advanced_button.setChecked(True)
+            settings.notification_rule_custom.setChecked(True)
+            settings.notification_rule_thresholds.setText("unfinished")
+            settings.select_section("general")
+            settings.active.setCurrentIndex(settings.active.findData(["claude", 0, "weekly"]))
+            selected = settings.active.currentData()
+            settings.select_section("alerts")
+            self.assertEqual(settings.notification_rule_choice, ("codex", "weekly"))
+            self.assertEqual(settings.notification_rule_thresholds.text(), "unfinished")
+            self.assertFalse(settings.notification_advanced.isHidden())
+            with patch.object(config, "save_connection_order") as save_order:
+                settings.save_button.click()
+            save_order.assert_not_called()
+            self.assertIn("Codex", settings.message.text())
+            self.assertIn("Weekly", settings.message.text())
+            self.assertIs(self.dashboard.focusWidget(), settings.notification_rule_thresholds)
+            self.assertEqual(settings.active.currentData(), selected)
+            settings.notification_rule_selector.setCurrentIndex(
+                settings.notification_rule_selector.findData(["claude", "weekly"]))
+            settings.notification_rule_custom.setChecked(True)
+            settings.notification_rule_thresholds.setText("another unfinished rule")
+            self.app.processEvents()
+            review = next(button for button in settings.notification_rule_reviews.findChildren(tray.SettingsLinkButton)
+                          if button.isVisible() and "Codex" in button.accessibleName())
+            QTest.keyClick(review, tray.Qt.Key.Key_Space)
+            self.assertEqual(settings.notification_rule_choice, ("codex", "weekly"))
+            self.assertIs(self.dashboard.focusWidget(), settings.notification_rule_thresholds)
+            self.assertEqual(settings.active.currentData(), selected)
+            settings.notification_rule_thresholds.setText("85, 99")
+            self.app.processEvents()
+            review = next(button for button in settings.notification_rule_reviews.findChildren(tray.SettingsLinkButton)
+                          if button.isVisible() and "Claude" in button.accessibleName())
+            review.click()
+            self.assertEqual(settings.notification_rule_thresholds.text(), "another unfinished rule")
+            settings.notification_rule_thresholds.setText("90")
+            with patch.object(self.dashboard, "refresh"):
+                settings.save_button.click()
+            self.assertEqual(state.load_selected()["provider"], "claude")
+            rules = {(rule["connection_id"], rule["metric"]): rule["thresholds"]
+                     for rule in tray.notifications.load_settings()["rules"]}
+            self.assertEqual(rules[("codex", "weekly")], [85, 99])
+            self.assertEqual(rules[("claude", "weekly")], [90])
 
     def test_provider_arrows_keyboard_and_native_move_preserve_checks_and_save_order(self):
         self.dashboard.configure()

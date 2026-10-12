@@ -133,11 +133,13 @@ Ui.Panel {
         if (ancestor !== content) return
 
         const margin = Style.space(4)
-        const top = item.mapToItem(scroller, 0, 0).y
-        const bottom = top + item.height
+        const safeTop = scroller.navigationInset + (root.configurationPage ? root.settingsTabGap : margin)
+        const target = item.parent && item.parent.inputItem === item ? item.parent : item
+        const top = target.mapToItem(scroller, 0, 0).y
+        const bottom = top + target.height
         let nextY = scroller.contentY
-        if (top < margin || item.height + margin * 2 > scroller.height)
-            nextY += top - margin
+        if (top < safeTop || target.height + safeTop + margin > scroller.height)
+            nextY += top - safeTop
         else if (bottom > scroller.height - margin)
             nextY += bottom - scroller.height + margin
         nextY = Math.max(0, Math.min(nextY, Math.max(0, scroller.contentHeight - scroller.height)))
@@ -173,7 +175,7 @@ Ui.Panel {
         open: root.opened
         focusTarget: keyCatcher
         contentWidth: panel.fittedContentWidth(Style.space(380))
-        contentHeight: panel.fittedContentHeight(header.height + panel.padding + Style.space(1) + scroller.contentHeight + (settingsNavigation.visible ? settingsNavigation.height : 0) + (footer.visible ? footer.height : -panel.padding), Style.space(680))
+        contentHeight: panel.fittedContentHeight(header.height + panel.padding + Style.space(1) + scroller.contentHeight + (footer.visible ? footer.height : -panel.padding), Style.space(680))
 
         Ui.PanelKeyCatcher {
             id: keyCatcher
@@ -289,7 +291,14 @@ Ui.Panel {
                 flickableDirection: Flickable.HorizontalFlick
                 boundsBehavior: Flickable.StopAtBounds
                 visible: root.configurationPage
+                z: 1
                 enabled: !Plugin.Model.settingsSaving
+                MouseArea {
+                    // The fixed strip owns its gaps, even with controls scrolling below.
+                    anchors.fill: parent
+                    z: -1
+                    onClicked: {}
+                }
                 function focusCurrentControl() {
                     sectionButtons.itemAt(settings.sections.findIndex(item => item.key === settings.section)).forceActiveFocus(Qt.TabFocusReason)
                 }
@@ -329,11 +338,18 @@ Ui.Panel {
                             objectName: "settings-nav-" + modelData.key
                             width: implicitWidth + Style.space(12)
                             text: modelData.label
+                            leadingIconName: modelData.icon
+                            alignLeft: true
                             fontFamily: root.panelFont
                             foreground: root.barForeground
+                            opacity: 1
+                            contentOpacity: enabled ? 1 : 0.35
                             outlined: true
-                            color: settings.section === modelData.key ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.12)
-                                : activeFocus ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.06) : "transparent"
+                            // Opaque faces preserve the existing composited theme colors
+                            // and keep scrolling text behind each tab's label.
+                            color: Qt.tint(Commons.Color.popups.background, settings.section === modelData.key
+                                ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.12)
+                                : activeFocus ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.06) : "transparent")
                             Accessible.role: Accessible.PageTab
                             Accessible.selected: settings.section === modelData.key
                             onClicked: settings.selectSection(modelData.key)
@@ -348,21 +364,31 @@ Ui.Panel {
             Flickable {
                 id: scroller
                 objectName: "panel-scroller"
-                anchors.top: settingsNavigation.visible ? settingsNavigation.bottom : divider.bottom
+                anchors.top: settingsNavigation.visible && !supportsMask ? settingsNavigation.bottom : divider.bottom
                 anchors.bottom: footer.visible ? footer.top : parent.bottom
                 anchors.bottomMargin: footer.visible ? 0 : -panel.padding
                 x: -panel.padding
                 width: parent.width + panel.padding * 2
                 contentWidth: width
-                contentHeight: content.implicitHeight + Style.space(24)
+                readonly property bool supportsMask: GraphicsInfo.api !== GraphicsInfo.Software
+                readonly property real navigationInset: settingsNavigation.visible && supportsMask ? settingsNavigation.height : 0
+                contentHeight: content.implicitHeight + Style.space(24) + navigationInset
                 clip: true
+                layer.enabled: navigationInset > 0 && contentY > 0
+                layer.effect: ShaderEffect {
+                    property var source
+                    property real fadeStart: Math.max(0, scroller.navigationInset - root.settingsTabGap) / Math.max(1, scroller.height)
+                    property real fadeEnd: (scroller.navigationInset + root.settingsTabGap) / Math.max(1, scroller.height)
+                    fragmentShader: Qt.resolvedUrl("scroll-fade.frag.qsb")
+                }
                 boundsBehavior: Flickable.StopAtBounds
                 onContentYChanged: settings.closeSelectors()
+                onContentHeightChanged: Qt.callLater(root.revealFocusedControl)
 
                 Column {
                     id: content
                     x: panel.padding
-                    y: Style.space(12)
+                    y: Style.space(12) + scroller.navigationInset
                     width: scroller.width - panel.padding * 2
                     spacing: Style.space(20)
                     Text {
@@ -431,6 +457,7 @@ Ui.Panel {
                         fontFamily: root.panelFont
                         popupParent: keyCatcher
                         inlineValidation: false
+                        onAlertsAdvancedChanged: Qt.callLater(root.revealFocusedControl)
                         onSectionChanged: {
                             scroller.cancelFlick()
                             scroller.contentY = 0
@@ -450,7 +477,7 @@ Ui.Panel {
                 objectName: "settings-footer"
                 anchors.bottom: parent.bottom
                 width: parent.width
-                height: footerDivider.height + Style.space(12) + footerActions.height + (footerFeedback.visible ? footerFeedback.height + Style.space(8) : 0)
+                height: footerDivider.height + panel.padding + footerActions.height + (footerFeedback.visible ? footerFeedback.height + Style.space(8) : 0)
                 visible: root.configurationPage
                 Rectangle {
                     id: footerDivider
@@ -463,7 +490,7 @@ Ui.Panel {
                 Column {
                     id: footerFeedback
                     anchors.top: footerDivider.bottom
-                    anchors.topMargin: Style.space(12)
+                    anchors.topMargin: panel.padding
                     width: parent.width
                     spacing: Style.space(6)
                     visible: !Plugin.Model.settingsSaving && (Plugin.Model.settingsError !== "" || settings.validationSection !== "")
@@ -479,7 +506,7 @@ Ui.Panel {
                     }
                     Plugin.PanelButton {
                         objectName: "settings-review-section"
-                        visible: settings.validationSection !== "" && settings.validationSection !== settings.section
+                        visible: settings.validationSection !== "" && (settings.validationSection !== settings.section || (settings.section === "alerts" && !settings.alertsAdvanced))
                         text: settings.validationSection ? "Review " + settings.sections.find(item => item.key === settings.validationSection).label : ""
                         fontFamily: root.panelFont
                         foreground: root.barForeground

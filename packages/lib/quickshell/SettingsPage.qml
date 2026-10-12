@@ -18,20 +18,29 @@ Column {
     property string alertQuietHours: ""
     property string alertWorkHours: ""
     property var alertRuleTexts: ({})
-    readonly property string selectedAlertKey: selected.provider + "\u001f" + selected.metric
-    readonly property var selectedAlertRule: (alertSettings.rules || []).find(rule => rule.connection_id === selected.provider && rule.metric === selected.metric) || null
+    property bool alertsAdvanced: false
+    property real alertNow: Date.now() / 1000
+    readonly property bool alertsPaused: alertSettings.muted_until > alertNow
+    readonly property var thresholdValues: validThresholds(alertThresholds) ? parseThresholds(alertThresholds) : []
+    property var alertRuleTarget: null
+    readonly property var ruleSelection: alertRuleTarget || selected
+    readonly property string selectedAlertKey: ruleSelection.provider + "\u001f" + ruleSelection.metric
+    readonly property var selectedAlertRule: (alertSettings.rules || []).find(rule => rule.connection_id === ruleSelection.provider && rule.metric === ruleSelection.metric) || null
     readonly property string selectedAlertThresholds: alertRuleTexts[selectedAlertKey] !== undefined ? alertRuleTexts[selectedAlertKey] : selectedAlertRule ? selectedAlertRule.thresholds.join(",") : ""
+    readonly property var invalidAlertRules: (alertSettings.rules || []).filter(rule => !validThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] : rule.thresholds.join(",")))
+    readonly property string ruleSelectionLabel: ruleLabel(ruleSelection.provider, ruleSelection.metric)
     property Item popupParent: parent
     readonly property bool selectionOpen: providerSelector.popupOpen || iconSelector.popupOpen || usageDisplaySelector.popupOpen
     property bool saved: false
     property bool inlineValidation: true
     property string section: "general"
     readonly property var sections: [
-        {key: "general", label: "General"},
-        {key: "appearance", label: "Appearance"},
-        {key: "alerts", label: "Alerts"},
-        {key: "providers", label: "Providers"},
-        {key: "about", label: "About"}
+        {key: "general", label: "General", icon: "settings"},
+        {key: "appearance", label: "Appearance", icon: "paintbrush"},
+        {key: "alerts", label: "Alerts", icon: "bell"},
+        {key: "providers", label: "Providers", icon: "server"},
+        {key: "guide", label: "Guide", icon: "book-open"},
+        {key: "about", label: "About", icon: "info"}
     ]
     readonly property string validationSection: enabledProviders.length === 0 ? "providers"
         : !Object.keys(display).some(key => display[key]) || ["used", "remaining"].indexOf(usageDisplay) === -1 ? "appearance"
@@ -40,7 +49,7 @@ Column {
     readonly property string validationMessage: validationSection === "providers" ? "Enable at least one provider in Providers."
         : validationSection === "appearance" ? "Choose a usage display and at least one bar text field in Appearance."
         : validationSection === "general" ? "Choose an active provider and limit in General."
-        : validationSection === "alerts" ? "Alert thresholds must be whole percentages from 1 to 100. Review Alerts."
+        : validationSection === "alerts" ? "Review alert levels and schedules in Alerts."
         : ""
     readonly property var choices: {
         const items = []
@@ -92,7 +101,7 @@ Column {
     }
     readonly property var selectedChoice: choices.find(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) || null
     readonly property string selectedLabel: selectedChoice ? selectedChoice.groupLabel + " · " + selectedChoice.label : "Choose a provider and limit"
-    readonly property bool valid: enabledProviders.length > 0 && Object.keys(display).some(key => display[key]) && ["used", "remaining"].indexOf(usageDisplay) !== -1 && choices.some(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) && validThresholds(alertThresholds) && (alertSettings.rules || []).every(rule => validThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] : rule.thresholds.join(",")))
+    readonly property bool valid: enabledProviders.length > 0 && Object.keys(display).some(key => display[key]) && ["used", "remaining"].indexOf(usageDisplay) !== -1 && choices.some(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) && validThresholds(alertThresholds) && validHours(alertQuietHours) && validHours(alertWorkHours) && (alertSettings.rules || []).every(rule => validThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] : rule.thresholds.join(",")))
     spacing: Style.space(16)
     enabled: !Plugin.Model.settingsSaving
     onOrderChanged: saved = false
@@ -100,7 +109,7 @@ Column {
     onDisplayChanged: saved = false
     onIconModeChanged: saved = false
     onUsageDisplayChanged: saved = false
-    onSelectedChanged: saved = false
+    onSelectedChanged: { saved = false; alertRuleTarget = null }
     onAlertSettingsChanged: saved = false
     onAlertThresholdsChanged: saved = false
     onAlertRuleTextsChanged: saved = false
@@ -113,13 +122,19 @@ Column {
         target: Plugin.Model
         function onSettingsSaved() { root.saved = true }
     }
+    Timer {
+        interval: 1000
+        repeat: true
+        running: root.visible && root.section === "alerts"
+        onTriggered: root.alertNow = Date.now() / 1000
+    }
 
     function providerLogo(name, entry) {
-        return entry && entry.logoPath ? "file://" + entry.logoPath : Qt.resolvedUrl("../assets/providers/" + ((Plugin.Model.snapshot.settings.providerIds || {})[name] || name) + ".png")
+        return entry && entry.logoPath ? "file://" + entry.logoPath : Qt.resolvedUrl("../assets/providers/" + (((Plugin.Model.snapshot.settings || {}).providerIds || {})[name] || name) + ".png")
     }
 
     function providerName(name) {
-        return (Plugin.Model.snapshot.settings.names || {})[name] || name
+        return ((Plugin.Model.snapshot.settings || {}).names || {})[name] || name
     }
 
     function limitLabel(metric) {
@@ -156,8 +171,11 @@ Column {
         alertSettings = JSON.parse(JSON.stringify(settings.notifications || {enabled: true, thresholds: [80,95,100], recovery: true, muted_until: 0, rules: [], quiet_hours: {start: "", end: ""}, work_hours: {start: "", end: ""}, recent_only: false}))
         alertThresholds = alertSettings.thresholds.join(",")
         alertRuleTexts = {}
+        alertRuleTarget = null
         alertQuietHours = hoursText("quiet_hours")
         alertWorkHours = hoursText("work_hours")
+        alertsAdvanced = false
+        alertNow = Date.now() / 1000
         closeSelectors()
         saved = false
         Plugin.Model.settingsError = ""
@@ -166,7 +184,11 @@ Column {
     function focusFirstControl() {
         if (section === "about") { aboutContent.focusFirstControl(); return }
         const first = section === "appearance" ? usageDisplaySelector
-            : section === "alerts" ? alertAccountButton
+            : section === "alerts" ? !validThresholds(alertThresholds) ? globalThresholdField.inputItem
+                : !validHours(alertQuietHours) ? quietHoursField.inputItem
+                : !validHours(alertWorkHours) ? workHoursField.inputItem
+                : invalidAlertRules.length ? ruleThresholdField.inputItem : alertEnabled
+            : section === "guide" ? null
             : section === "providers" && providerRows.count > 0 ? providerRows.itemAt(0).firstControl : providerSelector
         if (first) first.forceActiveFocus(Qt.TabFocusReason)
     }
@@ -175,6 +197,9 @@ Column {
         if (Plugin.Model.settingsSaving || !sections.some(item => item.key === key)) return
         closeSelectors()
         section = key
+        if (key === "alerts" && !valid) alertsAdvanced = true
+        if (key === "alerts" && invalidAlertRules.length) reviewRule(invalidAlertRules[0])
+        if (key === "alerts" && validationSection === "alerts") Qt.callLater(() => focusFirstControl())
     }
 
     function toggleProvider(name) {
@@ -204,9 +229,9 @@ Column {
             iconMode: iconMode,
             usageDisplay: usageDisplay,
             notifications: Object.assign({}, alertSettings, {
-                thresholds: alertThresholds.split(",").map(value => Number(value.trim())),
+                thresholds: parseThresholds(alertThresholds),
                 rules: (alertSettings.rules || []).map(rule => Object.assign({}, rule, {
-                    thresholds: alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? alertRuleTexts[rule.connection_id + "\u001f" + rule.metric].split(",").map(Number) : rule.thresholds
+                    thresholds: alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? parseThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric]) : rule.thresholds
                 }))
             }),
             selected: {provider: selected.provider, idx: selected.idx, metric: selected.metric}
@@ -246,6 +271,7 @@ Column {
         id: field
         property string text: ""
         property string label: ""
+        property alias inputItem: input
         signal edited(string value)
         width: parent.width
         height: Style.space(36)
@@ -270,8 +296,32 @@ Column {
     }
 
     function validThresholds(value) {
+        if (!value.trim()) return true
         const values = value.split(",")
-        return values.length > 0 && values.every(item => /^\d+$/.test(item.trim()) && Number(item) > 0 && Number(item) <= 100)
+        return values.length > 0 && values.every(item => /^\d+$/.test(item.trim()) && Number(item) > 0 && Number(item) <= 100) && new Set(values.map(Number)).size === values.length
+    }
+    function parseThresholds(value) {
+        return value.trim() ? value.split(",").map(Number).sort((a, b) => a - b) : []
+    }
+    function updateThreshold(index, value) {
+        const next = thresholdValues.slice()
+        next[index] = Math.max(index > 0 ? next[index - 1] + 1 : 1, Math.min(index + 1 < next.length ? next[index + 1] - 1 : 100, Math.round(value)))
+        alertThresholds = next.join(",")
+    }
+    function addThreshold() {
+        const next = thresholdValues.slice()
+        let value = 80
+        while (next.indexOf(value) !== -1 && value > 1) value--
+        if (next.indexOf(value) !== -1) {
+            value = 1
+            while (next.indexOf(value) !== -1 && value < 100) value++
+        }
+        if (next.indexOf(value) === -1) alertThresholds = next.concat([value]).sort((a, b) => a - b).join(",")
+    }
+    function removeThreshold(index) {
+        if (!thresholdValues.length) return
+        alertThresholds = thresholdValues.filter((value, position) => position !== index).join(",")
+        Qt.callLater(() => addLevel.forceActiveFocus(Qt.TabFocusReason))
     }
     function setAlert(key, value) {
         const next = Object.assign({}, alertSettings)
@@ -279,8 +329,8 @@ Column {
         alertSettings = next
     }
     function setRule(key, value) {
-        const rules = (alertSettings.rules || []).filter(rule => rule.connection_id !== selected.provider || rule.metric !== selected.metric)
-        const rule = Object.assign({}, selectedAlertRule || {connection_id: selected.provider, metric: selected.metric, thresholds: alertSettings.thresholds, enabled: true})
+        const rules = (alertSettings.rules || []).filter(rule => rule.connection_id !== ruleSelection.provider || rule.metric !== ruleSelection.metric)
+        const rule = Object.assign({}, selectedAlertRule || {connection_id: ruleSelection.provider, metric: ruleSelection.metric, thresholds: alertSettings.thresholds, enabled: true})
         rule[key] = value
         setAlert("rules", rules.concat([rule]))
     }
@@ -289,9 +339,27 @@ Column {
         texts[selectedAlertKey] = value
         alertRuleTexts = texts
     }
+    function ruleLabel(connection, metric) {
+        if (!connection || !metric) return "Choose a provider and limit in General."
+        const choice = choices.find(item => item.provider === connection && item.metric === metric)
+        return choice ? choice.groupLabel + " · " + choice.label : providerName(connection) + " · " + metric
+    }
+    function reviewRule(rule) {
+        alertRuleTarget = {provider: rule.connection_id, metric: rule.metric}
+        alertsAdvanced = true
+        Qt.callLater(() => {
+            if (root.visible && root.section === "alerts") ruleThresholdField.inputItem.forceActiveFocus(Qt.TabFocusReason)
+        })
+    }
     function hoursText(key) {
         const hours = alertSettings[key] || {start: "", end: ""}
         return hours.start ? hours.start + "-" + hours.end : ""
+    }
+    function validHours(value) {
+        if (!value) return true
+        if (!/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/.test(value)) return false
+        const parts = value.split("-")
+        return parts[0] !== parts[1]
     }
     function setHours(key, value) {
         if (key === "quiet_hours") alertQuietHours = value
@@ -392,80 +460,202 @@ Column {
         objectName: "settings-section-alerts"
         visible: root.section === "alerts"
         width: parent.width
-        spacing: Style.space(8)
+        spacing: Style.space(16)
         SectionHeading {
-            title: "Quota alerts"
-            description: "Alerts use quota consumed. Recovery requires a successful fresh check of all applicable limits."
+            title: "Quota notifications"
+            description: "Get notified as your quota is consumed."
         }
-        Label { text: "Selected account & limit: " + root.selectedLabel; font.pixelSize: Style.font.caption }
-        Button {
-            id: alertAccountButton
-            objectName: "alerts-change-selection"
+        Plugin.PanelSwitch {
+            id: alertEnabled
+            objectName: "alerts-enabled"
             width: parent.width
-            text: "Change account & limit"
-            alignLeft: true
-            trailingIconName: "arrow-right"
-            outlined: true
-            onClicked: root.selectSection("general")
+            text: "Desktop quota notifications"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            checked: !!root.alertSettings.enabled
+            onToggled: root.setAlert("enabled", checked)
         }
-        Repeater {
-            model: [{key: "enabled", label: "Desktop quota alerts"}, {key: "recovery", label: "Notify when capacity recovers"}, {key: "recent_only", label: "Recovery only for accounts active in the last 24h"}]
-            delegate: Button {
-                required property var modelData
-                objectName: "alerts-" + modelData.key
-                width: parent.width
-                alignLeft: true
-                multiline: true
-                text: (root.alertSettings[modelData.key] ? "[x]  " : "[ ]  ") + modelData.label
-                Accessible.role: Accessible.CheckBox
-                Accessible.checked: !!root.alertSettings[modelData.key]
-                onClicked: root.setAlert(modelData.key, !root.alertSettings[modelData.key])
+        Plugin.PanelSwitch {
+            objectName: "alerts-mute"
+            width: parent.width
+            text: "Pause notifications for 1 hour"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            checked: root.alertsPaused
+            onToggled: {
+                root.alertNow = Date.now() / 1000
+                root.setAlert("muted_until", checked ? root.alertNow + 3600 : 0)
             }
         }
-        Label { text: "Consumption thresholds (%)" }
-        Field { objectName: "alert-thresholds"; text: root.alertThresholds; label: "Quota alert percentages"; onEdited: value => root.alertThresholds = value }
-        Label { visible: !root.validThresholds(root.alertThresholds); text: "Enter percentages between 0 and 100, separated by commas."; color: Commons.Color.urgent }
+        Column {
+            width: parent.width
+            spacing: Style.space(8)
+            SectionHeading {
+                title: "Notify at"
+                description: root.thresholdValues.length ? "Each level sends one notification when usage reaches it." : "Add a level to receive usage notifications."
+            }
+            Repeater {
+                model: root.thresholdValues.length
+                delegate: Row {
+                    required property int index
+                    width: parent.width
+                    spacing: Style.space(8)
+                    Label {
+                        width: Style.space(42)
+                        height: Style.space(30)
+                        verticalAlignment: Text.AlignVCenter
+                        text: root.thresholdValues[parent.index] + "%"
+                    }
+                    Plugin.PanelSlider {
+                        objectName: "alert-threshold-slider-" + parent.index
+                        width: parent.width - Style.space(42 + 30 + 16)
+                        value: root.thresholdValues[parent.index]
+                        foreground: root.foreground
+                        Accessible.name: "Notification level " + (parent.index + 1)
+                        onMoved: root.updateThreshold(parent.index, value)
+                    }
+                    Button {
+                        width: Style.space(30)
+                        text: "−"
+                        objectName: "alert-threshold-remove-" + parent.index
+                        Accessible.name: "Remove notification level " + (parent.index + 1)
+                        enabled: root.thresholdValues.length > 0
+                        outlined: true
+                        onClicked: root.removeThreshold(parent.index)
+                    }
+                }
+            }
+            Button {
+                id: addLevel
+                objectName: "alert-threshold-add"
+                text: "Add level"
+                outlined: true
+                enabled: root.thresholdValues.length < 100
+                onClicked: root.addThreshold()
+            }
+            Field {
+                id: globalThresholdField
+                objectName: "alert-thresholds"
+                visible: !root.validThresholds(root.alertThresholds)
+                text: root.alertThresholds
+                label: "Quota alert percentages"
+                onEdited: value => root.alertThresholds = value
+            }
+            Label { visible: !root.validThresholds(root.alertThresholds); text: "Use distinct whole percentages from 1 to 100."; color: Commons.Color.urgent }
+        }
         Button {
-            objectName: "alert-rule-customize"
+            objectName: "alerts-recovery"
             width: parent.width
             alignLeft: true
             multiline: true
-            text: (root.selectedAlertRule ? "[x]  " : "[ ]  ") + "Custom alerts for selected account & limit"
-            onClicked: {
-                if (root.selectedAlertRule) {
-                    root.setAlert("rules", root.alertSettings.rules.filter(rule => rule !== root.selectedAlertRule))
-                    const texts = Object.assign({}, root.alertRuleTexts)
-                    delete texts[root.selectedAlertKey]
-                    root.alertRuleTexts = texts
-                } else root.setRule("thresholds", root.validThresholds(root.alertThresholds) ? root.alertThresholds.split(",").map(Number) : [80,95,100])
-            }
+            text: (root.alertSettings.recovery ? "[x]  " : "[ ]  ") + "Notify when capacity recovers"
+            Accessible.role: Accessible.CheckBox
+            Accessible.checked: !!root.alertSettings.recovery
+            onClicked: root.setAlert("recovery", !root.alertSettings.recovery)
         }
-        Field {
-            objectName: "alert-rule-thresholds"
-            visible: !!root.selectedAlertRule
-            text: root.selectedAlertThresholds
-            label: "Selected limit quota alert percentages"
-            onEdited: value => root.setRuleText(value)
-        }
-        Label { visible: !!root.selectedAlertRule && !root.validThresholds(root.selectedAlertThresholds); text: "Enter whole percentages from 1 to 100 for this limit."; color: Commons.Color.urgent }
         Button {
-            visible: !!root.selectedAlertRule
+            objectName: "alerts-advanced-toggle"
             width: parent.width
             alignLeft: true
-            text: (root.selectedAlertRule && root.selectedAlertRule.enabled ? "[x]  " : "[ ]  ") + "Alerts for this limit"
-            onClicked: root.setRule("enabled", !root.selectedAlertRule.enabled)
-        }
-        Button {
-            objectName: "alerts-mute"
-            width: parent.width
-            text: root.alertSettings.muted_until > Date.now() / 1000 ? "Resume alerts" : "Silence alerts for 1 hour"
+            text: "Advanced"
+            trailingIconName: root.alertsAdvanced ? "arrow-up" : "chevron-down"
             outlined: true
-            onClicked: root.setAlert("muted_until", root.alertSettings.muted_until > Date.now() / 1000 ? 0 : Date.now() / 1000 + 3600)
+            onClicked: root.alertsAdvanced = !root.alertsAdvanced
         }
-        Label { text: "Quiet hours (local HH:MM-HH:MM, blank for none)" }
-        Field { objectName: "alerts-quiet-hours"; text: root.alertQuietHours; label: "Quiet hours"; onEdited: value => root.setHours("quiet_hours", value) }
-        Label { text: "Working hours (local HH:MM-HH:MM, blank for all day)" }
-        Field { objectName: "alerts-work-hours"; text: root.alertWorkHours; label: "Working hours"; onEdited: value => root.setHours("work_hours", value) }
+        Column {
+            objectName: "alerts-advanced"
+            visible: root.alertsAdvanced
+            width: parent.width
+            spacing: Style.space(16)
+            Button {
+                objectName: "alerts-recent_only"
+                width: parent.width
+                alignLeft: true
+                multiline: true
+                text: (root.alertSettings.recent_only ? "[x]  " : "[ ]  ") + "Recovery only for accounts active in the last 24h"
+                Accessible.role: Accessible.CheckBox
+                Accessible.checked: !!root.alertSettings.recent_only
+                onClicked: root.setAlert("recent_only", !root.alertSettings.recent_only)
+            }
+            Column {
+                width: parent.width
+                spacing: Style.space(8)
+                SectionHeading { title: "Quiet hours"; description: "Local time, HH:MM-HH:MM. Leave blank for none." }
+                Field { id: quietHoursField; objectName: "alerts-quiet-hours"; text: root.alertQuietHours; label: "Quiet hours"; onEdited: value => root.setHours("quiet_hours", value) }
+                Label { visible: !root.validHours(root.alertQuietHours); text: "Enter two different times, for example 22:00-08:00."; color: Commons.Color.urgent }
+            }
+            Column {
+                width: parent.width
+                spacing: Style.space(8)
+                SectionHeading { title: "Working hours"; description: "Local time, HH:MM-HH:MM. Leave blank for all day." }
+                Field { id: workHoursField; objectName: "alerts-work-hours"; text: root.alertWorkHours; label: "Working hours"; onEdited: value => root.setHours("work_hours", value) }
+                Label { visible: !root.validHours(root.alertWorkHours); text: "Enter two different times, for example 09:00-18:00."; color: Commons.Color.urgent }
+            }
+            Column {
+                width: parent.width
+                spacing: Style.space(8)
+                SectionHeading { title: "Per-limit rule"; description: root.ruleSelectionLabel }
+                Repeater {
+                    model: root.invalidAlertRules.filter(rule => rule.connection_id !== root.ruleSelection.provider || rule.metric !== root.ruleSelection.metric)
+                    delegate: Button {
+                        required property var modelData
+                        width: parent.width
+                        text: "Review " + root.ruleLabel(modelData.connection_id, modelData.metric)
+                        objectName: "alerts-review-rule-" + modelData.connection_id + "-" + modelData.metric
+                        outlined: true
+                        multiline: true
+                        trailingIconName: "arrow-right"
+                        alignLeft: true
+                        onClicked: root.reviewRule(modelData)
+                    }
+                }
+                Button {
+                    visible: !!root.alertRuleTarget && (root.ruleSelection.provider !== root.selected.provider || root.ruleSelection.metric !== root.selected.metric) && root.invalidAlertRules.length === 0
+                    width: parent.width
+                    text: "Edit rule for " + root.selectedLabel
+                    outlined: true
+                    multiline: true
+                    trailingIconName: "arrow-right"
+                    alignLeft: true
+                    onClicked: root.alertRuleTarget = null
+                }
+                Button {
+                    objectName: "alert-rule-customize"
+                    width: parent.width
+                    alignLeft: true
+                    multiline: true
+                    text: (root.selectedAlertRule ? "[x]  " : "[ ]  ") + "Use custom levels for this limit"
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.checked: !!root.selectedAlertRule
+                    onClicked: {
+                        if (root.selectedAlertRule) {
+                            root.setAlert("rules", root.alertSettings.rules.filter(rule => rule !== root.selectedAlertRule))
+                            const texts = Object.assign({}, root.alertRuleTexts)
+                            delete texts[root.selectedAlertKey]
+                            root.alertRuleTexts = texts
+                        } else root.setRule("thresholds", root.thresholdValues.length ? root.thresholdValues : [80,95,100])
+                    }
+                }
+                Field {
+                    id: ruleThresholdField
+                    objectName: "alert-rule-thresholds"
+                    visible: !!root.selectedAlertRule
+                    text: root.selectedAlertThresholds
+                    label: "Selected limit quota alert percentages"
+                    onEdited: value => root.setRuleText(value)
+                }
+                Label { visible: !!root.selectedAlertRule && !root.validThresholds(root.selectedAlertThresholds); text: "Use distinct whole percentages from 1 to 100 for this limit."; color: Commons.Color.urgent }
+                Button {
+                    visible: !!root.selectedAlertRule
+                    width: parent.width
+                    alignLeft: true
+                    text: (root.selectedAlertRule && root.selectedAlertRule.enabled ? "[x]  " : "[ ]  ") + "Notifications for this limit"
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.checked: !!root.selectedAlertRule && root.selectedAlertRule.enabled
+                    onClicked: root.setRule("enabled", !root.selectedAlertRule.enabled)
+                }
+            }
+        }
     }
     Column {
         objectName: "settings-section-providers"
@@ -524,11 +714,18 @@ Column {
     }
     Button {
         objectName: "settings-review-validation"
-        visible: root.inlineValidation && root.validationSection !== "" && root.validationSection !== root.section
+        visible: root.inlineValidation && root.validationSection !== "" && (root.validationSection !== root.section || (root.section === "alerts" && !root.alertsAdvanced))
         width: parent.width
         text: root.validationSection ? "Review " + root.sections.find(item => item.key === root.validationSection).label : ""
         outlined: true
         onClicked: root.selectSection(root.validationSection)
+    }
+    Plugin.GuidePage {
+        objectName: "settings-section-guide"
+        visible: root.section === "guide"
+        width: parent.width
+        foreground: root.foreground
+        fontFamily: root.fontFamily
     }
     Plugin.AboutPage {
         id: aboutContent
@@ -537,5 +734,6 @@ Column {
         width: parent.width
         foreground: root.foreground
         fontFamily: root.fontFamily
+        onGuideRequested: root.selectSection("guide")
     }
 }

@@ -44,7 +44,9 @@ Waybar formatting lives in `packages/lib/src/core/render.py` using Pango markup.
 
 Run `python3 -m unittest discover -s packages/lib/tests -v` for adapter and isolated installer tests. For native plugin validation and desktop acceptance checks, see [Linux development](docs/development/linux.md#development-validation).
 
-Run `python3 packages/lib/tests/run_qml_tests.py` for native settings and usage page tests. These use the production QML pages with a fake daemon and theme, via Qt Quick Test's offscreen renderer. Install `qt6-declarative-dev-tools`, `qml6-module-qtquick`, `qml6-module-qtquick-window`, `qml6-module-qtquick-shapes`, `qml6-module-qtqml-models`, `qml6-module-qtqml-workerscript`, `qml6-module-qttest`, and `qt6-qpa-plugins`. They do not replace an Omarchy desktop smoke test.
+Run `python3 packages/lib/tests/run_qml_tests.py` for native settings and usage page tests. These use the production QML pages with a fake daemon and theme, via Qt Quick Test's offscreen renderer. Install `qt6-declarative-dev-tools`, `qml6-module-qtquick`, `qml6-module-qtquick-window`, `qml6-module-qtquick-shapes`, `qml6-module-qtquick-templates`, `qml6-module-qtqml-models`, `qml6-module-qtqml-workerscript`, `qml6-module-qttest`, and `qt6-qpa-plugins`. They do not replace an Omarchy desktop smoke test.
+
+To exercise the scroll fade shader and its alpha-only pixel check, run `AI_STATUS_QML_RENDERER=opengl xvfb-run -a python3 packages/lib/tests/run_qml_tests.py` with Mesa and the Qt XCB platform plugin installed. The pure software renderer retains normal clipped scrolling because it does not support Qt Quick shader effects. The packaged `quickshell/scroll-fade.frag.qsb` targets Qt 6.4 and newer; after editing its source, regenerate it with Qt Shader Baker: `qsb --qt6 --qsbversion 64 -o packages/lib/quickshell/scroll-fade.frag.qsb packages/lib/quickshell/scroll-fade.frag`.
 
 ## CI checks
 

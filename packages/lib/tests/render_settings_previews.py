@@ -11,7 +11,7 @@ import tempfile
 
 LIB = Path(__file__).resolve().parents[1]
 PROJECT = LIB.parents[1]
-SECTIONS = ("general", "appearance", "alerts", "providers", "about")
+SECTIONS = ("general", "appearance", "alerts", "providers", "guide", "about")
 PROVIDERS = ["codex", "claude", "cursor", "opencode", "copilot", "kiro",
              "openrouter", "anthropic-api", "openai-api", "google-cloud",
              "grok-bot", "commandcode", "deepinfra", "deepseek", "kimi", "minimax"]
@@ -23,7 +23,7 @@ NAMES = {"codex": "Codex", "claude": "Claude", "cursor": "Cursor",
          "deepinfra": "DeepInfra", "deepseek": "DeepSeek", "kimi": "Kimi", "minimax": "MiniMax"}
 
 
-def render_quickshell(output):
+def render_quickshell(output, renderer="software"):
     runner = os.environ.get("QMLTESTRUNNER") or shutil.which("qmltestrunner")
     if not runner:
         candidate = Path("/usr/lib/qt6/bin/qmltestrunner")
@@ -50,6 +50,33 @@ Item {
     TestCase {
         name: "SettingsPreviews"
         when: windowShown
+        function captureViews(name, captures) {
+            const scroller = findChild(panel, "panel-scroller")
+            scroller.contentY = 0
+            wait(150)
+            const top = "quickshell-" + name + ".png"
+            grabImage(findChild(panel, "panel-surface")).save(OUTPUT + "/" + top)
+            captures.push(top)
+            const range = Math.max(0, scroller.contentHeight - scroller.height)
+            console.info("SCROLL_RANGE " + name + " " + range)
+            const visibleHeight = scroller.height - scroller.navigationInset
+            if (range > visibleHeight) {
+                scroller.contentY = range / 2
+                wait(150)
+                const middle = "quickshell-" + name + "-middle.png"
+                grabImage(findChild(panel, "panel-surface")).save(OUTPUT + "/" + middle)
+                captures.push(middle)
+            }
+            if (range > 0) {
+                scroller.contentY = range
+                wait(150)
+                const bottom = "quickshell-" + name + "-bottom.png"
+                grabImage(findChild(panel, "panel-surface")).save(OUTPUT + "/" + bottom)
+                captures.push(bottom)
+            }
+            scroller.contentY = 0
+            wait(50)
+        }
         function test_render() {
             Plugin.Model.reset()
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
@@ -64,26 +91,17 @@ Item {
             Plugin.Model.snapshot = snapshot
             panel.configure()
             const settings = findChild(panel, "panel-settings-page")
-            const scroller = findChild(panel, "panel-scroller")
             const captures = []
             verify(settings !== null)
             for (const section of SECTIONS) {
                 settings.selectSection(section)
                 wait(150)
                 compare(settings.section, section)
-                const top = "quickshell-" + section + ".png"
-                grabImage(findChild(panel, "panel-surface")).save(OUTPUT + "/" + top)
-                captures.push(top)
-                const range = Math.max(0, scroller.contentHeight - scroller.height)
-                console.info("SCROLL_RANGE " + section + " " + range)
-                if (range > 0) {
-                    scroller.contentY = range
-                    wait(150)
-                    const bottom = "quickshell-" + section + "-bottom.png"
-                    grabImage(findChild(panel, "panel-surface")).save(OUTPUT + "/" + bottom)
-                    captures.push(bottom)
-                    scroller.contentY = 0
-                    wait(50)
+                captureViews(section, captures)
+                if (section === "alerts") {
+                    settings.alertsAdvanced = true
+                    captureViews("alerts-advanced", captures)
+                    settings.alertsAdvanced = false
                 }
             }
             console.info("CAPTURE_FILES " + JSON.stringify(captures))
@@ -95,10 +113,15 @@ Item {
                              "SECTIONS": SECTIONS, "OUTPUT": str(output)}.items():
             preview = preview.replace(token, json.dumps(value))
         (root / "tst_Preview.qml").write_text(preview, encoding="utf-8")
-        env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software",
-                   QML_XHR_ALLOW_FILE_READ="1")
-        for section in SECTIONS:
-            (output / f"quickshell-{section}-bottom.png").unlink(missing_ok=True)
+        env = dict(os.environ, QML_XHR_ALLOW_FILE_READ="1")
+        if renderer == "opengl":
+            env.update(QT_QPA_PLATFORM="xcb", QSG_RHI_BACKEND="opengl", LIBGL_ALWAYS_SOFTWARE="1")
+            env.pop("QT_QUICK_BACKEND", None)
+        else:
+            env.update(QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software")
+        for section in (*SECTIONS, "alerts-advanced"):
+            for position in ("middle", "bottom"):
+                (output / f"quickshell-{section}-{position}.png").unlink(missing_ok=True)
         result = subprocess.run([runner, "-input", str(root), "-import", str(root)], env=env,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         print(result.stdout, end="")
@@ -106,7 +129,7 @@ Item {
         marker = "CAPTURE_FILES "
         capture_line = next(line for line in result.stdout.splitlines() if marker in line)
         captures = json.loads(capture_line.split(marker, 1)[1])
-        expected = {f"quickshell-{section}.png" for section in SECTIONS}
+        expected = {f"quickshell-{section}.png" for section in (*SECTIONS, "alerts-advanced")}
         if not expected.issubset(captures):
             raise RuntimeError("Qt did not capture every Settings section.")
         for name in captures:
@@ -151,19 +174,36 @@ def render_windows(output):
              patch.object(panel, "isActiveWindow", return_value=True):
             panel.show()
             panel.configure()
+            def capture_views(name):
+                scroll = panel.settings_scroll.verticalScrollBar()
+                scroll.setValue(0)
+                QTest.qWait(150)
+                assert panel.grab().save(str(output / f"windows-{name}.png"))
+                maximum = scroll.maximum()
+                print(f"Windows {name} scroll range: {maximum}")
+                visible_height = panel.settings_scroll.viewport().height() - panel.settings_navigation.height()
+                if maximum > visible_height:
+                    scroll.setValue(maximum // 2)
+                    QTest.qWait(150)
+                    assert panel.grab().save(str(output / f"windows-{name}-middle.png"))
+                if maximum > 0:
+                    scroll.setValue(maximum)
+                    QTest.qWait(150)
+                    assert panel.grab().save(str(output / f"windows-{name}-bottom.png"))
+                scroll.setValue(0)
+                QTest.qWait(50)
+
+            for name in (*SECTIONS, "alerts-advanced"):
+                for position in ("middle", "bottom"):
+                    (output / f"windows-{name}-{position}.png").unlink(missing_ok=True)
             for section in SECTIONS:
-                (output / f"windows-{section}-bottom.png").unlink(missing_ok=True)
                 panel.settings_view.select_section(section)
                 QTest.qWait(150)
-                assert panel.grab().save(str(output / f"windows-{section}.png"))
-                scroll = panel.settings_scroll.verticalScrollBar()
-                print(f"Windows {section} scroll range: {scroll.maximum()}")
-                if scroll.maximum() > 0:
-                    scroll.setValue(scroll.maximum())
-                    QTest.qWait(150)
-                    assert panel.grab().save(str(output / f"windows-{section}-bottom.png"))
-                    scroll.setValue(0)
-                    QTest.qWait(50)
+                capture_views(section)
+                if section == "alerts":
+                    panel.settings_view.notification_advanced_button.setChecked(True)
+                    capture_views("alerts-advanced")
+                    panel.settings_view.notification_advanced_button.setChecked(False)
             panel.hide()
     finally:
         case.doCleanups()
@@ -172,12 +212,14 @@ def render_windows(output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", choices=("quickshell", "windows", "all"), default="quickshell")
+    parser.add_argument("--qml-renderer", choices=("software", "opengl"), default="software",
+                        help="OpenGL uses an X display and includes the production alpha fade.")
     parser.add_argument("--output", type=Path, default=PROJECT / "docs/screenshots/settings-submenus")
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     if args.platform in ("quickshell", "all"):
-        render_quickshell(output)
+        render_quickshell(output, args.qml_renderer)
     if args.platform in ("windows", "all"):
         render_windows(output)
     print(f"Rendered sample-data Settings previews in {output}")
