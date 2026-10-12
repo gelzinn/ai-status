@@ -3000,6 +3000,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
     }
 
+    private static func checkResources() throws {
+        _ = NSApplication.shared
+        Assets.registerFonts()
+        guard Assets.image() != nil,
+              ["GeistMono-Regular.ttf", "GeistMono-Medium.ttf"].allSatisfy({ file in
+                  Assets.url("fonts/" + file).map { FileManager.default.isReadableFile(atPath: $0.path) } == true
+              }) else {
+            throw AppError.message("Bundled app artwork or Geist Mono is missing.")
+        }
+        _ = try PanelIcons.load()
+    }
+
+    #if !AI_STATUS_SMOKE
+    private static func smoke() throws {
+        guard !CommandLine.arguments.contains("--preview-directory") else {
+            throw AppError.message("Visual previews require a development build with -D AI_STATUS_SMOKE.")
+        }
+        try checkResources()
+        // Exercise the shipped SwiftUI host and Objective-C menu callbacks
+        // without a daemon, credentials, notifications or network access.
+        let host = NSHostingController(rootView: PanelView(model: Model()))
+        host.view.frame = NSRect(x: 0, y: 0, width: 380, height: 200)
+        host.view.layoutSubtreeIfNeeded()
+        guard AppDelegate.instancesRespond(to: #selector(AppDelegate.applicationDidFinishLaunching(_:))),
+              PanelSelectMenuActions.instancesRespond(to: #selector(PanelSelectMenuActions.select(_:))) else {
+            throw AppError.message("Native application or menu callbacks are unavailable.")
+        }
+        print("AI Status macOS smoke OK: native host, resources, fonts, panel icons, application and menu callbacks")
+    }
+    #endif
+
+    // Full interaction fixtures and PNG previews belong to CI/development
+    // builds. Their sample data and helper code never enter the installed app.
+    #if AI_STATUS_SMOKE
     private static func smoke() throws {
         var previewDirectory: URL?
         if let index = CommandLine.arguments.firstIndex(of: "--preview-directory") {
@@ -3030,12 +3064,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
          "author":"gelzin.com","license":"MIT","github":"https://github.com/gelzinn/ai-status","documentation":"https://github.com/gelzinn/ai-status#readme","issues":"https://github.com/gelzinn/ai-status/issues/new"},
          "version":{"current":"0.10.0","latest":null,"has_update":false}}
         """#
-        _ = NSApplication.shared
-        Assets.registerFonts()
-        guard Assets.image() != nil, Assets.url("fonts/GeistMono-Regular.ttf").map({ FileManager.default.isReadableFile(atPath: $0.path) }) == true else {
-            throw AppError.message("Bundled app artwork or Geist Mono is missing.")
-        }
-        _ = try PanelIcons.load()
+        try checkResources()
         try smokeFocusInput()
         try smokeMenuTracking()
         try smokeSettingsSelects(sample: sample)
@@ -4025,4 +4054,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             }
         }
     }
+    #endif
 }

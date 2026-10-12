@@ -38,6 +38,7 @@ EXACT = {
     "tests/test_ci_selection.py": set(),  # Always tested by pr-metadata.
     "tests/test_installer.py": {"installer"},
     "tests/test_macos_installer.py": {"macos-installer"},
+    "tests/test_macos_size.py": {"macos-installer", "macos-native"},
     "tests/test_release_flow.py": {"release-tests"},
     "tests/test_release_config.cjs": {"release-config"},
     "tests/test_changelog.mjs": {"web-build"},

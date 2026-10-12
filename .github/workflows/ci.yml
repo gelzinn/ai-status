@@ -106,9 +106,11 @@ jobs:
       - name: Test Linux stable installs and updates
         if: needs.pr-metadata.outputs.installer == 'true'
         run: python3 -m unittest discover -s tests -p 'test_installer.py' -v
-      - name: Test macOS stable installs and updates
+      - name: Test macOS installs, updates and size reporting
         if: needs.pr-metadata.outputs.macos-installer == 'true'
-        run: python3 -m unittest discover -s tests -p 'test_macos_installer.py' -v
+        run: |
+          python3 -m unittest discover -s tests -p 'test_macos_installer.py' -v
+          python3 -m unittest discover -s tests -p 'test_macos_size.py' -v
       - name: Test release metadata, archives and publication recovery
         if: needs.pr-metadata.outputs.release-tests == 'true'
         run: python3 -m unittest discover -s tests -p 'test_release_flow.py' -v
@@ -122,15 +124,54 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Test the macOS backend and read-only Keychain adapter
-        run: python3 -m unittest discover -s packages/lib/tests -p 'test_macos*.py' -v
-      - name: Build and smoke-test the native app without provider requests
+      - name: Build and verify the production app without provider requests
         run: |
           AI_STATUS_TEST_HOME="$RUNNER_TEMP/ai-status-macos-home"
           mkdir -p "$AI_STATUS_TEST_HOME"
           HOME="$AI_STATUS_TEST_HOME" bash packages/lib/install-macos.sh --no-start --no-interactive
-          HOME="$AI_STATUS_TEST_HOME" "$AI_STATUS_TEST_HOME/Applications/AI Status.app/Contents/MacOS/AIStatus" --check-runtime
-          HOME="$AI_STATUS_TEST_HOME" "$AI_STATUS_TEST_HOME/Applications/AI Status.app/Contents/MacOS/AIStatus" --smoke --preview-directory "$RUNNER_TEMP/macos-preview"
+          AI_STATUS_APP="$AI_STATUS_TEST_HOME/.local/share/ai-status/AI Status.app"
+          codesign --verify --strict "$AI_STATUS_APP"
+          HOME="$AI_STATUS_TEST_HOME" "$AI_STATUS_APP/Contents/MacOS/AIStatus" --check-runtime
+          HOME="$AI_STATUS_TEST_HOME" "$AI_STATUS_APP/Contents/MacOS/AIStatus" --smoke
+      - name: Compare production size with the previous build settings
+        run: |
+          AI_STATUS_TEST_HOME="$RUNNER_TEMP/ai-status-macos-home"
+          AI_STATUS_INSTALLED="$AI_STATUS_TEST_HOME/.local/share/ai-status"
+          AI_STATUS_APP="$AI_STATUS_INSTALLED/AI Status.app"
+          AI_STATUS_ARCH="$(uname -m)"
+          swiftc -O -D AI_STATUS_SMOKE -parse-as-library -target "$AI_STATUS_ARCH-apple-macosx13.0" \
+            -framework Cocoa -framework SwiftUI -framework UserNotifications packages/lib/macos/AIStatus.swift \
+            -o "$RUNNER_TEMP/AIStatus-baseline"
+          codesign --force --sign - "$RUNNER_TEMP/AIStatus-baseline"
+          python3 packages/lib/macos/size_report.py \
+            --executable "$AI_STATUS_APP/Contents/MacOS/AIStatus" \
+            --bundle "$AI_STATUS_APP" --installed "$AI_STATUS_INSTALLED" \
+            --baseline-executable "$RUNNER_TEMP/AIStatus-baseline" \
+            --architecture "$AI_STATUS_ARCH" --compiler "$(swiftc --version)" \
+            --report "$RUNNER_TEMP/macos-size-report.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-size-report
+          path: ${{ runner.temp }}/macos-size-report.txt
+          if-no-files-found: warn
+      - name: Test the macOS backend and read-only Keychain adapter
+        run: python3 -m unittest discover -s packages/lib/tests -p 'test_macos*.py' -v
+      - name: Build and run developer smoke fixtures in a separate app
+        run: |
+          AI_STATUS_TEST_HOME="$RUNNER_TEMP/ai-status-macos-home"
+          AI_STATUS_FIXTURE_APP="$RUNNER_TEMP/AI Status Smoke.app"
+          AI_STATUS_ARCH="$(uname -m)"
+          cp -R "$AI_STATUS_TEST_HOME/.local/share/ai-status/AI Status.app" "$AI_STATUS_FIXTURE_APP"
+          swiftc -Osize -whole-module-optimization -Xlinker -dead_strip -D AI_STATUS_SMOKE \
+            -parse-as-library -target "$AI_STATUS_ARCH-apple-macosx13.0" \
+            -framework Cocoa -framework SwiftUI -framework UserNotifications packages/lib/macos/AIStatus.swift \
+            -o "$AI_STATUS_FIXTURE_APP/Contents/MacOS/AIStatus"
+          strip -u -r "$AI_STATUS_FIXTURE_APP/Contents/MacOS/AIStatus"
+          codesign --force --sign - "$AI_STATUS_FIXTURE_APP"
+          codesign --verify --strict "$AI_STATUS_FIXTURE_APP"
+          HOME="$AI_STATUS_TEST_HOME" "$AI_STATUS_FIXTURE_APP/Contents/MacOS/AIStatus" \
+            --smoke --preview-directory "$RUNNER_TEMP/macos-preview"
       - uses: actions/upload-artifact@v4
         with:
           name: macos-panel-preview
