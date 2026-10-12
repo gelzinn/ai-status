@@ -175,7 +175,9 @@ Ui.Panel {
         open: root.opened
         focusTarget: keyCatcher
         contentWidth: panel.fittedContentWidth(Style.space(380))
-        contentHeight: panel.fittedContentHeight(header.height + panel.padding + Style.space(1) + scroller.contentHeight + (footer.visible ? footer.height : -panel.padding), Style.space(680))
+        contentHeight: panel.fittedContentHeight(header.height + panel.padding + Style.space(1) + scroller.contentHeight
+            + (settingsNavigation.visible && !scroller.supportsMask ? settingsNavigation.height : 0)
+            + (footer.visible ? footer.height : -panel.padding), Style.space(680))
 
         Ui.PanelKeyCatcher {
             id: keyCatcher

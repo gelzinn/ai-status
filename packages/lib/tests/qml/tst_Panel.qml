@@ -1119,6 +1119,12 @@ Item {
                     compare(after.pixel(Math.round(position.x + x), Math.round(position.y + y)), before.pixel(Math.round(position.x + x), Math.round(position.y + y)))
             }
         }
+        function test_short_general_section_fits_without_vertical_overflow() {
+            panel.configure()
+            wait(20)
+            const scroller = findChild(panel, "panel-scroller")
+            verify(scroller.contentHeight <= scroller.height + 1)
+        }
         function test_separator_reaches_sides_and_only_refresh_icon_spins() {
             const surface = findChild(panel, "panel-surface")
             const divider = findChild(panel, "panel-divider")

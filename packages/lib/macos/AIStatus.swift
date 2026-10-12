@@ -676,7 +676,13 @@ final class Model: ObservableObject {
     var updateGuide: UpdateGuide { snapshot?.update ?? .manualMacOS }
     var panelHeight: CGFloat {
         switch page {
-        case .settings: return 680
+        case .settings:
+            switch settingsSection {
+            case .general: return 320
+            case .appearance: return 480
+            case .about: return 600
+            case .alerts, .providers, .guide: return 680
+            }
         case .update: return 600
         case .credits: return min(680, CGFloat(310 + (creditProvider?.resetCredits?.rows.count ?? 0) * 82))
         case .cloudCredits: return 660
@@ -790,6 +796,7 @@ final class Model: ObservableObject {
         guard page == .settings, !settingsSaving else { return }
         if section == .alerts && invalidAdvancedNotifications { notificationAdvancedExpanded = true }
         settingsSection = section
+        changed?()
     }
     func toggleProvider(_ provider: String) {
         if draft.enabled.contains(provider) { draft.enabled.remove(provider) } else { draft.enabled.insert(provider) }
@@ -1293,9 +1300,8 @@ struct SettingsPage: View {
                           ("show_metric", "Limit name"), ("show_pct", "Usage value")]
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if model.settingsSection != .alerts {
-                SettingsHeading(title: model.settingsSection.title,
-                                detail: model.settingsSection == .general ? nil : model.settingsSection.detail)
+            if model.settingsSection != .alerts && model.settingsSection != .general {
+                SettingsHeading(title: model.settingsSection.title, detail: model.settingsSection.detail)
             }
             switch model.settingsSection {
             case .general:
@@ -1393,7 +1399,7 @@ struct NotificationLevelsView: View {
                     Text("\(value)%").frame(width: 42, alignment: .trailing).foregroundColor(Palette.bright)
                     Slider(value: Binding(get: {
                         Double(model.notificationLevels.indices.contains(index) ? model.notificationLevels[index] : value)
-                    }, set: { model.setNotificationLevel(index, Int($0.rounded())) }), in: 1...100, step: 1) {
+                    }, set: { model.setNotificationLevel(index, Int($0.rounded())) }), in: 1...100) {
                         Text("Alert level \(index + 1)")
                     }.labelsHidden().modifier(PanelFocusTarget()).accessibilityValue("\(value)%")
                     Button("Remove") {
@@ -1445,12 +1451,16 @@ struct NotificationSettingsView: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
                 SettingsHeading(title: "Quota notifications")
-                Toggle("Enable quota alerts", isOn: Binding(get: { model.draft.notifications.enabled }, set: {
+                Toggle(isOn: Binding(get: { model.draft.notifications.enabled }, set: {
                     model.draft.notifications.enabled = $0; model.draft.saved = false
-                })).toggleStyle(.switch).modifier(PanelFocusTarget())
-                Toggle("Pause for 1 hour", isOn: Binding(get: {
+                })) {
+                    Text("Enable quota alerts").frame(maxWidth: .infinity, alignment: .leading)
+                }.toggleStyle(.switch).modifier(PanelFocusTarget())
+                Toggle(isOn: Binding(get: {
                     model.draft.notifications.mutedUntil > Date().timeIntervalSince1970
-                }, set: { model.muteNotifications($0 ? 3600 : 0) })).toggleStyle(.switch).modifier(PanelFocusTarget())
+                }, set: { model.muteNotifications($0 ? 3600 : 0) })) {
+                    Text("Pause for 1 hour").frame(maxWidth: .infinity, alignment: .leading)
+                }.toggleStyle(.switch).modifier(PanelFocusTarget())
                 if model.draft.notifications.mutedUntil > Date().timeIntervalSince1970 {
                     Text("Paused until " + Date(timeIntervalSince1970: model.draft.notifications.mutedUntil).formatted(date: .abbreviated, time: .shortened))
                         .font(.custom("GeistMono-Regular", size: 11))
@@ -1891,11 +1901,6 @@ struct AboutPage: View {
     }
 }
 
-struct PanelScrollPreference: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
 struct PanelScrollMask: View {
     let fading: Bool
     var body: some View {
@@ -1912,7 +1917,6 @@ struct PanelScrollMask: View {
 
 struct PanelScrollContent: View {
     @ObservedObject var model: Model
-    @State private var scrollOffset: CGFloat = 0
     @State private var focusedID = ""
     var body: some View {
         GeometryReader { viewport in
@@ -1942,13 +1946,8 @@ struct PanelScrollContent: View {
                     }.environment(\.panelScrollFocusTracking, true)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.bottom, 18)
                         .padding(.top, model.page == .settings ? SettingsNavigation.height + 18 : 18)
-                        .background(GeometryReader { geometry in
-                            Color.clear.preference(key: PanelScrollPreference.self, value: geometry.frame(in: .named("panel-scroll")).minY)
-                        })
                         .id("page-top")
-                }.coordinateSpace(name: "panel-scroll")
-                    .mask(PanelScrollMask(fading: model.page == .settings && scrollOffset > 0.5))
-                    .onPreferenceChange(PanelScrollPreference.self) { scrollOffset = max(0, -$0) }
+                }.mask(PanelScrollMask(fading: model.page == .settings))
                     .onPreferenceChange(PanelFocusPreference.self) { positions in
                         guard let focus = positions.first else { focusedID = ""; return }
                         guard focus.id != focusedID, focus.frame.height > 0 else { return }
@@ -1970,7 +1969,7 @@ struct PanelScrollContent: View {
                         scroll.scrollTo("page-top", anchor: .top)
                     }
             }
-        }
+        }.coordinateSpace(name: "panel-scroll")
     }
 }
 
@@ -2562,6 +2561,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         settings["order"] = order
         settings["enabled"] = Array(order.prefix(4))
         document["settings"] = settings
+        if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, !version.isEmpty {
+            if var metadata = document["version"] as? [String: Any] {
+                metadata["current"] = version
+                document["version"] = metadata
+            }
+            if var metadata = document["about"] as? [String: Any] {
+                metadata["version"] = version
+                document["about"] = metadata
+            }
+        }
         let model = Model()
         model.accept(try JSONSerialization.data(withJSONObject: document))
         model.showSettings()
