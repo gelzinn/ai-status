@@ -41,7 +41,7 @@ class ProductVersionTests(unittest.TestCase):
         (self.lib / "package.json").write_text(json.dumps({"version": "8.8.8"}))
         result = self.run_core()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), {"version": "1.2.3", "root": str(self.root), "lib": str(self.lib)})
+        self.assertEqual(json.loads(result.stdout), {"version": "1.2.3", "root": str(self.root.resolve()), "lib": str(self.lib.resolve())})
 
     def test_legacy_only_installation_keeps_its_original_version(self):
         (self.lib / "VERSION").write_text("0.9.0\n")
