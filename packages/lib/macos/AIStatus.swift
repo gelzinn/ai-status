@@ -984,12 +984,72 @@ struct PanelSelectOption<Value: Hashable>: Identifiable {
     var provider: String? = nil
     var logoPath = ""
     var id: Value { value }
+}
 
-    @ViewBuilder var label: some View {
-        if let provider = provider {
-            Label { Text(title) } icon: { ProviderLogo(provider: provider, path: logoPath) }
-        } else { Text(title) }
+final class PanelSelectMenuActions: NSObject {
+    private let actions: [() -> Void]
+    init(actions: [() -> Void]) { self.actions = actions }
+    @objc func select(_ item: NSMenuItem) {
+        guard actions.indices.contains(item.tag) else { return }
+        actions[item.tag]()
     }
+}
+
+final class PanelSelectMenuPresenter: ObservableObject {
+    weak var anchor: NSView?
+
+    static func makeMenu<Value: Hashable>(title: String, options: [PanelSelectOption<Value>],
+                                         selection: Binding<Value>, placeholder: String) -> (NSMenu, PanelSelectMenuActions) {
+        let menu = NSMenu(title: title)
+        menu.autoenablesItems = false
+        menu.font = NSFont(name: "GeistMono-Regular", size: 13) ?? .monospacedSystemFont(ofSize: 13, weight: .regular)
+        let target = PanelSelectMenuActions(actions: options.map { option in { selection.wrappedValue = option.value } })
+        for (index, option) in options.enumerated() {
+            let item = NSMenuItem(title: option.title, action: #selector(PanelSelectMenuActions.select(_:)), keyEquivalent: "")
+            item.tag = index
+            item.target = target
+            item.state = option.value == selection.wrappedValue ? .on : .off
+            if let provider = option.provider, let image = Assets.image(provider: provider, path: option.logoPath)?.copy() as? NSImage {
+                image.size = NSSize(width: 16, height: 16)
+                image.isTemplate = false
+                item.image = image
+            }
+            menu.addItem(item)
+        }
+        if options.isEmpty {
+            let item = NSMenuItem(title: placeholder, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+        return (menu, target)
+    }
+
+    func present<Value: Hashable>(title: String, options: [PanelSelectOption<Value>],
+                                 selection: Binding<Value>, placeholder: String) {
+        guard let anchor = anchor, anchor.window != nil else { return }
+        let (menu, target) = Self.makeMenu(title: title, options: options, selection: selection, placeholder: placeholder)
+        menu.minimumWidth = anchor.bounds.width
+        // popUp tracks synchronously; retain the action target until it ends.
+        withExtendedLifetime(target) {
+            _ = menu.popUp(positioning: nil, at: NSPoint(x: anchor.bounds.minX, y: anchor.bounds.maxY + 4), in: anchor)
+        }
+    }
+}
+
+final class PanelSelectAnchorView: NSView {
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+struct PanelSelectMenuAnchor: NSViewRepresentable {
+    let presenter: PanelSelectMenuPresenter
+    func makeNSView(context: Context) -> PanelSelectAnchorView {
+        let view = PanelSelectAnchorView()
+        view.setAccessibilityElement(false)
+        presenter.anchor = view
+        return view
+    }
+    func updateNSView(_ view: PanelSelectAnchorView, context: Context) { presenter.anchor = view }
 }
 
 struct PanelSelect<Value: Hashable>: View {
@@ -997,6 +1057,7 @@ struct PanelSelect<Value: Hashable>: View {
     let options: [PanelSelectOption<Value>]
     @Binding var selection: Value
     var placeholder = "Choose an option"
+    @StateObject private var presenter = PanelSelectMenuPresenter()
     @State private var hovering = false
     @State private var focusID = UUID().uuidString
     @FocusState private var focused: Bool
@@ -1005,15 +1066,13 @@ struct PanelSelect<Value: Hashable>: View {
 
     private var selected: PanelSelectOption<Value>? { options.first { $0.value == selection } }
 
+    private func openMenu() {
+        guard enabled else { return }
+        presenter.present(title: title, options: options, selection: $selection, placeholder: placeholder)
+    }
+
     var body: some View {
-        Menu {
-            // A Picker inside the native menu keeps checked items and standard
-            // keyboard selection while the closed face uses the panel's style.
-            Picker(title, selection: $selection) {
-                if options.isEmpty { Text(placeholder).tag(selection) }
-                ForEach(options) { option in option.label.tag(option.value) }
-            }.labelsHidden().pickerStyle(.inline)
-        } label: {
+        Button(action: openMenu) {
             HStack(spacing: 8) {
                 if let provider = selected?.provider {
                     ProviderLogo(provider: provider, path: selected?.logoPath ?? "")
@@ -1026,8 +1085,13 @@ struct PanelSelect<Value: Hashable>: View {
             .padding(.horizontal, 8).frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32)
             .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden)
+        .buttonStyle(.plain).frame(maxWidth: .infinity).frame(height: 32)
         .id(focusID).focused($focused)
+        .onMoveCommand { direction in
+            if focused && (direction == .up || direction == .down) { openMenu() }
+        }
+        .onCommand(#selector(NSResponder.insertNewline(_:))) { if focused { openMenu() } }
+        .background(PanelSelectMenuAnchor(presenter: presenter).allowsHitTesting(false))
         .background(PanelFocusGeometry(id: focusID, focused: focused))
         .background(RoundedRectangle(cornerRadius: 6)
             .fill(hovering && enabled ? Palette.bright.opacity(0.045) : Palette.surface))
@@ -2451,6 +2515,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         _ = try PanelIcons.load()
         try smokeFocusInput()
         try smokeMenuTracking()
+        try smokeSettingsSelects(sample: sample)
         let model = Model()
         model.accept(Data(sample.utf8))
         guard let snapshot = model.snapshot, snapshot.providers.count == 2,
@@ -2892,6 +2957,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         guard tracking.isTracking else { throw AppError.message("An unrelated menu ended select keyboard handling.") }
         center.post(name: NSMenu.didEndTrackingNotification, object: menu)
         guard !tracking.isTracking else { throw AppError.message("Closing a select left panel shortcuts blocked.") }
+    }
+
+    private static func smokeSettingsSelects(sample: String) throws {
+        let model = Model()
+        model.accept(Data(sample.utf8))
+        model.showSettings()
+        let choices = model.choices
+        guard choices.count > 1 else { throw AppError.message("Select menu fixture has no alternate provider limit.") }
+        let options = choices.map {
+            PanelSelectOption(value: $0.selection, title: $0.label, provider: $0.provider, logoPath: $0.logoPath)
+        }
+        let binding = Binding(get: { model.draft.selected }, set: { model.draft.selected = $0; model.draft.saved = false })
+        let first = choices[0]
+        let sourceImage = Assets.image(provider: first.provider, path: first.logoPath)
+        let sourceSize = sourceImage?.size
+        let (menu, target) = PanelSelectMenuPresenter.makeMenu(title: "Active provider & limit", options: options,
+                                                             selection: binding, placeholder: "Choose a provider and limit")
+        guard menu.items.map(\.title) == choices.map(\.label),
+              menu.items.filter({ $0.state == .on }).count == 1,
+              menu.items[0].state == .on,
+              menu.items.allSatisfy({ $0.image?.size == NSSize(width: 16, height: 16) }),
+              sourceImage?.size == sourceSize else {
+            throw AppError.message("Native select options, checked selection or resized provider artwork are invalid.")
+        }
+        model.draft.saved = true
+        let savedSelection = model.snapshot?.selected
+        withExtendedLifetime(target) { menu.performActionForItem(at: 1) }
+        guard model.draft.selected == choices[1].selection, !model.draft.saved,
+              model.snapshot?.selected == savedSelection else {
+            throw AppError.message("A native select action did not update only its pending draft.")
+        }
+        let usageBinding = Binding(get: { model.draft.usageDisplay }, set: { model.draft.usageDisplay = $0; model.draft.saved = false })
+        let (usageMenu, usageTarget) = PanelSelectMenuPresenter.makeMenu(title: "Usage display", options: [
+            PanelSelectOption(value: "used", title: "Used"), PanelSelectOption(value: "remaining", title: "Remaining")
+        ], selection: usageBinding, placeholder: "Choose an option")
+        withExtendedLifetime(usageTarget) { usageMenu.performActionForItem(at: 1) }
+        guard model.draft.usageDisplay == "remaining", usageMenu.items.allSatisfy({ $0.image == nil }) else {
+            throw AppError.message("A text-only native select lost its value or added provider artwork.")
+        }
+        let (emptyMenu, emptyTarget) = PanelSelectMenuPresenter.makeMenu(title: "Active provider & limit", options: [],
+                                                                       selection: binding, placeholder: "Choose a provider and limit")
+        try withExtendedLifetime(emptyTarget) {
+            guard emptyMenu.numberOfItems == 1, emptyMenu.items[0].title == "Choose a provider and limit",
+                  !emptyMenu.items[0].isEnabled else {
+                throw AppError.message("An empty provider select did not show its disabled placeholder.")
+            }
+        }
     }
 
     private static func smokeCloudCredits(sample: String, directory: URL?) throws {
