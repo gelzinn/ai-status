@@ -1362,8 +1362,14 @@ class DesktopTests(IsolatedState):
             self.wait_for_update()
             self.assertEqual(updater.call_count, 2)
             self.assertTrue(self.dashboard.update_view.completed)
-            self.assertTrue(self.dashboard.update_view.action.isEnabled())  # Setup can be cancelled.
+            self.assertTrue(self.dashboard.update_view.action.isEnabled())
+            self.assertEqual(self.dashboard.update_view.action.text(), "Done")
             self.assertIn("verified installer is open", self.dashboard.update_view.status.text())
+            self.dashboard.update_view.action.click()
+            self.assertFalse(self.dashboard.viewing_updates())
+            self.assertEqual(updater.call_count, 2)  # Done never opens a second setup wizard.
+            self.dashboard.show_updates()  # Setup can be cancelled; a later action can retry.
+            self.assertEqual(self.dashboard.update_view.action.text(), self.update_guide()["actionLabel"])
 
     def test_update_guide_command_can_be_copied(self):
         guide = self.update_guide(False)

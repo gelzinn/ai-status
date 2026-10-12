@@ -66,8 +66,8 @@ Item {
         snapshot.update = """ + json.dumps(guide) + """
         Plugin.Model.snapshot = snapshot
         panel.open()
-        panel.showUpdate()
     }
+    function guide() { panel.showUpdate() }
     function command() { findUpdatePage().commandExpanded = true }
     function findUpdatePage() {
         function find(item) {
@@ -105,6 +105,10 @@ Item {
         Plugin.Model.updateMessage = "Checking the latest stable release…"
     }
     function current() {
+        const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+        snapshot.version.latest = snapshot.version.current
+        snapshot.version.has_update = false
+        Plugin.Model.snapshot = snapshot
         Plugin.Model.updateStage = "complete"
         findUpdatePage().commandExpanded = false
         Plugin.Model.updateMessage = "AI Status is already up to date."
@@ -120,7 +124,7 @@ Item {
         item = view.rootObject()
         QMetaObject.invokeMethod(item, "initialize", Qt.DirectConnection)
         surface = item.findChild(QQuickItem, "panel-surface")
-        stages = [(None, "linux-guide.png"), ("command", "linux-command.png"),
+        stages = [(None, "linux-available.png"), ("guide", "linux-guide.png"), ("command", "linux-command.png"),
                   ("checking", "linux-checking.png"), ("opening", "linux-opening.png"),
                   ("terminal", "linux-terminal.png"), ("error", "linux-error.png"),
                   ("retry", "linux-retry.png"), ("current", "linux-up-to-date.png")]

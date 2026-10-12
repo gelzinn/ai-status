@@ -60,7 +60,6 @@ def main():
                     patch.object(guide_module, "run_update", side_effect=reject_update), \
                     patch.object(fetch, "check_for_updates", side_effect=reject_update):
                 dashboard.version.setText("v0.15.0")
-                dashboard.show_updates()
                 view = dashboard.update_view
 
                 def capture(name):
@@ -73,6 +72,11 @@ def main():
                         raise RuntimeError("Could not save " + str(filename))
                     print(filename)
 
+                dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
+                    {"type": "weekly", "percentage": 23, "reset_in_seconds": 583200}]}])
+                dashboard.show_dashboard()
+                capture("windows-available")
+                dashboard.show_updates()
                 capture("windows-guide")
                 view.running = True
                 view.update_action()

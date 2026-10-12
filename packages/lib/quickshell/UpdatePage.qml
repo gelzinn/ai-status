@@ -36,7 +36,8 @@ Column {
         Label { text: root.guide.title || "A new version is available"; font.bold: true }
         Label {
             objectName: "update-versions"
-            text: "v" + (root.version.current || "—") + "  →  v" + (root.version.latest || "—")
+            text: "v" + (root.version.current || "—") +
+                  (root.version.latest && root.version.latest !== root.version.current ? "  →  v" + root.version.latest : "")
             opacity: 0.7
         }
         Label { text: root.guide.description || "See the update guide for your installation." }

@@ -306,7 +306,7 @@ class UpdateActionTests(unittest.TestCase):
 
         events = []
         with patch.object(Path, "home", return_value=self.root), \
-                patch.object(sys, "platform", "darwin"), patch.object(updates.os, "setpgrp") as detach, \
+                patch.object(sys, "platform", "darwin"), patch.object(updates.os, "setpgrp", create=True) as detach, \
                 patch.object(updates, "request_bytes", return_value=checksum), \
                 patch.object(updates, "_download_macos", side_effect=lambda url, path, progress: path.write_bytes(payload)), \
                 patch.object(updates, "_stream_process", side_effect=install):

@@ -1227,6 +1227,7 @@ class UpdateWorker(QObject):
 
 class UpdateView(QWidget):
     update_requested = Signal()
+    done_requested = Signal()
 
     def __init__(self):
         super().__init__()
@@ -1324,7 +1325,7 @@ class UpdateView(QWidget):
         self.action = QPushButton()
         self.action.setObjectName("update-action")
         self.action.setStyleSheet("color: #89b4fa; border: 1px solid #294666; border-radius: 6px; padding: 8px;")
-        self.action.clicked.connect(self.update_requested)
+        self.action.clicked.connect(self.request_action)
         footer.addWidget(self.action)
 
     def set_guide(self, guide, version):
@@ -1359,12 +1360,19 @@ class UpdateView(QWidget):
         self.action.setVisible(available or self.running or self.failed)
         self.action.setEnabled(available and not self.running)
         self.action.setText("Updating…" if self.running else
-                            "Retry update" if self.failed else self.guide.get("actionLabel", "Update now"))
+                            "Retry update" if self.failed else "Done" if self.completed else
+                            self.guide.get("actionLabel", "Update now"))
         self.spinner.set_running(self.running)
         if not self.running:
             self.progress_bar.hide()
             self.percent.hide()
             self.transferred.hide()
+
+    def request_action(self):
+        if self.completed:
+            self.done_requested.emit()
+        else:
+            self.update_requested.emit()
 
     def show_progress(self, event):
         event = {"message": event} if isinstance(event, str) else event
@@ -1520,6 +1528,7 @@ class Dashboard(QWidget):
         self.update_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.update_view = UpdateView()
         self.update_view.update_requested.connect(self.start_update)
+        self.update_view.done_requested.connect(self.show_usage)
         self.update_scroll.setWidget(self.update_view)
         self.pages.addWidget(self.update_scroll)
         self.settings_footer = QWidget()
@@ -1694,6 +1703,10 @@ class Dashboard(QWidget):
     def show_updates(self):
         if not self.viewing_updates():
             self.usage_scroll_position = self.scroll.verticalScrollBar().value()
+            if self.update_view.completed and not self.updating:
+                self.update_view.completed = False
+                self.update_view.status.clear()
+                self.update_view.status.hide()
         self.reset_provider = None
         self.monetary_credit = None
         self.update_view.set_guide(updates.update_guide(), fetch.get_version_info())
