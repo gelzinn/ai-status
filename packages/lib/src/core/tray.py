@@ -1,5 +1,6 @@
 """Desktop adapter. The Waybar daemon and CLI do not import Qt."""
 import logging
+import re
 from functools import lru_cache
 from pathlib import Path
 import subprocess
@@ -9,11 +10,11 @@ import time
 import uuid
 
 from PySide6.QtCore import QEasingCurve, QEvent, QModelIndex, QObject, QPoint, QPointF, QRectF, QLockFile, QThread, QTimer, Qt, QUrl, Signal, QSize, QVariantAnimation
-from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen, QPixmap
+from PySide6.QtGui import QAction, QBrush, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen, QPixmap, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QGraphicsEffect, QHBoxLayout,
     QLabel, QLayout, QLineEdit, QListWidget, QListWidgetItem, QMenu,
-    QPushButton, QScrollArea, QSlider, QSizePolicy, QSpacerItem, QStackedWidget, QStyledItemDelegate, QStyle,
+    QProgressBar, QPushButton, QScrollArea, QSlider, QSizePolicy, QSpacerItem, QStackedWidget, QStyledItemDelegate, QStyle,
     QStyleOptionButton, QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
@@ -1914,8 +1915,119 @@ class AboutView(QWidget):
             layout.addWidget(button)
 
 
+class OperationSpinner(QWidget):
+    """The shared footer loader, with the same one-second rotation as QML."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(16, 16)
+        self.running = False
+        self.rotation = 0.0
+        self.spin = QVariantAnimation(self)
+        self.spin.setStartValue(0.0)
+        self.spin.setEndValue(360.0)
+        self.spin.setDuration(1000)
+        self.spin.setLoopCount(-1)
+        self.spin.valueChanged.connect(self.rotate)
+
+    def rotate(self, angle):
+        self.rotation = angle
+        self.update()
+
+    def set_running(self, running):
+        self.running = running
+        self.setVisible(running)
+        if running and self.isVisible():
+            if self.spin.state() != QVariantAnimation.State.Running:
+                self.spin.start()
+        else:
+            self.spin.stop()
+            self.rotate(0.0)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.set_running(self.running)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.spin.stop()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        rect = QRectF(self.rect())
+        center = rect.center()
+        painter.translate(center)
+        painter.rotate(self.rotation)
+        painter.translate(-center)
+        draw_control_icon(painter, rect, "loader-circle", color="#89b4fa")
+
+
+class UpdateResultIcon(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(16, 16)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.icon_name = "check"
+        self.color = "#89b4fa"
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        draw_control_icon(painter, QRectF(self.rect()), self.icon_name, color=self.color)
+
+
+def update_failure_label(message):
+    lower = message.lower()
+    if "checksum" in lower:
+        if "not match" in lower or "mismatch" in lower:
+            return "Verification failed: checksum mismatch"
+        if "could not download" in lower or "could not get" in lower:
+            return "Update failed: checksum unavailable"
+        if any(word in lower for word in ("no valid", "missing", "invalid")):
+            return "Update failed: invalid release checksum"
+    if "powershell" in lower and "unavailable" in lower:
+        return "Update failed: PowerShell unavailable"
+    if "runtime" in lower and "unavailable" in lower:
+        return "Update failed: updater unavailable"
+    if "no supported terminal" in lower or "terminal not found" in lower:
+        return "Update failed: Terminal unavailable"
+    if "terminal" in lower and "did not respond" in lower:
+        return "Update failed: Terminal not responding"
+    if "could not open terminal" in lower:
+        return "Update failed: could not open Terminal"
+    if "timed out" in lower:
+        return "Update failed: updater timed out"
+    if "download" in lower and "interrupted" in lower:
+        return "Download failed: transfer interrupted"
+    if "download" in lower and ("failed" in lower or "connection" in lower):
+        return "Download failed. Check your connection."
+    if "invalid" in lower and ("progress" in lower or "output" in lower):
+        return "Update failed: invalid updater response"
+    if "without confirmation" in lower or "missing completion" in lower or "before confirming" in lower:
+        return "Update failed: completion not confirmed"
+    return next((line.strip() for line in message.splitlines() if line.strip()), message)
+
+
+def release_notes_markdown(body):
+    lines, fence = [], ""
+    for line in body.splitlines():
+        marker = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if marker:
+            if not fence:
+                fence = marker[1]
+            elif marker[1][0] == fence[0] and len(marker[1]) >= len(fence):
+                fence = ""
+            lines.append(line)
+        elif fence:
+            lines.append(line)
+        else:
+            parts = re.split(r"(`+[^`]*`+)", line)
+            lines.append("".join(part if index % 2 else
+                                 part.replace("<", "&lt;").replace(">", "&gt;").replace("![", "[")
+                                 for index, part in enumerate(parts)))
+    return "\n".join(lines)
+
+
 class UpdateWorker(QObject):
-    progress = Signal(str)
+    progress = Signal(object)
     finished = Signal(str, bool)
 
     def work(self):
@@ -1932,6 +2044,7 @@ class UpdateWorker(QObject):
 
 class UpdateView(QWidget):
     update_requested = Signal()
+    done_requested = Signal()
 
     def __init__(self):
         super().__init__()
@@ -1949,15 +2062,28 @@ class UpdateView(QWidget):
         self.versions = plain_label("")
         self.versions.setWordWrap(True)
         layout.addWidget(self.versions)
-        optional = plain_label("You can keep using this version and update when you're ready.")
-        optional.setWordWrap(True)
-        layout.addWidget(optional)
-        self.description = plain_label("")
-        self.description.setWordWrap(True)
-        layout.addWidget(self.description)
-        self.steps = plain_label("")
-        self.steps.setWordWrap(True)
-        layout.addWidget(self.steps)
+        self.notes_heading = plain_label("What's new", "#eeeeee")
+        self.notes_heading.setObjectName("update-notes-heading")
+        self.notes_heading.hide()
+        layout.addWidget(self.notes_heading)
+        self.notes_body = QLabel()
+        self.notes_body.setObjectName("update-notes-body")
+        self.notes_body.setStyleSheet("color: #bbbbbb;")
+        self.notes_body.setTextFormat(Qt.TextFormat.RichText)
+        self.notes_body.setWordWrap(True)
+        self.notes_body.setMinimumWidth(1)
+        self.notes_body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse |
+                                               Qt.TextInteractionFlag.LinksAccessibleByMouse |
+                                               Qt.TextInteractionFlag.LinksAccessibleByKeyboard)
+        self.notes_body.linkActivated.connect(self.open_note_link)
+        self.notes_body.hide()
+        layout.addWidget(self.notes_body)
+        self.notes_markdown = ""
+        self.manual_toggle = QPushButton("Show terminal command")
+        self.manual_toggle.setStyleSheet("border: 1px solid #303030; border-radius: 6px; padding: 8px;")
+        self.manual_toggle.setCheckable(True)
+        self.manual_toggle.toggled.connect(self.toggle_command)
+        layout.addWidget(self.manual_toggle)
         self.command_box = QWidget()
         self.command_box.setObjectName("updateCommandBox")
         self.command_box.setStyleSheet("QWidget#updateCommandBox { background: #181818; border: 1px solid #303030; border-radius: 6px; }")
@@ -1978,17 +2104,9 @@ class UpdateView(QWidget):
         self.copy_feedback = QTimer(self)
         self.copy_feedback.setSingleShot(True)
         self.copy_feedback.timeout.connect(self.reset_copy_feedback)
-        self.action = QPushButton()
-        self.action.setObjectName("update-action")
-        self.action.setStyleSheet("color: #89b4fa; border: 1px solid #294666; border-radius: 6px; padding: 8px;")
-        self.action.clicked.connect(self.update_requested)
-        layout.addWidget(self.action)
-        self.status = plain_label("")
-        self.status.setWordWrap(True)
-        self.status.hide()
-        layout.addWidget(self.status)
-        for title, key in (("Downloads and release notes", "releaseUrl"), ("Manual update guide", "guideUrl")):
+        for title, key in (("Release notes", "releaseUrl"), ("Installation guide", "guideUrl")):
             button = QPushButton(title)
+            button.setStyleSheet("border: 1px solid #303030; border-radius: 6px; padding: 8px;")
             button.setObjectName("update-" + key)
             row = QHBoxLayout(button)
             row.setContentsMargins(8, 0, 8, 0)
@@ -1998,34 +2116,195 @@ class UpdateView(QWidget):
             layout.addWidget(button)
         layout.addStretch()
 
+        # Dashboard reparents this into the fixed actions area below the scroll.
+        self.footer = QWidget()
+        self.footer.setObjectName("updateFooter")
+        self.footer.setStyleSheet("QWidget#updateFooter { border-top: 1px solid #202020; }")
+        footer = QVBoxLayout(self.footer)
+        self.footer_layout = footer
+        footer.setContentsMargins(16, 12, 16, 12)
+        footer.setSpacing(8)
+        status_row = QHBoxLayout()
+        self.status_row = status_row
+        status_row.setSpacing(6)
+        self.spinner = OperationSpinner()
+        self.spinner.setObjectName("update-spinner")
+        self.spinner.hide()
+        status_row.addWidget(self.spinner, 0, Qt.AlignmentFlag.AlignTop)
+        self.result_icon = UpdateResultIcon()
+        self.result_icon.setObjectName("update-result-icon")
+        self.result_icon.hide()
+        status_row.addWidget(self.result_icon, 0, Qt.AlignmentFlag.AlignTop)
+        self.status = plain_label("")
+        self.status.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self.status.setWordWrap(True)
+        self.status.hide()
+        status_row.addWidget(self.status, 1)
+        self.percent = plain_label("", "#eeeeee")
+        self.percent.setObjectName("update-percent")
+        self.percent.hide()
+        status_row.addWidget(self.percent, 0, Qt.AlignmentFlag.AlignTop)
+        footer.addLayout(status_row)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("update-progress")
+        self.progress_bar.setAccessibleName("Update download progress")
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedHeight(3)
+        self.progress_bar.setStyleSheet(
+            "QProgressBar { background: #262626; border: none; border-radius: 2px; }"
+            "QProgressBar::chunk { background: #89b4fa; border-radius: 2px; }")
+        self.progress_bar.hide()
+        footer.addWidget(self.progress_bar)
+        self.transferred = plain_label("")
+        self.transferred.setObjectName("update-transferred")
+        self.transferred.hide()
+        self.remaining = plain_label("")
+        self.remaining.setObjectName("update-remaining")
+        self.remaining.hide()
+        self.transfer_row = QWidget()
+        transfer_layout = QHBoxLayout(self.transfer_row)
+        transfer_layout.setContentsMargins(0, 0, 0, 0)
+        transfer_layout.setSpacing(8)
+        transfer_layout.addWidget(self.transferred, 1)
+        transfer_layout.addWidget(self.remaining)
+        self.transfer_row.hide()
+        footer.addWidget(self.transfer_row)
+        self.action = QPushButton()
+        self.action_compact = False
+        self.action.setObjectName("update-action")
+        self.action.setStyleSheet("color: #89b4fa; border: 1px solid #294666; border-radius: 6px; padding: 8px;")
+        self.action.clicked.connect(self.request_action)
+        footer.addWidget(self.action)
+
     def set_guide(self, guide, version):
         self.guide = guide
         self.version = version
-        self.heading.setText(guide.get("title") or "Update AI Status")
+        self.heading.setText("Latest stable version")
         current = version.get("current") or __version__
         latest = version.get("latest")
-        self.versions.setText(f"Installed: v{current}\nLatest: v{latest}" if latest else
-                              f"Installed: v{current}\nCheck for updates with Refresh.")
-        self.description.setText(guide.get("description", ""))
-        self.steps.setText("\n\n".join(f"{index}. {step}" for index, step in enumerate(guide.get("steps", []), 1)))
+        self.versions.setText(f"v{current}" + (f" → v{latest}" if latest and latest != current else ""))
+        notes = guide.get("releaseNotes") or {}
+        already_current = self.completed and "already up to date" in self.status.toolTip().lower()
+        body = notes.get("body", "") if (version.get("has_update") and not already_current and isinstance(notes, dict)
+                                          and notes.get("version") == latest and latest != current) else ""
+        body = body if isinstance(body, str) else ""
+        if body != self.notes_markdown:
+            document = QTextDocument()
+            document.setDefaultFont(panel_font())
+            document.setMarkdown(release_notes_markdown(body), QTextDocument.MarkdownFeature.MarkdownDialectGitHub |
+                                 QTextDocument.MarkdownFeature.MarkdownNoHTML)
+            block = document.begin()
+            while block.isValid():
+                if block.blockFormat().headingLevel():
+                    cursor = QTextCursor(block)
+                    cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+                    style = QTextCharFormat()
+                    font = panel_font()
+                    font.setPixelSize(14)
+                    font.setWeight(QFont.Weight.DemiBold)
+                    style.setFont(font)
+                    style.setForeground(QColor("#eeeeee"))
+                    cursor.mergeCharFormat(style)
+                block = block.next()
+            self.notes_body.setText(document.toHtml())
+            self.notes_markdown = body
+        self.notes_heading.setVisible(bool(body.strip()))
+        self.notes_body.setVisible(bool(body.strip()))
         command = guide.get("command", "")
         if self.command.text() != command:
             self.reset_copy_feedback()
+            self.manual_toggle.setChecked(not guide.get("canUpdate"))
         self.command.setText(command)
-        self.command_box.setVisible(bool(command))
+        self.manual_toggle.setVisible(bool(command) and bool(guide.get("canUpdate")))
+        self.toggle_command(self.manual_toggle.isChecked() or not guide.get("canUpdate"))
         self.update_action()
+
+    def toggle_command(self, expanded):
+        self.command_box.setVisible(bool(self.command.text()) and expanded)
+        self.manual_toggle.setText("Hide manual update" if expanded else "Update manually…")
+        dashboard = self.window()
+        if hasattr(dashboard, "fit_content") and dashboard.viewing_updates():
+            dashboard.fit_content()
 
     def update_action(self):
         available = bool(self.guide.get("canUpdate") and self.version.get("has_update"))
-        self.action.setVisible(available or self.running or self.completed or self.failed)
-        self.action.setEnabled(available and not self.running)
-        self.action.setText("Updating…" if self.running else
-                            "Retry update" if self.failed else self.guide.get("actionLabel", "Update now"))
+        self.action.setVisible(not self.running and (available or self.failed or self.completed))
+        self.action.setEnabled(not self.running and (available or self.completed))
+        self.action.setText("Retry" if self.failed else "Done" if self.completed else
+                            self.guide.get("actionLabel", "Update now"))
+        compact = (self.failed or self.completed) and not self.running
+        if compact != self.action_compact:
+            (self.status_row if self.action_compact else self.footer_layout).removeWidget(self.action)
+            (self.status_row if compact else self.footer_layout).addWidget(self.action)
+            self.action_compact = compact
+        self.action.setSizePolicy(QSizePolicy.Policy.Fixed if compact else QSizePolicy.Policy.Expanding,
+                                  QSizePolicy.Policy.Fixed)
+        self.status_row.setSpacing(12 if compact else 6)
+        self.spinner.set_running(self.running)
+        self.result_icon.icon_name = "info" if self.failed else "check"
+        self.result_icon.color = "#f5a3a3" if self.failed else "#89b4fa"
+        self.result_icon.setVisible((self.completed or self.failed) and not self.running)
+        self.status_row.setAlignment(self.result_icon, Qt.AlignmentFlag.AlignVCenter)
+        self.result_icon.update()
+        if not self.running:
+            self.progress_bar.hide()
+            self.percent.hide()
+            self.transferred.hide()
+            self.remaining.hide()
+            self.transfer_row.hide()
 
-    def show_progress(self, message):
-        self.status.setText(message)
-        self.status.setStyleSheet("color: #89b4fa;")
+    def request_action(self):
+        if self.completed:
+            self.done_requested.emit()
+        else:
+            self.update_requested.emit()
+
+    def show_progress(self, event):
+        event = {"message": event} if isinstance(event, str) else event
+        message = event.get("message", "")
+        label = {
+            "checking": "Checking for updates…", "downloading": "Downloading…",
+            "verifying": "Verifying download…", "installing": "Installing…",
+            "opening": "Opening updater…", "restarting": "Restarting AI Status…",
+        }.get(event.get("stage"), message)
+        if self.failed and not self.running:
+            label = update_failure_label(message)
+        elif self.completed and not self.running:
+            current = "already up to date" in message.lower()
+            label = "Up to date" if current else "Updater opened"
+            if current:
+                self.notes_heading.hide()
+                self.notes_body.hide()
+        self.status.setText(label)
+        self.status.setToolTip(message)
+        self.status.setStyleSheet("color: #f5a3a3;" if self.failed else "color: #89b4fa;")
         self.status.setVisible(bool(message))
+        self.progress_bar.setVisible(self.running)
+        downloaded = event.get("downloadedBytes")
+        total = event.get("totalBytes")
+        downloading = self.running and event.get("stage") == "downloading"
+        known_total = downloading and isinstance(total, (int, float)) and total > 0
+        download_known = bool(known_total and isinstance(downloaded, (int, float)) and downloaded >= 0)
+        self.spinner.set_running(self.running)
+        if download_known:
+            percent = min(100, max(0, int(downloaded * 100 / total)))
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(percent)
+            self.percent.setText(f"{percent}%")
+            self.transferred.setText(f"{downloaded / 1_000_000:.1f} / {total / 1_000_000:.1f} MB")
+            self.remaining.setText(f"{max(0, total - downloaded) / 1_000_000:.1f} MB left")
+        else:
+            self.progress_bar.setRange(0, 0)
+            self.transferred.setText(f"{downloaded / 1_000_000:.1f} MB downloaded"
+                                     if downloading and isinstance(downloaded, (int, float)) else "")
+            self.remaining.clear()
+        self.percent.setVisible(download_known)
+        self.remaining.setVisible(download_known)
+        self.transferred.setVisible(downloading and bool(self.transferred.text()))
+        self.transfer_row.setVisible(downloading and bool(self.transferred.text()))
+        dashboard = self.window()
+        if hasattr(dashboard, "fit_content") and dashboard.viewing_updates():
+            dashboard.fit_content()
 
     def copy_command(self):
         QApplication.clipboard().setText(self.guide.get("command", ""))
@@ -2048,6 +2327,11 @@ class UpdateView(QWidget):
         url = self.guide.get(key)
         if url:
             QDesktopServices.openUrl(QUrl(url))
+
+    def open_note_link(self, url):
+        target = QUrl(url)
+        if target.scheme() in ("http", "https"):
+            QDesktopServices.openUrl(target)
 
 
 class Dashboard(QWidget):
@@ -2148,6 +2432,7 @@ class Dashboard(QWidget):
         self.update_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.update_view = UpdateView()
         self.update_view.update_requested.connect(self.start_update)
+        self.update_view.done_requested.connect(self.show_usage)
         self.update_scroll.setWidget(self.update_view)
         self.pages.addWidget(self.update_scroll)
         self.settings_footer = QWidget()
@@ -2157,6 +2442,8 @@ class Dashboard(QWidget):
         self.settings_footer.setMinimumHeight(49)
         self.settings_footer.hide()
         self.panel_layout.addWidget(self.settings_footer)
+        self.panel_layout.addWidget(self.update_view.footer)
+        self.update_view.footer.hide()
         self.tray = QSystemTrayIcon(status_icon(), self)
         menu = QMenu(self)
         menu.setFont(panel_font())
@@ -2319,6 +2606,10 @@ class Dashboard(QWidget):
     def show_updates(self):
         if not self.viewing_updates():
             self.usage_scroll_position = self.scroll.verticalScrollBar().value()
+            if self.update_view.completed and not self.updating:
+                self.update_view.completed = False
+                self.update_view.status.clear()
+                self.update_view.status.hide()
         self.reset_provider = None
         self.monetary_credit = None
         self.update_view.set_guide(updates.update_guide(), fetch.get_version_info())
@@ -2341,8 +2632,9 @@ class Dashboard(QWidget):
         self.updating = True
         self.update_view.running = True
         self.update_view.failed = False
+        self.update_view.completed = False
         self.update_view.update_action()
-        self.update_view.show_progress("Preparing update…")
+        self.update_view.show_progress({"stage": "checking", "message": "Checking for updates…"})
         self.update_thread = QThread(self)
         self.update_worker = UpdateWorker()
         self.update_worker.moveToThread(self.update_thread)
@@ -2356,11 +2648,15 @@ class Dashboard(QWidget):
         self.update_thread.start()
 
     def on_update_finished(self, message, successful):
+        self.update_view.running = False
         self.update_view.completed = successful
         self.update_view.failed = not successful
         self.update_view.show_progress(message)
+        self.update_view.update_action()
         if not successful:
             self.update_view.status.setStyleSheet("color: #f5a3a3;")
+            if self.update_view.guide.get("command"):
+                self.update_view.manual_toggle.setChecked(True)
         self.fit_content()
 
     def update_thread_finished(self):
@@ -2394,6 +2690,7 @@ class Dashboard(QWidget):
         self.refresh_button.setVisible(not configuring and not update_page)
         self.settings_button.setVisible(not configuring and not update_page and not self.viewing_credit_details())
         self.settings_footer.setVisible(configuring)
+        self.update_view.footer.setVisible(update_page)
         self.settings_navigation.setVisible(configuring)
 
     def animate(self):
@@ -2862,8 +3159,14 @@ class Dashboard(QWidget):
         content.layout().activate()
         height = content.heightForWidth(self.width() - 2) if content.hasHeightForWidth() else content.sizeHint().height()
         height = max(height, content.minimumSizeHint().height())
-        settings_height = max(49, self.settings_footer.sizeHint().height()) if self.configuring() else 0
-        natural_height = height + 57 + settings_height
+        footer_height = 0
+        if self.configuring():
+            footer_height = max(49, self.settings_footer.sizeHint().height())
+        elif self.viewing_updates():
+            footer = self.update_view.footer
+            footer_height = (footer.heightForWidth(self.width() - 2) if footer.hasHeightForWidth()
+                             else footer.sizeHint().height())
+        natural_height = height + 57 + footer_height
         screen = self.screen().availableGeometry()
         bottom = self.geometry().bottom()
         self.resize(self.width(), min(max(180, natural_height), 720, max(180, screen.height() - 32)))

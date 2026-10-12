@@ -12,6 +12,7 @@ Item {
     property bool updateRunning: false
     property string updateError: ""
     property string updateMessage: ""
+    property string updateStage: "idle"
     property int updateStarts: 0
     function startUpdate() {
         if (updateRunning || !snapshot.update || !snapshot.update.canUpdate) return
@@ -19,6 +20,7 @@ Item {
         updateRunning = true
         updateError = ""
         updateMessage = ""
+        updateStage = "checking"
     }
     property string spinner: "⠋"
     property var snapshot: ({})
@@ -33,6 +35,7 @@ Item {
         updateRunning = false
         updateError = ""
         updateMessage = ""
+        updateStage = "idle"
         updateStarts = 0
         snapshot = {
             about: {name: "AI Status", version: "0.9.0", commit: "12345678", license: "MIT", author: "gelzin.com", github: "https://github.com/gelzinn/ai-status", documentation: "https://github.com/gelzinn/ai-status#readme", issues: "https://github.com/gelzinn/ai-status/issues/new"},

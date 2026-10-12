@@ -278,6 +278,52 @@ sys.exit(0 if exists else 22)
         self.assert_preserved(self.run_installer())
         self.assertFalse(self.bundle.exists())
 
+    def test_predownloaded_package_updates_from_installed_script_with_json_progress(self):
+        self.assert_success(self.run_installer("--version", "0.9.0"), "0.9.0")
+        self.env["TEST_CURL_EXIT"] = "22"
+        assets = self.root / "assets/v0.10.0"
+        arguments = [REAL_BASH, str(self.installed / "packages/lib/install-macos.sh"),
+                     "--no-interactive", "--skip-check", "--no-autostart", "--json-progress",
+                     "--version", "v0.10.0", "--package", str(assets / "ai-status-v0.10.0.tar.gz"),
+                     "--checksums", str(assets / "SHA256SUMS")]
+        result = subprocess.run(arguments, cwd=self.root, env=self.env, capture_output=True, text=True, timeout=30)
+        self.assert_success(result, "0.10.0")
+        events = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual([event["stage"] for event in events], ["verifying", "installing", "restarting", "complete"])
+        self.assertEqual(self.tool_calls("started-version")[-1], ["started-version", "0.10.0"])
+        self.assertFalse(self.agent.exists())
+        self.assertFalse((self.installed.parent / ".ai-status-update.lock").exists())
+
+    def test_predownloaded_package_rechecks_checksum_and_preserves_install_on_failure(self):
+        self.seed_existing_install()
+        assets = self.root / "assets/v0.10.0"
+        sums = assets / "SHA256SUMS"
+        sums.write_text("0" * 64 + "  ai-status-v0.10.0.tar.gz\n")
+        result = self.run_installer("--version", "0.10.0", "--package", str(assets / "ai-status-v0.10.0.tar.gz"),
+                                    "--checksums", str(sums), "--json-progress")
+        self.assert_preserved(result)
+        self.assertFalse(self.tool_calls("swiftc"))
+        events = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual([event["stage"] for event in events], ["verifying"])
+
+    @unittest.skipIf(sys.platform == "win32", "Requires a Unix pipe that has no reader")
+    def test_native_installation_finishes_when_old_ui_closes_progress_pipe(self):
+        assets = self.root / "assets/v0.10.0"
+        arguments = [REAL_BASH, str(self.bootstrap), "--no-interactive", "--skip-check", "--no-autostart",
+                     "--json-progress", "--version", "v0.10.0", "--package", str(assets / "ai-status-v0.10.0.tar.gz"),
+                     "--checksums", str(assets / "SHA256SUMS")]
+        reader, writer = os.pipe()
+        os.close(reader)
+        try:
+            result = subprocess.run(arguments, cwd=self.root, env=self.env, stdout=writer, stderr=subprocess.PIPE,
+                                    text=True, timeout=30)
+        finally:
+            os.close(writer)
+        result.stdout = ""
+        self.assert_success(result, "0.10.0")
+        self.assertEqual(self.tool_calls("started-version")[-1], ["started-version", "0.10.0"])
+        self.assertNotIn("BrokenPipe", result.stderr)
+
     def test_invalid_canonical_manifest_is_rejected_before_build_or_activation(self):
         self.seed_existing_install()
         for data in (b'{invalid json', b'{"version":"0.9.0"}', b'{"version":null}'):

@@ -26,6 +26,7 @@ Item {
         function init() {
             Plugin.Model.reset()
             Plugin.Model.settingsSaving = false
+            findChild(panel, "panel-update-page").commandExpanded = false
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
             snapshot.providers[1].resetCredits = {available: 2, timezone: "Local time · UTC+00:00", rows: [
                 {title: "Full reset", count: 2, expires: "Oct 22, 18:05", remaining: "12d 2h left", timezone: "UTC+00:00"}
@@ -306,7 +307,8 @@ Item {
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
             snapshot.version = {current: "0.11.0", latest: "0.12.1", has_update: true}
             snapshot.update = {
-                title: "Update the Omarchy plugin", description: "Omarchy updates AI Status in place.",
+                method: "omarchy",
+                title: "Update the Omarchy plugin", description: "Updates in Terminal, then restarts the shell. Your settings are kept.",
                 steps: ["Start the update.", "Wait for the plugin to reload."],
                 command: "omarchy plugin update io.github.gelzinn.ai-status",
                 canUpdate: canUpdate, actionLabel: "Update in terminal",
@@ -393,13 +395,61 @@ Item {
             mouseClick(action)
             compare(Plugin.Model.updateStarts, 1)
             verify(!action.enabled)
-            mouseClick(action)
+            verify(!action.visible)
+            Plugin.Model.startUpdate()
             compare(Plugin.Model.updateStarts, 1)
             Plugin.Model.updateError = "Terminal not found. Run the command above."
             Plugin.Model.updateRunning = false
             verify(action.enabled)
-            compare(findChild(panel, "update-status").text, Plugin.Model.updateError)
-            mouseClick(action)
+            verify(action.visible)
+            compare(action.text, "Retry")
+            const label = findChild(panel, "update-status-label")
+            const status = findChild(panel, "update-status")
+            const footer = findChild(panel, "update-footer")
+            wait(20)
+            verify(action.width < footer.width)
+            compare(action.x + action.width, footer.width)
+            verify(status.x + status.width < action.x)
+            verify(action.height >= Style.space(34))
+            compare(label.text, "Update failed: Terminal unavailable")
+            const icon = findChild(panel, "update-status-icon")
+            verify(!findChild(panel, "update-status-detail"))
+            compare(label.wrapMode, Text.WordWrap)
+            compare(label.Accessible.description, Plugin.Model.updateError)
+            verify(icon.visible)
+            compare(icon.name, "info")
+            compare(icon.width, Style.space(16))
+            compare(icon.foreground, label.color)
+            compare(icon.foreground, "#f5a3a3")
+            const failures = [
+                ["The checksum did not match. Nothing was installed.", "Verification failed: checksum mismatch"],
+                ["Could not download the release checksum.", "Update failed: checksum unavailable"],
+                ["This release has no valid update checksum.", "Update failed: invalid release checksum"],
+                ["Windows PowerShell is unavailable.", "Update failed: PowerShell unavailable"],
+                ["The AI Status runtime is unavailable.", "Update failed: updater unavailable"],
+                ["Terminal did not respond.", "Update failed: Terminal not responding"],
+                ["Could not open Terminal.", "Update failed: could not open Terminal"],
+                ["The updater timed out.", "Update failed: updater timed out"],
+                ["The download was interrupted. Check your connection and retry.", "Download failed: transfer interrupted"],
+                ["Installer download failed. Check your connection.", "Download failed. Check your connection."],
+                ["The updater returned invalid progress.", "Update failed: invalid updater response"],
+                ["The updater stopped before confirming the update.", "Update failed: completion not confirmed"],
+                ["Unknown updater failure. Keep the complete original text.", "Unknown updater failure. Keep the complete original text."],
+                ["\n Unknown updater failure.\nAdditional diagnostic detail", "Unknown updater failure."]
+            ]
+            for (const failure of failures) {
+                Plugin.Model.updateError = failure[0]
+                compare(label.text, failure[1])
+                compare(label.Accessible.description, failure[0])
+                verify(!findChild(panel, "update-status-detail"))
+            }
+            Plugin.Model.updateError = "No supported terminal found. Run the command shown in the guide in your terminal."
+            compare(label.text, "Update failed: Terminal unavailable")
+            compare(label.Accessible.description, Plugin.Model.updateError)
+            verify(findChild(panel, "update-command-box").visible)
+            compare(findChild(panel, "update-manual-command").text, "Hide manual update")
+            action.forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Return)
             compare(Plugin.Model.updateStarts, 2)
             compare(Plugin.Model.updateError, "")
             panel.close()
@@ -412,13 +462,185 @@ Item {
             wait(20)
             verify(panel.updatePage)
             verify(!findChild(panel, "update-action").visible)
+            verify(!findChild(panel, "update-footer").visible)
+            verify(!findChild(panel, "update-status-detail"))
             verify(findChild(panel, "update-release-notes").visible)
+            compare(findChild(panel, "update-guide-link").text, "Installation guide")
+            verify(findChild(panel, "update-guide-link").outlined)
             verify(findChild(panel, "update-copy-command").visible)
             compare(Plugin.Model.updateStarts, 0)
+            const copy = findChild(panel, "update-copy-command")
+            copy.forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Return)
+            compare(copy.iconName, "check")
             Plugin.Model.updateError = ""
             panel.configure()
             verify(!panel.updatePage)
             verify(!findChild(panel, "update-available").visible)
+        }
+        function test_update_footer_shows_real_handoff_and_preserves_manual_fallback() {
+            prepareUpdate(true)
+            panel.showUpdate()
+            wait(20)
+            const footer = findChild(panel, "update-footer")
+            const scroller = findChild(panel, "panel-scroller")
+            const separator = findChild(panel, "update-footer-divider")
+            const icon = findChild(panel, "update-status-icon")
+            const progress = findChild(panel, "update-progress")
+            const label = findChild(panel, "update-status-label")
+            const action = findChild(panel, "update-action")
+            const command = findChild(panel, "update-command-box")
+            verify(footer.visible)
+            verify(!findChild(panel, "settings-footer").visible)
+            compare(scroller.mapToItem(footer, 0, scroller.height).y, separator.y)
+            verify(!command.visible)
+            verify(!progress.visible)
+            compare(action.text, "Update now")
+            verify(!action.primary)
+            verify(action.outlined)
+            verify(action.alignLeft)
+            compare(action.iconName, "")
+            compare(action.leadingIconName, "")
+            compare(action.trailingIconName, "")
+            compare(action.width, footer.width)
+            compare(action.x, 0)
+            compare(icon.width, Style.space(16))
+            compare(label.font.pixelSize, Style.font.body)
+            verify(!findChild(panel, "update-status-detail"))
+            compare(findChild(panel, "update-manual-command").text, "Update manually…")
+            verify(findChild(panel, "update-manual-command").outlined)
+            verify(findChild(panel, "update-release-notes").outlined)
+            verify(findChild(panel, "update-guide-link").outlined)
+            mouseClick(findChild(panel, "update-manual-command"))
+            wait(20)
+            verify(command.visible)
+            compare(findChild(panel, "update-manual-command").text, "Hide manual update")
+            compare(findChild(panel, "update-command").text, Plugin.Model.snapshot.update.command)
+            const copy = findChild(panel, "update-copy-command")
+            mouseClick(copy)
+            compare(copy.iconName, "check")
+            mouseClick(action)
+            wait(20)
+            const footerBottom = footer.y + footer.height
+            compare(Plugin.Model.updateStarts, 1)
+            compare(icon.name, "loader-circle")
+            tryVerify(() => icon.rotation > 0)
+            compare(label.text, "Checking for updates…")
+            compare(findChild(panel, "update-status").width, footer.width)
+            verify(!action.visible)
+            verify(!findChild(panel, "update-status-detail"))
+            verify(progress.visible)
+            verify(progress.animating)
+            const phase = progress.phase
+            tryVerify(() => progress.phase !== phase)
+            verify(!action.enabled)
+            Plugin.Model.updateStage = "opening"
+            Plugin.Model.updateMessage = "Opening the updater in a terminal…"
+            compare(label.text, "Opening updater…")
+            verify(!findChild(panel, "update-status-detail"))
+            verify(!action.visible)
+            compare(footer.y + footer.height, footerBottom)
+            panel.showUsage()
+            tryCompare(icon, "rotation", 0)
+            verify(!progress.animating)
+            panel.showUpdate()
+            tryVerify(() => icon.rotation > 0)
+            Plugin.Model.updateMessage = "The updater is open in a terminal. Follow its progress there."
+            Plugin.Model.updateRunning = false
+            wait(20)
+            compare(label.text, "Updater opened")
+            compare(icon.name, "check")
+            compare(icon.foreground, label.color)
+            tryCompare(icon, "rotation", 0)
+            verify(!progress.visible)
+            verify(!progress.animating)
+            verify(!findChild(panel, "update-status-detail"))
+            verify(action.visible)
+            verify(!findChild(panel, "update-description"))
+            verify(!findChild(panel, "update-next-step"))
+            compare(action.text, "Done")
+            verify(action.width < footer.width)
+            compare(action.x + action.width, footer.width)
+            verify(findChild(panel, "update-status").width < action.x)
+            mouseClick(action)
+            verify(!panel.updatePage)
+            compare(Plugin.Model.updateStarts, 1)
+        }
+        function test_update_already_current_does_not_claim_terminal_opened() {
+            prepareUpdate(true)
+            panel.showUpdate()
+            wait(20)
+            mouseClick(findChild(panel, "update-action"))
+            Plugin.Model.updateMessage = "AI Status is already up to date."
+            Plugin.Model.updateRunning = false
+            compare(findChild(panel, "update-status-label").text, "Up to date")
+            verify(!findChild(panel, "update-description"))
+            verify(!findChild(panel, "update-next-step"))
+            compare(findChild(panel, "update-versions").text, "v0.11.0")
+            verify(!findChild(panel, "update-status-detail"))
+            compare(findChild(panel, "update-status-icon").name, "check")
+            compare(findChild(panel, "update-status-icon").foreground, findChild(panel, "update-status-label").color)
+            compare(findChild(panel, "update-action").text, "Done")
+            verify(findChild(panel, "update-action").outlined)
+            wait(20)
+            const action = findChild(panel, "update-action")
+            const footer = findChild(panel, "update-footer")
+            verify(action.width < footer.width)
+            compare(action.x + action.width, footer.width)
+            verify(findChild(panel, "update-status").width < action.x)
+            verify(!findChild(panel, "update-progress").visible)
+        }
+        function test_release_notes_are_inline_optional_and_keep_update_footer_fixed() {
+            prepareUpdate(true)
+            panel.showUpdate()
+            wait(20)
+            const page = findChild(panel, "panel-update-page")
+            const notes = findChild(panel, "update-release-notes-content")
+            const body = findChild(panel, "update-release-notes-body")
+            const footer = findChild(panel, "update-footer")
+            const scroller = findChild(panel, "panel-scroller")
+            verify(!notes.visible)
+            compare(body.text, "")
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.update.releaseNotes = {version: snapshot.version.latest, title: "New panel", body: "### Features\n- **Progress** in the panel.\n\n```sh\nai-status --update\n```\n", url: "https://github.com/gelzinn/ai-status/releases/tag/v" + snapshot.version.latest}
+            Plugin.Model.snapshot = snapshot
+            wait(20)
+            verify(notes.visible)
+            verify(body.readOnly)
+            verify(body.selectByMouse)
+            compare(body.textFormat, TextEdit.MarkdownText)
+            compare(body.wrapMode, TextEdit.Wrap)
+            verify(body.getText(0, body.length).indexOf("Progress in the panel.") !== -1)
+            verify(body.getText(0, body.length).indexOf("ai-status --update") !== -1)
+            verify(body.implicitHeight > 0)
+            verify(page.isSafeReleaseNotesLink("https://github.com/gelzinn/ai-status/releases/tag/v0.12.1"))
+            verify(page.isSafeReleaseNotesLink("http://example.com/notes"))
+            verify(!page.isSafeReleaseNotesLink("javascript:alert(1)"))
+            verify(!page.isSafeReleaseNotesLink("file:///tmp/update.sh"))
+            compare(page.safeReleaseNotesMarkdown("<img src='file:///tmp/private.png'>\n![Preview](https://example.com/p.png)\n`<safe-code>`"), "&lt;img src='file:///tmp/private.png'&gt;\n[Preview](https://example.com/p.png)\n`<safe-code>`")
+            compare(page.safeReleaseNotesMarkdown("```html\n<img src='example'>\n```"), "```html\n<img src='example'>\n```")
+            const longSnapshot = JSON.parse(JSON.stringify(snapshot))
+            longSnapshot.update.releaseNotes.body = "### Features\n" + Array(50).fill("- Keep the update status visible while reviewing release notes.").join("\n")
+            Plugin.Model.snapshot = longSnapshot
+            wait(20)
+            verify(scroller.contentHeight > scroller.height)
+            compare(scroller.mapToItem(footer, 0, scroller.height).y, 0)
+            const footerBottom = footer.y + footer.height
+            scroller.contentY = Math.min(150, scroller.contentHeight - scroller.height)
+            wait(20)
+            compare(footer.y + footer.height, footerBottom)
+            verify(findChild(panel, "update-action").visible)
+            const mismatched = JSON.parse(JSON.stringify(snapshot))
+            mismatched.update.releaseNotes.version = "0.1.0"
+            Plugin.Model.snapshot = mismatched
+            wait(20)
+            verify(!notes.visible)
+            compare(body.text, "")
+            const empty = JSON.parse(JSON.stringify(snapshot))
+            empty.update.releaseNotes.body = " \n "
+            Plugin.Model.snapshot = empty
+            verify(!notes.visible)
+            verify(findChild(panel, "update-release-notes").visible)
         }
         function test_update_notice_does_not_replace_backend_error() {
             prepareUpdate(true)

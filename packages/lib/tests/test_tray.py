@@ -1,4 +1,5 @@
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1768,7 +1769,7 @@ class DesktopTests(IsolatedState):
         return {"method": "windows-installer" if can_update else "windows-portable",
                 "title": "Update AI Status", "description": "Update this installation.",
                 "steps": ["Download the latest installer.", "Run setup to keep your settings."],
-                "command": "", "actionLabel": "Download and open installer", "canUpdate": can_update,
+                "command": "", "actionLabel": "Update now", "canUpdate": can_update,
                 "releaseUrl": "https://github.com/gelzinn/ai-status/releases/latest",
                 "guideUrl": "https://github.com/gelzinn/ai-status/blob/main/packages/lib/WINDOWS.md"}
 
@@ -1801,8 +1802,7 @@ class DesktopTests(IsolatedState):
             self.assertTrue(self.dashboard.viewing_updates())
             self.assertEqual(self.dashboard.brand.text(), "Updates")
             self.assertIs(self.dashboard.focusWidget(), self.dashboard.back_button)
-            self.assertIn("Installed: v0.11.0", self.dashboard.update_view.versions.text())
-            self.assertIn("Latest: v0.12.1", self.dashboard.update_view.versions.text())
+            self.assertEqual(self.dashboard.update_view.versions.text(), "v0.11.0 → v0.12.1")
             self.assertTrue(self.dashboard.update_view.action.isEnabled())
             QTest.keyClick(self.dashboard.back_button, tray.Qt.Key.Key_Down)
             self.assertEqual(state.load_selected(), selected)
@@ -1845,8 +1845,9 @@ class DesktopTests(IsolatedState):
             self.dashboard.start_update()
             self.wait_for_update()
             updater.assert_called_once()
-            self.assertIn("Check your connection", self.dashboard.update_view.status.text())
-            self.assertEqual(self.dashboard.update_view.action.text(), "Retry update")
+            self.assertEqual(self.dashboard.update_view.status.text(), "Download failed. Check your connection.")
+            self.assertIn("Check your connection", self.dashboard.update_view.status.toolTip())
+            self.assertEqual(self.dashboard.update_view.action.text(), "Retry")
             self.assertTrue(self.dashboard.update_view.action.isEnabled())
             updater.side_effect = None
             updater.return_value = "The verified installer is open. Follow setup to update."
@@ -1854,8 +1855,23 @@ class DesktopTests(IsolatedState):
             self.wait_for_update()
             self.assertEqual(updater.call_count, 2)
             self.assertTrue(self.dashboard.update_view.completed)
-            self.assertTrue(self.dashboard.update_view.action.isEnabled())  # Setup can be cancelled.
-            self.assertIn("verified installer is open", self.dashboard.update_view.status.text())
+            self.assertTrue(self.dashboard.update_view.action.isEnabled())
+            self.assertEqual(self.dashboard.update_view.action.text(), "Done")
+            self.assertEqual(self.dashboard.update_view.status.text(), "Updater opened")
+            self.assertIn("verified installer is open", self.dashboard.update_view.status.toolTip())
+            self.dashboard.update_view.action.click()
+            self.assertFalse(self.dashboard.viewing_updates())
+            self.assertEqual(updater.call_count, 2)  # Done never opens a second setup wizard.
+            self.dashboard.show_updates()  # Setup can be cancelled; a later action can retry.
+            self.assertEqual(self.dashboard.update_view.action.text(), self.update_guide()["actionLabel"])
+            version["has_update"] = False
+            self.dashboard.update_view.set_guide(self.update_guide(), version)
+            self.dashboard.on_update_finished("AI Status is already up to date.", True)
+            self.assertEqual(self.dashboard.update_view.status.text(), "Up to date")
+            self.assertTrue(self.dashboard.update_view.action.isEnabled())
+            self.dashboard.update_view.action.click()
+            self.assertFalse(self.dashboard.viewing_updates())
+            self.assertEqual(updater.call_count, 2)
 
     def test_update_guide_command_can_be_copied(self):
         guide = self.update_guide(False)
@@ -1866,6 +1882,119 @@ class DesktopTests(IsolatedState):
             self.dashboard.update_view.copy_button.click()
             self.assertEqual(self.app.clipboard().text(), "ai-status update")
             self.assertEqual(self.dashboard.update_view.copy_button.text(), "Copied")
+
+    def test_release_notes_match_the_update_and_keep_the_footer_visible(self):
+        version = {"current": "0.11.0", "latest": "0.12.1", "has_update": True}
+        guide = self.update_guide()
+        guide["releaseNotes"] = {
+            "version": "0.12.1", "title": "v0.12.1", "url": guide["releaseUrl"],
+            "body": "### Features\n" + "\n".join(f"- Improve **desktop feedback** {i}." for i in range(60)) +
+                    "\n![Preview](file:///tmp/private.png)\n[Details](https://github.com/gelzinn/ai-status/releases)",
+        }
+        with patch.object(tray.fetch, "get_version_info", return_value=version), \
+                patch.object(tray.updates, "update_guide", return_value=guide), \
+                patch.object(tray.QDesktopServices, "openUrl") as browser:
+            self.dashboard.show_updates()
+            self.app.processEvents()
+            view = self.dashboard.update_view
+            self.assertTrue(view.notes_body.isVisible())
+            self.assertIn("desktop feedback", view.notes_body.text())
+            self.assertNotIn("<img", view.notes_body.text())
+            self.assertGreater(self.dashboard.update_scroll.verticalScrollBar().maximum(), 0)
+            self.assertTrue(view.action.isVisible())
+            view.notes_body.linkActivated.emit("file:///tmp/private.png")
+            browser.assert_not_called()
+            view.notes_body.linkActivated.emit("https://github.com/gelzinn/ai-status/releases")
+            self.assertEqual(browser.call_args.args[0].scheme(), "https")
+            self.dashboard.on_update_finished("Installer opened.", True)
+            self.app.processEvents()
+            self.assertTrue(view.action.isVisible())
+            self.assertLess(view.action.width(), view.footer.width() / 2)
+            self.assertLess(view.status.geometry().right(), view.action.geometry().left())
+            self.dashboard.on_update_finished("AI Status is already up to date.", True)
+            view.set_guide(guide, version)
+            self.assertTrue(view.notes_body.isHidden())
+            view.completed = False
+            guide["releaseNotes"]["version"] = "0.12.0"
+            view.set_guide(guide, version)
+            self.assertTrue(view.notes_body.isHidden())
+            guide["releaseNotes"]["version"] = "0.12.1"
+            version["has_update"] = False
+            view.set_guide(guide, version)
+            self.assertTrue(view.notes_heading.isHidden())
+
+    def test_live_update_progress_stays_in_footer_and_survives_navigation(self):
+        release = threading.Event()
+        version = {"current": "0.11.0", "latest": "0.12.1", "has_update": True}
+
+        def updating(progress=None):
+            progress({"stage": "downloading", "message": "Downloading update…",
+                      "downloadedBytes": 4_200_000, "totalBytes": 10_000_000, "percent": 42})
+            if not release.wait(5):
+                raise OSError("Fixture timed out")
+            return "Installer opened. Complete setup to restart AI Status."
+
+        with patch.object(tray.fetch, "get_version_info", return_value=version), \
+                patch.object(tray.updates, "update_guide", return_value=self.update_guide()), \
+                patch.object(tray.updates, "run_update", side_effect=updating):
+            self.dashboard.show_updates()
+            view = self.dashboard.update_view
+            view.action.click()
+            try:
+                deadline = time.monotonic() + 3
+                while view.percent.text() != "42%" and time.monotonic() < deadline:
+                    self.app.processEvents()
+                    time.sleep(0.01)
+                self.assertEqual(view.percent.text(), "42%")
+                self.assertEqual(view.progress_bar.value(), 42)
+                self.assertEqual(view.transferred.text(), "4.2 / 10.0 MB")
+                self.assertEqual(view.remaining.text(), "5.8 MB left")
+                self.assertTrue(view.spinner.running)
+                self.assertTrue(view.action.isHidden())
+                self.assertIs(view.footer.parentWidget(), self.dashboard.pages.parentWidget())
+                self.assertGreaterEqual(view.footer.y(), self.dashboard.pages.geometry().bottom())
+                self.dashboard.go_back()
+                self.app.processEvents()
+                self.assertTrue(view.footer.isHidden())
+                self.dashboard.show_updates()
+                self.app.processEvents()
+                self.assertEqual(view.progress_bar.value(), 42)
+                self.assertEqual(view.percent.text(), "42%")
+                self.assertTrue(view.spinner.isVisible())
+                self.assertTrue(view.progress_bar.isVisible())
+                self.assertEqual(view.remaining.text(), "5.8 MB left")
+                self.assertFalse(view.action.isEnabled())
+            finally:
+                release.set()
+                self.wait_for_update()
+            self.assertTrue(view.progress_bar.isHidden())
+            self.assertTrue(view.spinner.isHidden())
+            self.assertTrue(view.remaining.isHidden())
+            self.assertEqual(view.status.text(), "Updater opened")
+            self.assertTrue(view.result_icon.isVisible())
+            self.assertIn("Complete setup", view.status.toolTip())
+
+    def test_unknown_download_size_and_verification_do_not_show_fake_percentage(self):
+        with patch.object(tray.fetch, "get_version_info", return_value={"has_update": True}), \
+                patch.object(tray.updates, "update_guide", return_value=self.update_guide()):
+            self.dashboard.show_updates()
+            view = self.dashboard.update_view
+            view.running = True
+            view.show_progress({"stage": "downloading", "message": "Downloading update…",
+                                "downloadedBytes": 2_500_000})
+            self.assertEqual(view.progress_bar.maximum(), 0)
+            self.assertTrue(view.percent.isHidden())
+            self.assertEqual(view.transferred.text(), "2.5 MB downloaded")
+            self.assertTrue(view.remaining.isHidden())
+            view.show_progress({"stage": "verifying", "message": "Verifying update…"})
+            self.assertEqual(view.progress_bar.maximum(), 0)
+            self.assertTrue(view.transferred.isHidden())
+            self.assertTrue(view.spinner.running)
+            self.dashboard.on_update_finished("Download failed. Retry.", False)
+            self.assertTrue(view.progress_bar.isHidden())
+            self.assertFalse(view.spinner.running)
+            self.assertEqual(view.action.text(), "Retry")
+            self.assertTrue(view.action.isEnabled())
 
     def test_provider_settings_save_disabled_providers(self):
         settings = tray.ProviderSettings(self.dashboard)
