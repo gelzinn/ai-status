@@ -7,11 +7,28 @@ v0.16.0 available; the reopened Usage previews show v0.16.0.
 
 Windows and macOS use the same short progress labels, including **Downloading…**,
 with the percentage above a thin progress bar. Downloaded bytes appear on the left
-and the remaining size on the right, such as **10.4 MB left**. Known-size downloads
-use the bar; unknown sizes keep the same blue loader-circle spinner and an
-indeterminate bar without a percentage or remaining-size estimate. The active
-operation hides the action button. Other running stages use the shared spinner,
-which rotates around its exact center on Windows.
+and the remaining size on the right, such as **10.4 MB left**. The blue loader-circle
+spinner stays beside the stage label for both known and unknown download sizes.
+Unknown sizes use an indeterminate bar without a percentage or remaining-size
+estimate. The active operation hides the action button.
+
+All three platforms use a full-width outlined **Update now** button in the fixed
+footer. Checking uses **Checking for updates…**, and external updater opening uses
+**Opening updater…**, with a blue spinner and progress bar. Linux shows only this
+feedback while running, and a short Terminal handoff message afterward.
+
+Every alternate state follows the same footer layout. Success shows a blue check
+and **Up to date**, **Updater opened** or **Update complete**, then a full-width
+**Done** button. Handoffs add only **Finish the update in Setup.** or **Finish the
+update in Terminal.** Errors show an info icon and **Update failed**, a compact
+reason in neutral text, and the outlined **Retry update** button. Redundant download
+failure prefixes are removed from the displayed reason; the original error stays
+available in tooltips or accessibility descriptions. Manual alternatives keep
+their command and links in the page, without duplicate footer instructions.
+
+The page uses **Latest stable version**, one compact version row, and a short
+description of the platform's update path. Installation instructions no longer
+repeat across the body and footer, including already-current and completed states.
 
 ## Before
 
@@ -49,12 +66,12 @@ opens on Usage, shown in the last row with sample v0.16.0.
 
 | Step | Windows | macOS | Linux / Omarchy |
 | --- | --- | --- | --- |
-| Optional manual command | See the manual guide | ![macOS: Optional manual command](macos-manual-alternative.png) | ![Linux: Optional manual command](linux-command.png) |
+| Optional manual command | See Installation guide | ![macOS: Optional manual command](macos-manual-alternative.png) | ![Linux: Optional manual command](linux-command.png) |
 | Already up to date | ![Windows: Already up to date](windows-up-to-date.png) | ![macOS: Already up to date](macos-up-to-date.png) | ![Linux: Already up to date](linux-up-to-date.png) |
 | Download or terminal error | ![Windows: Download or terminal error](windows-error.png) | ![macOS: Download or terminal error](macos-download-error.png) | ![Linux: Download or terminal error](linux-error.png) |
 | Runtime unavailable | See the error feedback above | ![macOS: Runtime unavailable](macos-error.png) | See the error feedback above |
 | Retry the update | ![Windows: Retry the update](windows-retry.png) | ![macOS: Retry the update](macos-retry.png) | ![Linux: Retry the update](linux-retry.png) |
-| Manual installation fallback | See the manual guide | ![macOS: Manual installation fallback](macos-manual.png) | See the manual guide |
+| Manual installation fallback | See Installation guide | ![macOS: Manual installation fallback](macos-manual.png) | See Installation guide |
 | SwiftBar update page | — | ![macOS: SwiftBar update page](macos-terminal-guide.png) | — |
 | Open Terminal for SwiftBar | — | ![macOS: Open Terminal for SwiftBar](macos-terminal-opening.png) | — |
 | SwiftBar updater opened | — | ![macOS: SwiftBar updater opened](macos-terminal-handoff.png) | — |
@@ -66,14 +83,14 @@ handoff; errors offer retry. SwiftBar keeps its Terminal update path.
 ## Capture sources and reproduction
 
 - Windows: production Qt widgets rendered offscreen on Linux with PySide6 6.12,
-  bundled fonts and artwork. Source: commit `a0ec11b`. Baselines render the old
+  bundled fonts and artwork. Source: commit `3f2ab14`. Baselines render the old
   widgets and guide from `38df1df` with the same sample versions.
 - Linux: production QML rendered offscreen with Qt Quick's software renderer and
   the test daemon/Omarchy theme (dark surface, blue accent, 6px corners). Source:
-  commit `09eb4fa`; this does not capture a running Omarchy desktop.
+  commit `4f690da`; this does not capture a running Omarchy desktop.
 - macOS: unmodified `update-*.png` files from the `macos-panel-preview` artifact
-  for commit `a0ec11b` in the
-  [native macOS CI run](https://github.com/gelzinn/ai-status/actions/runs/38313521244/job/115024675109).
+  for commit `3f2ab14` in the
+  [native macOS CI run](https://github.com/gelzinn/ai-status/actions/runs/38316201442/job/115033365729).
 - The Linux and macOS baselines are the existing tracked
   [Linux guide](../updates-linux-guide.png) and
   [native macOS guide](../updates-macos-guide.png), copied without alteration.
