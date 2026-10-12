@@ -115,7 +115,7 @@ def update_guide():
         guide.update(title="Update the Omarchy plugin",
                      command="omarchy plugin update " + PLUGIN_ID + " --yes && omarchy restart shell",
                      actionLabel="Update now", canUpdate=shutil.which("omarchy") is not None,
-                     description="Updates in Terminal, then restarts the shell.\nYour settings are kept.")
+                     description="Updates in Terminal and restarts the shell.\nYour settings are kept.")
     elif method in ("linux-installer", "macos-installer"):
         native = method == "macos-installer" and options["mode"] == "native"
         guide.update(title="Update on macOS" if method == "macos-installer" else "Update on Linux",

@@ -532,7 +532,7 @@ Item {
             verify(detail.visible)
             verify(action.visible)
             compare(detail.text, "Finish the update in Terminal.")
-            verify(findChild(panel, "update-description").text.indexOf("restarts the shell") !== -1)
+            compare(findChild(panel, "update-description").text, "Your settings are kept.")
             verify(!findChild(panel, "update-next-step"))
             verify(detail.mapToItem(action, 0, detail.height).y <= 0)
             compare(action.text, "Done")
