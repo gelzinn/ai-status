@@ -5,7 +5,7 @@
   <p>Track usage limits, reset timers and available reset credits from your desktop.<br />Native panels for Omarchy Quickshell, Windows and macOS, plus Waybar integration.</p>
   <p>
     <a href="https://github.com/gelzinn/ai-status/releases/latest"><img src="https://img.shields.io/github/v/release/gelzinn/ai-status?style=flat-square&amp;label=release" alt="Latest stable release" /></a>
-    <a href="https://github.com/gelzinn/ai-status/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/gelzinn/ai-status/ci.yml?branch=main&amp;style=flat-square&amp;label=checks" alt="CI status on main" /></a>
+    <a href="https://github.com/gelzinn/ai-status/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/gelzinn/ai-status/release.yml?branch=main&amp;event=push&amp;style=flat-square&amp;label=checks" alt="Checks and release status on main" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT license" /></a>
   </p>
   <p>
