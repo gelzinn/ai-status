@@ -32,6 +32,7 @@ class InstallerTests(unittest.TestCase):
 case "$2" in
   add) mkdir -p "$AI_STATUS_TEST_HOME/.config/omarchy/plugins/io.github.gelzinn.ai-status/.git" ;;
 esac
+if [ "$1" = restart ]; then exit "${AI_STATUS_TEST_RESTART_FAILURE:-0}"; fi
 exit "${AI_STATUS_TEST_PLUGIN_FAILURE:-0}"''')
         self.waybar_config = self.home / ".config/waybar/config.jsonc"
         self.waybar_config.parent.mkdir(parents=True)
@@ -62,6 +63,7 @@ exit "${AI_STATUS_TEST_PLUGIN_FAILURE:-0}"''')
         self.assertIn(f"omarchy plugin enable {PLUGIN_ID}", self.commands())
         self.assertNotIn("pkill", self.commands())
         self.assertNotIn("waybar ", self.commands())
+        self.assertNotIn("omarchy restart shell", self.commands())
         self.assertTrue((self.home / ".local/bin/ai-status").is_symlink())
 
     def test_repeated_quickshell_install_updates_only_ai_status_and_keeps_preferences(self):
@@ -71,10 +73,35 @@ exit "${AI_STATUS_TEST_PLUGIN_FAILURE:-0}"''')
         self.install("--bar", "quickshell", "--configure-bar", "true")
         self.assertIn(f"omarchy plugin update {PLUGIN_ID} --yes", self.commands())
         self.assertNotIn("plugin add", self.commands())
+        commands = self.commands().splitlines()
+        self.assertEqual(commands.count("omarchy restart shell"), 1)
+        self.assertLess(commands.index(f"omarchy plugin update {PLUGIN_ID} --yes"), commands.index("omarchy restart shell"))
+        self.assertLess(commands.index(f"omarchy plugin enable {PLUGIN_ID}"), commands.index("omarchy restart shell"))
         prefs = json.loads((self.home / ".config/ai-status/selected.json").read_text())
         self.assertFalse(prefs["show_pct"])
         self.assertEqual(prefs["icon_mode"], "off")
         self.assertEqual(prefs["usage_display"], "remaining")
+
+    def test_failed_quickshell_update_does_not_restart_shell(self):
+        self.install("--bar", "quickshell", "--configure-bar", "true")
+        self.log.write_text("")
+        self.env["AI_STATUS_TEST_PLUGIN_FAILURE"] = "1"
+        result = self.install("--bar", "quickshell", "--configure-bar", "true", success=False)
+        self.assertIn(f"omarchy plugin update {PLUGIN_ID} --yes", self.commands())
+        self.assertNotIn("omarchy restart shell", self.commands())
+        self.assertNotIn("done", result.stdout)
+
+    def test_quickshell_restart_failure_reports_failure_and_preserves_preferences(self):
+        self.install("--bar", "quickshell", "--configure-bar", "true", "--usage-display", "remaining")
+        preferences = self.home / ".config/ai-status/selected.json"
+        saved = preferences.read_text()
+        self.log.write_text("")
+        self.env["AI_STATUS_TEST_RESTART_FAILURE"] = "9"
+        result = self.install("--bar", "quickshell", "--configure-bar", "true", "--usage-display", "used", success=False)
+        self.assertEqual(result.returncode, 9)
+        self.assertIn("omarchy restart shell", self.commands())
+        self.assertNotIn("done", result.stdout)
+        self.assertEqual(preferences.read_text(), saved)
 
     def test_usage_display_defaults_to_used_and_explicit_flag_overrides_saved_mode(self):
         self.install("--bar", "waybar", "--configure-bar", "false")

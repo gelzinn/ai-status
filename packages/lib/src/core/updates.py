@@ -111,10 +111,11 @@ def update_guide():
             "Your settings stay in AppData. Keep the old folder until the new version works.",
         ])
     elif method == "omarchy":
-        guide.update(title="Update the Omarchy plugin", command="omarchy plugin update " + PLUGIN_ID + " --yes",
+        guide.update(title="Update the Omarchy plugin",
+                     command="omarchy plugin update " + PLUGIN_ID + " --yes && omarchy restart shell",
                      actionLabel="Update in terminal", canUpdate=shutil.which("omarchy") is not None,
                      steps=["Open the updater in a terminal using the button below.",
-                            "Omarchy updates AI Status and reloads the plugin. Follow any instructions in the terminal."])
+                            "After the plugin update succeeds, Omarchy restarts the shell to load the new UI."])
     elif method in ("linux-installer", "macos-installer"):
         guide.update(title="Update on macOS" if method == "macos-installer" else "Update on Linux",
                      command=_installer_command(method, options, latest), actionLabel="Update in terminal", canUpdate=True,
