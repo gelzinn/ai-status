@@ -1533,6 +1533,32 @@ struct UpdatePage: View {
     }
 }
 
+struct UpdateProgressBar: View {
+    let percent: Double?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.04, paused: percent != nil || reduceMotion)) { context in
+            GeometryReader { geometry in
+                let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.2) / 1.2
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Palette.border)
+                    if let percent = percent {
+                        Capsule().fill(Palette.update).frame(width: geometry.size.width * percent / 100)
+                    } else {
+                        Capsule().fill(Palette.update).frame(width: geometry.size.width * 0.3)
+                            .offset(x: reduceMotion ? geometry.size.width * 0.35 :
+                                    geometry.size.width * (phase * 1.3 - 0.3))
+                    }
+                }.clipped()
+            }.frame(height: 5)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Update progress")
+        .accessibilityValue(percent.map { String(format: "%.0f%%", $0) } ?? "In progress")
+    }
+}
+
 struct UpdateActions: View {
     @ObservedObject var model: Model
     var body: some View {
@@ -1547,13 +1573,7 @@ struct UpdateActions: View {
                         Text(String(format: "%.0f%%", percent)).monospacedDigit()
                     }
                 }.foregroundColor(Palette.update)
-                if let percent = model.updateProgress?.downloadPercent {
-                    ProgressView(value: percent, total: 100).progressViewStyle(.linear).tint(Palette.update)
-                        .accessibilityLabel("Download progress")
-                } else {
-                    ProgressView().progressViewStyle(.linear).tint(Palette.update)
-                        .accessibilityLabel(model.updateProgress?.label ?? "Updating")
-                }
+                UpdateProgressBar(percent: model.updateProgress?.downloadPercent)
                 if let transferred = model.updateProgress?.transferred, !transferred.isEmpty {
                     Text(transferred).font(.custom("GeistMono-Regular", size: 11)).monospacedDigit()
                 }

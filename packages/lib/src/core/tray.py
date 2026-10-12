@@ -2263,8 +2263,13 @@ class Dashboard(QWidget):
         content.layout().activate()
         height = content.heightForWidth(self.width() - 2) if content.hasHeightForWidth() else content.sizeHint().height()
         height = max(height, content.minimumSizeHint().height())
-        footer_height = (self.settings_footer.sizeHint().height() if self.configuring() else
-                         self.update_view.footer.sizeHint().height() if self.viewing_updates() else 0)
+        footer_height = 0
+        if self.configuring():
+            footer_height = self.settings_footer.sizeHint().height()
+        elif self.viewing_updates():
+            footer = self.update_view.footer
+            footer_height = (footer.heightForWidth(self.width() - 2) if footer.hasHeightForWidth()
+                             else footer.sizeHint().height())
         natural_height = height + 57 + footer_height
         screen = self.screen().availableGeometry()
         bottom = self.geometry().bottom()
