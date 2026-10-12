@@ -12,7 +12,7 @@ from PySide6.QtCore import QEasingCurve, QEvent, QModelIndex, QObject, QPoint, Q
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPalette, QPen
 from PySide6.QtWidgets import (
     QAbstractButton, QApplication, QButtonGroup, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout,
-    QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
+    QLabel, QLayout, QLineEdit, QListWidget, QListWidgetItem, QMenu,
     QPushButton, QScrollArea, QSizePolicy, QSpacerItem, QStackedWidget, QStyledItemDelegate, QStyle,
     QSystemTrayIcon, QVBoxLayout, QWidget,
 )
@@ -32,11 +32,13 @@ def provider_name(key):
     return name + (" · " + info["label"] if key.startswith("account:") else "")
 
 # Colors, spacing and typography match the landing page's WaybarReplica.
+PANEL_BORDER_COLOR = "#262626"
 PANEL_STYLE = """
 QWidget { color: #888888; background: transparent; font-family: "Geist Mono"; font-size: 13px; }
 QDialog { background: #111111; }
-QWidget#panel { background: #111111; border: 1px solid #262626; border-radius: 12px; }
-QWidget#header { border-bottom: 1px solid #202020; }
+QWidget#panel { background: #111111; border: 1px solid PANEL_BORDER; border-radius: 12px; }
+QWidget#header { border-bottom: 1px solid PANEL_BORDER; }
+QWidget#settingsFooter { border-top: 1px solid PANEL_BORDER; }
 QLabel { background: transparent; border: none; }
 QLabel#brand { color: #eeeeee; font-weight: 500; }
 QAbstractButton { border: none; background: transparent; text-align: left; }
@@ -73,7 +75,7 @@ QMenu::item { color: #888888; padding: 8px 12px; margin: 1px 0; border-radius: 6
 QMenu::item:selected { background: #1c1c1c; color: #eeeeee; }
 QMenu::item:disabled { color: #555555; background: transparent; }
 QMenu::separator { height: 1px; background: #262626; margin: 6px; }
-"""
+""".replace("PANEL_BORDER", PANEL_BORDER_COLOR)
 
 
 def panel_font():
@@ -791,6 +793,32 @@ class UsageWorker(QObject):
             self.finished.emit(data)
 
 
+class SettingsNavigation(QScrollArea):
+    """A single row of tabs that scrolls independently from Settings content."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.FocusIn:
+            self.ensureWidgetVisible(watched, 4, 0)
+        return super().eventFilter(watched, event)
+
+    def wheelEvent(self, event):
+        pixels = event.pixelDelta()
+        angle = event.angleDelta()
+        delta = pixels.x() or pixels.y() or (angle.x() or angle.y()) / 120 * 48
+        if delta:
+            bar = self.horizontalScrollBar()
+            bar.setValue(bar.value() - round(delta))
+            event.accept()
+        else:
+            super().wheelEvent(event)
+
+
 class ProviderSettings(QWidget):
     saved = Signal()
     cancelled = Signal()
@@ -828,32 +856,34 @@ class ProviderSettings(QWidget):
         self.current_section = "general"
         self.section_positions = {}
         self.sections = {}
-        self.navigation = QWidget(self)
+        self.navigation = SettingsNavigation(self)
         self.navigation.hide()
         self.navigation.setStyleSheet("""
-            QPushButton { padding: 7px 5px; font-size: 12px; border: 1px solid transparent; border-radius: 6px; }
+            QScrollArea { border: none; }
+            QPushButton { padding: 7px 16px; font-size: 12px; border: 1px solid #303030; border-radius: 6px; }
             QPushButton:checked { color: #eeeeee; background: #252525; border-color: #303030; }
             QPushButton:focus { border-color: #888888; }
         """)
-        navigation_layout = QVBoxLayout(self.navigation)
+        navigation_content = QWidget()
+        navigation_layout = QHBoxLayout(navigation_content)
         navigation_layout.setContentsMargins(0, 0, 0, 0)
         navigation_layout.setSpacing(4)
+        navigation_layout.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
+        self.navigation.setWidget(navigation_content)
         self.section_group = QButtonGroup(self)
         self.section_buttons = {}
-        for index, (key, label) in enumerate((("general", "General"), ("appearance", "Appearance"),
-                                              ("alerts", "Alerts"), ("providers", "Providers"))):
-            if index % 2 == 0:
-                row = QHBoxLayout()
-                row.setSpacing(4)
-                navigation_layout.addLayout(row)
+        for key, label in (("general", "General"), ("appearance", "Appearance"),
+                           ("alerts", "Alerts"), ("providers", "Providers")):
             button = QPushButton(label)
+            button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             button.setCheckable(True)
             button.setChecked(key == self.current_section)
             button.setAccessibleName(label + " settings")
             button.clicked.connect(lambda checked=False, section=key: self.select_section(section))
             self.section_group.addButton(button)
             self.section_buttons[key] = button
-            row.addWidget(button)
+            navigation_layout.addWidget(button)
+            button.installEventFilter(self.navigation)
             section = QWidget()
             section.setVisible(key == self.current_section)
             section_layout = QVBoxLayout(section)
@@ -861,6 +891,9 @@ class ProviderSettings(QWidget):
             section_layout.setSpacing(8)
             self.sections[key] = section
             layout.addWidget(section)
+        navigation_content.ensurePolished()
+        navigation_layout.activate()
+        self.navigation.setFixedHeight(navigation_content.sizeHint().height())
         layout.addStretch()
         general = self.sections["general"].layout()
         general.addWidget(plain_label("Active provider & limit", "#eeeeee"))
@@ -956,7 +989,10 @@ class ProviderSettings(QWidget):
         self.startup.toggled.connect(self.clear_message)
 
     def select_section(self, key):
-        if key not in self.sections or key == self.current_section:
+        if key not in self.sections:
+            return
+        self.navigation.ensureWidgetVisible(self.section_buttons[key], 4, 0)
+        if key == self.current_section:
             return
         scroll = getattr(self.dashboard, "settings_scroll", None)
         if scroll and self.dashboard.configuring():
@@ -1486,6 +1522,7 @@ class Dashboard(QWidget):
         self.update_scroll.setWidget(self.update_view)
         self.pages.addWidget(self.update_scroll)
         self.settings_footer = QWidget()
+        self.settings_footer.setObjectName("settingsFooter")
         self.settings_footer_layout = QHBoxLayout(self.settings_footer)
         self.settings_footer_layout.setContentsMargins(16, 8, 16, 12)
         self.settings_footer.hide()

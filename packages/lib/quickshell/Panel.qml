@@ -284,47 +284,70 @@ Ui.Panel {
                 x: -panel.padding
                 width: parent.width + panel.padding * 2
                 height: Style.space(1)
-                color: Qt.rgba(root.barForeground.r, root.barForeground.g, root.barForeground.b, 0.12)
+                color: Commons.Color.popups.border
             }
 
-            Grid {
+            Flickable {
                 id: settingsNavigation
                 objectName: "settings-navigation"
                 anchors.top: divider.bottom
                 anchors.topMargin: Style.space(12)
                 width: parent.width
-                columns: 2
-                spacing: Style.space(4)
+                height: sectionTabs.height
+                contentWidth: sectionTabs.width
+                contentHeight: height
+                clip: true
+                flickableDirection: Flickable.HorizontalFlick
+                boundsBehavior: Flickable.StopAtBounds
                 visible: root.configurationPage && !root.aboutPage
                 enabled: !Plugin.Model.settingsSaving
                 function focusCurrentControl() {
                     sectionButtons.itemAt(settings.sections.findIndex(item => item.key === settings.section)).forceActiveFocus(Qt.TabFocusReason)
                 }
+                function revealTab(button) {
+                    if (!button) return
+                    let nextX = contentX
+                    if (button.x < contentX) nextX = button.x
+                    else if (button.x + button.width > contentX + width) nextX = button.x + button.width - width
+                    contentX = Math.max(0, Math.min(nextX, Math.max(0, contentWidth - width)))
+                }
                 function moveFocus(index, offset) {
                     const next = (index + offset + sectionButtons.count) % sectionButtons.count
                     sectionButtons.itemAt(next).forceActiveFocus(Qt.TabFocusReason)
+                    settings.selectSection(settings.sections[next].key)
                 }
-                Repeater {
-                    id: sectionButtons
-                    model: settings.sections
-                    delegate: Plugin.PanelButton {
-                        required property var modelData
-                        required property int index
-                        objectName: "settings-nav-" + modelData.key
-                        width: (settingsNavigation.width - settingsNavigation.spacing) / 2
-                        text: modelData.label
-                        fontFamily: root.panelFont
-                        foreground: root.barForeground
-                        outlined: true
-                        color: settings.section === modelData.key ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.12)
-                            : activeFocus ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.06) : "transparent"
-                        Accessible.role: Accessible.PageTab
-                        Accessible.selected: settings.section === modelData.key
-                        onClicked: settings.selectSection(modelData.key)
-                        Keys.onLeftPressed: settingsNavigation.moveFocus(index, -1)
-                        Keys.onRightPressed: settingsNavigation.moveFocus(index, 1)
-                        Keys.onUpPressed: settingsNavigation.moveFocus(index, -2)
-                        Keys.onDownPressed: settingsNavigation.moveFocus(index, 2)
+                WheelHandler {
+                    target: null
+                    onWheel: event => {
+                        const delta = event.pixelDelta.x || event.pixelDelta.y || event.angleDelta.x / 3 || event.angleDelta.y / 3
+                        settingsNavigation.contentX = Math.max(0, Math.min(settingsNavigation.contentWidth - settingsNavigation.width, settingsNavigation.contentX - delta))
+                        event.accepted = true
+                    }
+                }
+                Row {
+                    id: sectionTabs
+                    spacing: Style.space(6)
+                    Repeater {
+                        id: sectionButtons
+                        model: settings.sections
+                        delegate: Plugin.PanelButton {
+                            required property var modelData
+                            required property int index
+                            objectName: "settings-nav-" + modelData.key
+                            width: implicitWidth + Style.space(12)
+                            text: modelData.label
+                            fontFamily: root.panelFont
+                            foreground: root.barForeground
+                            outlined: true
+                            color: settings.section === modelData.key ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.12)
+                                : activeFocus ? Qt.rgba(foreground.r, foreground.g, foreground.b, 0.06) : "transparent"
+                            Accessible.role: Accessible.PageTab
+                            Accessible.selected: settings.section === modelData.key
+                            onClicked: settings.selectSection(modelData.key)
+                            onActiveFocusChanged: if (activeFocus) settingsNavigation.revealTab(sectionButtons.itemAt(index))
+                            Keys.onLeftPressed: settingsNavigation.moveFocus(index, -1)
+                            Keys.onRightPressed: settingsNavigation.moveFocus(index, 1)
+                        }
                     }
                 }
             }
@@ -420,6 +443,7 @@ Ui.Panel {
                             Qt.callLater(() => {
                                 content.forceLayout()
                                 if (!root.configurationPage || root.aboutPage) return
+                                settingsNavigation.revealTab(sectionButtons.itemAt(settings.sections.findIndex(item => item.key === settings.section)))
                                 const item = keyCatcher.Window.window ? keyCatcher.Window.window.activeFocusItem : null
                                 if (item && !item.visible) settingsNavigation.focusCurrentControl()
                             })

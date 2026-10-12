@@ -453,6 +453,57 @@ class DesktopTests(IsolatedState):
         self.assertIn("text field", settings.message.text())
         save_order.assert_not_called()
 
+    def test_settings_single_row_tabs_scroll_in_narrow_viewport_and_reveal_selected_or_focused_tab(self):
+        with patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.configure()
+            self.app.processEvents()
+            settings = self.dashboard.settings_view
+            navigation = settings.navigation
+            self.assertGreater(navigation.horizontalScrollBar().maximum(), 0)
+            navigation.setFixedWidth(220)
+            self.app.processEvents()
+            bar = navigation.horizontalScrollBar()
+            self.assertGreater(bar.maximum(), 0)
+            self.assertFalse(bar.isVisible())
+            buttons = list(settings.section_buttons.values())
+            self.assertEqual(len({button.y() for button in buttons}), 1)
+            self.assertGreater(buttons[1].width(), buttons[2].width())
+            self.assertLess(buttons[0].width(), navigation.viewport().width())
+            settings.section_buttons["general"].setFocus()
+            for _ in range(3):
+                QTest.keyClick(self.dashboard.focusWidget(), tray.Qt.Key.Key_Right)
+                self.app.processEvents()
+            self.assertEqual(settings.current_section, "providers")
+            providers_tab = settings.section_buttons["providers"]
+            self.assertIs(self.dashboard.focusWidget(), providers_tab)
+            self.assertTrue(navigation.viewport().rect().contains(
+                tray.QRectF(providers_tab.mapTo(navigation.viewport(), tray.QPoint()), providers_tab.size()).toRect()))
+            self.assertGreater(bar.value(), 0)
+            general_tab = settings.section_buttons["general"]
+            general_tab.setFocus()
+            self.app.processEvents()
+            self.assertEqual(bar.value(), 0)
+            self.assertEqual(settings.current_section, "providers")
+            content = self.dashboard.settings_scroll
+            content.verticalScrollBar().setValue(0)
+            point = tray.QPoint(10, 10)
+            event = QWheelEvent(tray.QPointF(point), tray.QPointF(navigation.viewport().mapToGlobal(point)),
+                                tray.QPoint(), tray.QPoint(0, -120), tray.Qt.MouseButton.NoButton,
+                                tray.Qt.KeyboardModifier.NoModifier, tray.Qt.ScrollPhase.NoScrollPhase, False)
+            QApplication.sendEvent(navigation.viewport(), event)
+            self.assertTrue(event.isAccepted())
+            self.assertGreater(bar.value(), 0)
+            self.assertEqual(content.verticalScrollBar().value(), 0)
+            self.assertEqual(settings.current_section, "providers")
+            event = QWheelEvent(tray.QPointF(point), tray.QPointF(content.viewport().mapToGlobal(point)),
+                                tray.QPoint(), tray.QPoint(0, -120), tray.Qt.MouseButton.NoButton,
+                                tray.Qt.KeyboardModifier.NoModifier, tray.Qt.ScrollPhase.NoScrollPhase, False)
+            tab_position = bar.value()
+            QApplication.sendEvent(content.viewport(), event)
+            self.app.processEvents()
+            self.assertGreater(content.verticalScrollBar().value(), 0)
+            self.assertEqual(bar.value(), tab_position)
+
     def test_settings_escape_and_cancel_discard_only_unsaved_changes(self):
         self.dashboard.configure()
         settings = self.dashboard.settings_view

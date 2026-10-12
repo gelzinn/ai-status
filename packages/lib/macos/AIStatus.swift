@@ -1063,21 +1063,24 @@ struct SettingsNavigationButton: View {
     let section: SettingsSection
     let selected: Bool
     let action: () -> Void
+    let focusChanged: () -> Void
     @State private var hovering = false
     @FocusState private var focused: Bool
     @Environment(\.controlKeyboardFocusVisible) private var keyboardFocusVisible
     @Environment(\.isEnabled) private var enabled
     var body: some View {
         Button(action: action) {
-            Text(section.title).frame(maxWidth: .infinity).padding(.vertical, 9).contentShape(Rectangle())
+            Text(section.title).fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 16).padding(.vertical, 9).contentShape(Rectangle())
         }.buttonStyle(.plain).focused($focused)
             .foregroundColor(selected || (focused && keyboardFocusVisible) ? Palette.bright : Palette.dim)
             .background(RoundedRectangle(cornerRadius: 6)
                 .fill(selected ? Palette.bright.opacity(0.09) : hovering && enabled ? Palette.bright.opacity(0.045) : .clear))
             .overlay(RoundedRectangle(cornerRadius: 6)
-                .stroke(focused && keyboardFocusVisible ? Palette.bright.opacity(0.5) : selected ? Palette.border : .clear))
+                .stroke(focused && keyboardFocusVisible ? Palette.bright.opacity(0.5) : Palette.border))
             .opacity(enabled ? 1 : 0.4)
             .onHover { hovering = $0 }
+            .onChange(of: focused) { if $0 { focusChanged() } }
             .accessibilityLabel(section.title)
             .accessibilityAddTraits(selected ? .isSelected : [])
             .help(section.detail)
@@ -1087,11 +1090,19 @@ struct SettingsNavigationButton: View {
 struct SettingsNavigation: View {
     @ObservedObject var model: Model
     var body: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 4) {
-            ForEach(SettingsSection.allCases) { section in
-                SettingsNavigationButton(section: section, selected: model.settingsSection == section,
-                                         action: { model.showSettingsSection(section) })
-            }
+        ScrollViewReader { scroll in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(SettingsSection.allCases) { section in
+                        SettingsNavigationButton(section: section, selected: model.settingsSection == section,
+                                                 action: { model.showSettingsSection(section) },
+                                                 focusChanged: { scroll.scrollTo(section.id, anchor: .center) })
+                            .id(section.id)
+                    }
+                }.padding(.vertical, 1)
+            }.frame(height: 36)
+                .onAppear { scroll.scrollTo(model.settingsSection.id, anchor: .center) }
+                .onChange(of: model.settingsSection) { scroll.scrollTo($0.id, anchor: .center) }
         }.padding(.horizontal, 16).padding(.vertical, 10).disabled(model.settingsSaving)
     }
 }
@@ -1528,10 +1539,10 @@ struct PanelView: View {
                     if model.page == .usage { ControlButton(icon: "settings", help: "Configure (C)", action: model.showSettings) }
                 }
             }.padding(.horizontal, 16).frame(height: 49)
-            Divider().overlay(Palette.border)
+            Rectangle().fill(Palette.border).frame(height: 1).accessibilityHidden(true)
             if model.page == .settings {
                 SettingsNavigation(model: model)
-                Divider().overlay(Palette.border)
+                Rectangle().fill(Palette.border).frame(height: 1).accessibilityHidden(true)
             }
             ScrollViewReader { scroll in
                 ScrollView {
@@ -1566,7 +1577,7 @@ struct PanelView: View {
                 }
             }
             if model.page == .settings {
-                Divider().overlay(Palette.border)
+                Rectangle().fill(Palette.border).frame(height: 1).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 8) {
                     if !model.settingsError.isEmpty {
                         Text(model.settingsError).font(.custom("GeistMono-Regular", size: 11)).foregroundColor(.orange)
