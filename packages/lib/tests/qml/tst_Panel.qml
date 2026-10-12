@@ -319,7 +319,7 @@ Item {
             prepareUpdate(true)
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
             const original = snapshot.providers[0].metrics[0]
-            for (let index = 0; index < 20; index++) {
+            for (let index = 0; index < 30; index++) {
                 const metric = Object.assign({}, original, {key: "rolling:long-" + index, name: "Usage " + index})
                 snapshot.providers[0].metrics.push(metric)
             }
@@ -558,8 +558,8 @@ Item {
             compare(back.border.width, 0)
             keyCatcher.forceActiveFocus()
             keyClick(Qt.Key_Backtab)
-            verify(back.activeFocus)
-            compare(back.border.width, 1)
+            verify(findChild(panel, "settings-nav-about").activeFocus)
+            compare(findChild(panel, "panel-settings-page").section, "about")
             mouseClick(back)
             compare(back.border.width, 0)
         }
@@ -574,7 +574,7 @@ Item {
         function configureManyProviders() {
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
             snapshot.settings.providerIds = {claude: "claude", codex: "codex", kiro: "kiro"}
-            for (let index = 0; index < 20; index++) {
+            for (let index = 0; index < 30; index++) {
                 const id = "account:scroll-" + index
                 const entry = JSON.parse(JSON.stringify(snapshot.providers[0]))
                 entry.id = id
@@ -589,14 +589,17 @@ Item {
             Plugin.Model.snapshot = snapshot
             panel.configure()
             wait(20)
+            const settings = findChild(panel, "panel-settings-page")
+            settings.selectSection("providers")
+            wait(20)
             const scroller = findChild(panel, "panel-scroller")
             verify(scroller.contentHeight > scroller.height * 2)
-            return findChild(panel, "panel-settings-page")
+            return settings
         }
         function verifyControlInViewport(control, scroller) {
             tryVerify(() => {
                 const top = control.mapToItem(scroller, 0, 0).y
-                return top >= -0.5 && top + control.height <= scroller.height + 0.5
+                return top >= scroller.navigationInset - 0.5 && top + control.height <= scroller.height + 0.5
             }, 1000, "Focused control must be fully visible: " + control.objectName)
         }
         function tabToNextControl(control, scroller, backwards) {
@@ -610,8 +613,8 @@ Item {
         function test_tab_and_backtab_reveal_controls_through_long_settings() {
             const settings = configureManyProviders()
             const scroller = findChild(panel, "panel-scroller")
-            const first = findChild(settings, "active-provider")
-            const last = findChild(settings, "settings-about")
+            const first = findChild(settings, "provider-claude")
+            const last = findChild(settings, "provider-move-up-" + settings.order[settings.order.length - 1])
             first.forceActiveFocus(Qt.TabFocusReason)
             verifyControlInViewport(first, scroller)
             compare(scroller.contentY, 0)
@@ -633,7 +636,7 @@ Item {
         function test_fixed_footer_and_header_focus_preserve_settings_scroll() {
             const settings = configureManyProviders()
             const scroller = findChild(panel, "panel-scroller")
-            const about = findChild(settings, "settings-about")
+            const about = findChild(settings, "provider-move-up-" + settings.order[settings.order.length - 1])
             scroller.contentY = Math.max(0, scroller.contentHeight - scroller.height)
             about.forceActiveFocus(Qt.TabFocusReason)
             verifyControlInViewport(about, scroller)
@@ -652,8 +655,140 @@ Item {
             verify(back.activeFocus)
             compare(scroller.contentY, position)
         }
+        function test_submenu_navigation_is_fixed_and_preserves_draft_and_keyboard_access() {
+            const settings = configureManyProviders()
+            settings.toggleProvider("kiro")
+            settings.usageDisplay = "remaining"
+            const scroller = findChild(panel, "panel-scroller")
+            const navigation = findChild(panel, "settings-navigation")
+            const providers = findChild(panel, "settings-nav-providers")
+            const appearance = findChild(panel, "settings-nav-appearance")
+            const navY = navigation.y
+            scroller.contentY = scroller.contentHeight - scroller.height
+            providers.forceActiveFocus(Qt.TabFocusReason)
+            wait(20)
+            compare(navigation.y, navY)
+            verify(scroller.contentY > scroller.height)
+            verify(navigation.contentWidth > navigation.width)
+            verify(navigation.contentX > 0)
+            verify(providers.mapToItem(navigation, 0, 0).x >= 0)
+            verify(providers.mapToItem(navigation, providers.width, 0).x <= navigation.width + 0.5)
+            keyClick(Qt.Key_Left)
+            compare(settings.section, "alerts")
+            keyClick(Qt.Key_Left)
+            verify(appearance.activeFocus)
+            keyClick(Qt.Key_Return)
+            compare(settings.section, "appearance")
+            tryCompare(scroller, "contentY", 0)
+            compare(settings.usageDisplay, "remaining")
+            verify(settings.enabledProviders.indexOf("kiro") !== -1)
+            const general = findChild(panel, "settings-nav-general")
+            keyClick(Qt.Key_Left)
+            compare(settings.section, "general")
+            wait(20)
+            compare(navigation.contentX, 0)
+            general.forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Tab)
+            verify(appearance.activeFocus)
+            keyClick(Qt.Key_Tab)
+            verify(findChild(panel, "settings-nav-alerts").activeFocus)
+            keyClick(Qt.Key_Tab)
+            verify(providers.activeFocus)
+            keyClick(Qt.Key_Tab)
+            verify(findChild(panel, "settings-nav-guide").activeFocus)
+            keyClick(Qt.Key_Tab)
+            verify(findChild(panel, "settings-nav-about").activeFocus)
+            keyClick(Qt.Key_Tab)
+            verify(findChild(settings, "active-provider").activeFocus)
+            // Controls in the other sections are skipped by the focus chain.
+            keyClick(Qt.Key_Tab)
+            verify(findChild(panel, "settings-cancel").activeFocus)
+            Plugin.Model.settingsSaving = true
+            verify(!navigation.enabled)
+            settings.selectSection("providers")
+            compare(settings.section, "general")
+            Plugin.Model.settingsSaving = false
+            mouseClick(findChild(panel, "settings-save"))
+            compare(Plugin.Model.saved.usageDisplay, "remaining")
+            panel.showUsage()
+            panel.configure()
+            compare(settings.section, "general")
+            compare(settings.usageDisplay, "used")
+        }
+        function test_hidden_validation_stays_in_fixed_footer_and_routes_to_affected_section() {
+            const settings = configureManyProviders()
+            const scroller = findChild(panel, "panel-scroller")
+            settings.alertThresholds = "101"
+            wait(20)
+            compare(scroller.contentY, 0)
+            verify(!findChild(panel, "settings-save").enabled)
+            const review = findChild(panel, "settings-review-section")
+            const footer = findChild(panel, "settings-footer")
+            verify(review.visible)
+            verify(review.mapToItem(footer, 0, 0).y >= 0)
+            verify(review.mapToItem(footer, 0, review.height).y <= footer.height)
+            verify(findChild(panel, "settings-validation-message").visible)
+            mouseClick(review)
+            compare(settings.section, "alerts")
+            verify(!review.visible)
+            settings.alertThresholds = "80,95,100"
+            wait(20)
+            verify(findChild(panel, "settings-save").enabled)
+            verify(!findChild(panel, "settings-validation-message").visible)
+        }
+        function test_horizontal_tab_strip_scrolls_without_changing_section_or_content_scroll() {
+            panel.configure()
+            wait(20)
+            const settings = findChild(panel, "panel-settings-page")
+            const navigation = findChild(panel, "settings-navigation")
+            const scroller = findChild(panel, "panel-scroller")
+            verify(navigation.contentWidth > navigation.width)
+            compare(navigation.contentX, 0)
+            mouseWheel(navigation, navigation.width / 2, navigation.height / 2, 0, -120)
+            tryVerify(() => navigation.contentX > 0)
+            compare(settings.section, "general")
+            compare(scroller.contentY, 0)
+            mouseWheel(navigation, navigation.width / 2, navigation.height / 2, 120, 0)
+            tryCompare(navigation, "contentX", 0)
+            settings.selectSection("providers")
+            wait(20)
+            const providers = findChild(panel, "settings-nav-providers")
+            verify(providers.mapToItem(navigation, 0, 0).x >= 0)
+            verify(providers.mapToItem(navigation, providers.width, 0).x <= navigation.width + 0.5)
+        }
+        function test_scroll_viewports_reach_edges_with_padding_inside_scrollable_content() {
+            const settings = configureManyProviders()
+            const surface = findChild(panel, "panel-surface")
+            const navigation = findChild(panel, "settings-navigation")
+            const scroller = findChild(panel, "panel-scroller")
+            const footer = findChild(panel, "settings-footer")
+            compare(navigation.mapToItem(surface, 0, 0).x, 0)
+            compare(navigation.width, surface.width)
+            compare(scroller.mapToItem(surface, 0, 0).x, 0)
+            compare(scroller.width, surface.width)
+            compare(scroller.y + scroller.navigationInset, navigation.y + navigation.height)
+            compare(scroller.y + scroller.height, footer.y)
+            settings.selectSection("general")
+            wait(20)
+            const general = findChild(panel, "settings-nav-general")
+            compare(navigation.contentX, 0)
+            compare(general.mapToItem(navigation, 0, 0).x, 16)
+            settings.selectSection("about")
+            wait(20)
+            const lastTab = findChild(panel, "settings-nav-about")
+            compare(navigation.contentX, navigation.contentWidth - navigation.width)
+            compare(lastTab.mapToItem(navigation, lastTab.width, 0).x, navigation.width - 16)
+            settings.selectSection("providers")
+            wait(20)
+            compare(settings.mapToItem(scroller, 0, 0).y, scroller.navigationInset + 12)
+            scroller.contentY = scroller.contentHeight - scroller.height
+            compare(settings.mapToItem(scroller, 0, settings.height).y, scroller.height - 12)
+            verify(settings.mapToItem(scroller, 0, 0).y < 0)
+        }
         function test_tab_dismisses_selector_without_scrolling_to_popup_overlay() {
             const settings = configureManyProviders()
+            settings.selectSection("general")
+            wait(20)
             const scroller = findChild(panel, "panel-scroller")
             const selector = findChild(settings, "active-provider")
             selector.forceActiveFocus(Qt.TabFocusReason)
@@ -665,7 +800,12 @@ Item {
             compare(scroller.contentY, position)
             keyClick(Qt.Key_Tab)
             tryCompare(selector, "popupOpen", false)
+            const cancel = findChild(panel, "settings-cancel")
+            tryVerify(() => cancel.activeFocus)
+            settings.selectSection("appearance")
+            wait(20)
             const next = findChild(settings, "usage-display")
+            next.forceActiveFocus(Qt.TabFocusReason)
             tryVerify(() => next.activeFocus)
             verifyControlInViewport(next, scroller)
             keyClick(Qt.Key_Space)
@@ -791,8 +931,10 @@ Item {
             compare(separator.color, headerSeparator.color)
             compare(separator.mapToItem(surface, 0, 0).x, headerSeparator.mapToItem(surface, 0, 0).x)
             compare(separator.width, surface.width)
-            verify(scroller.mapToItem(surface, 0, scroller.height).y < separator.mapToItem(surface, 0, 0).y)
+            compare(scroller.mapToItem(surface, 0, scroller.height).y, separator.mapToItem(surface, 0, 0).y)
             verify(separator.mapToItem(footer, 0, separator.height).y < cancel.mapToItem(footer, 0, 0).y)
+            compare(cancel.mapToItem(footer, 0, 0).y - separator.height, 16)
+            compare(surface.height - cancel.mapToItem(surface, 0, cancel.height).y, 16)
             compare(cancel.outlined, true)
             compare(save.primary, true)
             compare(save.text, "Save")
@@ -830,9 +972,9 @@ Item {
             tryVerify(() => icon.rotation > 0)
             const rotation = icon.rotation
             tryVerify(() => icon.rotation !== rotation)
-            panel.aboutPage = true
+            panel.configurationPage = false
             tryCompare(icon, "rotation", 0)
-            panel.aboutPage = false
+            panel.configurationPage = true
             tryVerify(() => icon.rotation > 0)
             Plugin.Model.settingsSaving = false
             compare(label.text, "Error")
@@ -857,38 +999,137 @@ Item {
             settings.toggleProvider("kiro")
             compare(label.text, "")
         }
-        function test_about_back_preserves_settings_draft_and_scroll() {
+        function test_about_is_last_settings_tab_and_preserves_shared_draft_and_save() {
             panel.configure()
             wait(20)
             const settings = findChild(panel, "panel-settings-page")
             settings.toggleProvider("kiro")
             settings.moveProvider(1, -1)
             const order = JSON.stringify(settings.order)
-            const scroller = findChild(panel, "panel-scroller")
-            scroller.contentY = Math.max(0, scroller.contentHeight - scroller.height)
-            const scrollPosition = scroller.contentY
-            mouseClick(findChild(settings, "settings-about"))
+            settings.usageDisplay = "remaining"
+            compare(settings.sections[settings.sections.length - 1].key, "about")
+            verify(findChild(settings, "settings-about") === null)
+            panel.showAbout()
             wait(20)
-            verify(panel.aboutPage)
-            compare(findChild(panel, "panel-title").text, "About")
-            verify(!findChild(panel, "settings-save").visible)
+            compare(settings.section, "about")
+            verify(findChild(settings, "settings-section-about").visible)
+            compare(findChild(panel, "panel-title").text, "Settings")
+            verify(findChild(panel, "settings-save").visible)
+            verify(findChild(panel, "settings-navigation").visible)
             const metadata = findChild(panel, "about-metadata")
             verify(metadata.text.indexOf("12345678") !== -1)
             verify(metadata.text.indexOf("gelzin.com") !== -1)
-            keyClick(Qt.Key_Escape)
+            const projectLink = findChild(settings, "about-link-guide")
+            compare(projectLink.trailingIconName, "arrow-right")
+            findChild(panel, "settings-nav-about").forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Tab)
+            tryVerify(() => projectLink.activeFocus)
+            settings.selectSection("general")
             wait(20)
-            verify(!panel.aboutPage)
             verify(panel.configurationPage)
             compare(JSON.stringify(settings.order), order)
             verify(settings.enabledProviders.indexOf("kiro") !== -1)
-            compare(scroller.contentY, scrollPosition)
-            verify(findChild(settings, "settings-about").activeFocus)
+            compare(settings.usageDisplay, "remaining")
+            settings.selectSection("about")
+            wait(20)
             mouseClick(findChild(panel, "settings-save"))
             compare(Plugin.Model.saved.enabled[0], "codex")
+            compare(Plugin.Model.saved.usageDisplay, "remaining")
+            Plugin.Model.settingsSaved()
+            compare(settings.section, "about")
+            verify(settings.saved)
+            keyClick(Qt.Key_Escape)
+            wait(20)
+            verify(!panel.configurationPage)
+            verify(panel.opened)
+            panel.showAbout()
+            wait(20)
+            verify(panel.configurationPage)
+            compare(settings.section, "about")
+            compare(settings.usageDisplay, "used")
+        }
+        function test_guide_link_order_keycaps_and_tab_icons() {
+            panel.configure()
+            const settings = findChild(panel, "panel-settings-page")
+            compare(settings.sections.map(item => item.key).join(","), "general,appearance,alerts,providers,guide,about")
+            settings.selectSection("about")
+            wait(20)
+            const links = ["guide", "issues", "documentation", "github"].map(key => findChild(settings, "about-link-" + key))
+            for (let index = 1; index < links.length; index++) verify(links[index].y > links[index - 1].y)
+            mouseClick(links[0])
+            compare(settings.section, "guide")
+            wait(20)
+            verify(findChild(settings, "guide-table").visible)
+            for (const key of ["R", "C", "Tab", "Shift+Tab", "Space", "Enter", "Left", "Right", "Esc"]) {
+                const cap = findChild(settings, "guide-keycap-" + key)
+                verify(cap !== null, key)
+                compare(cap.border.width, 1)
+                verify(cap.width > 0)
+            }
+            for (const section of settings.sections) {
+                const tab = findChild(panel, "settings-nav-" + section.key)
+                compare(tab.leadingIconName, section.icon)
+                const icon = findChild(tab, "leading-icon")
+                verify(icon.visible)
+                compare(icon.width, 16)
+            }
+            findChild(panel, "settings-nav-about").forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Tab)
+            verify(findChild(panel, "settings-cancel").activeFocus)
+        }
+        function test_review_invalid_rule_reveals_field_below_fixed_tabs_and_preserves_bar_selection() {
+            panel.configure()
+            const settings = findChild(panel, "panel-settings-page")
+            settings.selected = {provider: "codex", idx: 0, metric: "weekly"}
+            settings.setRule("thresholds", [90,100])
+            settings.setRuleText("bad")
+            settings.selected = {provider: "claude", idx: 0, metric: "rolling"}
+            settings.selectSection("about")
+            wait(20)
+            mouseClick(findChild(panel, "settings-review-section"))
+            compare(settings.section, "alerts")
+            const field = findChild(settings, "alert-rule-thresholds")
+            tryVerify(() => field.inputItem.activeFocus)
+            verifyControlInViewport(field, findChild(panel, "panel-scroller"))
+            compare(settings.selected.provider, "claude")
+            settings.alertsAdvanced = false
+            wait(20)
+            verify(findChild(panel, "settings-review-section").visible)
+            mouseClick(findChild(panel, "settings-review-section"))
+            tryVerify(() => field.inputItem.activeFocus)
+            verifyControlInViewport(field, findChild(panel, "panel-scroller"))
+        }
+        function test_tab_faces_stay_above_content_without_changing_colors_during_scroll() {
+            panel.configure()
+            const settings = findChild(panel, "panel-settings-page")
+            settings.selectSection("guide")
+            wait(20)
+            const surface = findChild(panel, "panel-surface")
+            const tab = findChild(panel, "settings-nav-guide")
+            const scroller = findChild(panel, "panel-scroller")
+            compare(tab.color.a, 1)
+            waitForRendering(surface)
+            const before = grabImage(surface)
+            const position = tab.mapToItem(surface, 0, 0)
+            scroller.contentY = scroller.contentHeight - scroller.height
+            waitForRendering(surface)
+            const after = grabImage(surface)
+            for (let y = 2; y < tab.height - 2; y++) {
+                for (let x = 2; x < tab.width - 2; x++)
+                    compare(after.pixel(Math.round(position.x + x), Math.round(position.y + y)), before.pixel(Math.round(position.x + x), Math.round(position.y + y)))
+            }
+        }
+        function test_short_general_section_fits_without_vertical_overflow() {
+            panel.configure()
+            wait(20)
+            const scroller = findChild(panel, "panel-scroller")
+            verify(scroller.contentHeight <= scroller.height + 1)
         }
         function test_separator_reaches_sides_and_only_refresh_icon_spins() {
             const surface = findChild(panel, "panel-surface")
             const divider = findChild(panel, "panel-divider")
+            compare(divider.color, surface.border.color)
+            compare(findChild(panel, "settings-footer-divider").color, surface.border.color)
             compare(divider.mapToItem(surface, 0, 0).x, 0)
             compare(divider.width, surface.width)
             const button = findChild(panel, "panel-refresh")
