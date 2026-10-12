@@ -318,7 +318,7 @@ def get_version_info():
         "has_update": newer_version(_latest_version, __version__),
     }
 
-def fetch_all_data(on_result=None, on_error=None, include_errors=False):
+def fetch_all_data(on_result=None, on_error=None, include_errors=False, check_updates=False):
     repo_dir = cfgmod.providers_dir()
     script_dir = repo_dir
 
@@ -335,7 +335,11 @@ def fetch_all_data(on_result=None, on_error=None, include_errors=False):
                        if name in cfgmod.available_providers()]
 
     connection_results = {}
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(connections)))) as executor:
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(connections))) + int(check_updates)) as executor:
+        if check_updates:
+            # Check the release alongside usage queries. A slow or unavailable
+            # GitHub response must not delay streamed provider results.
+            executor.submit(check_for_updates)
         future_to_connection = {}
         for connection in connections:
             directory = os.path.join(script_dir, connection["provider"])

@@ -55,7 +55,7 @@ def update_task(output_format="waybar"):
                         state.save_cache(_ordered_merged(cfgmod.enabled_connection_order()))
                     _pending.discard(dir_name)
 
-                data = fetch.fetch_all_data(on_result=on_result, include_errors=output_format in ("quickshell", "macos"))
+                data = fetch.fetch_all_data(on_result=on_result, include_errors=output_format in ("quickshell", "macos"), check_updates=True)
                 latest_data = data
                 state.save_cache(data)
             finally:
@@ -128,7 +128,6 @@ def _run(output_format="waybar"):
             logos.signal_waybar()
 
     last_auto_update = time.time()
-    last_update_check = 0
     last_config_mtime = None
     last_selected_mtime = 0
     last_refresh = paths.read_json(state.REFRESH_FILE)
@@ -147,10 +146,6 @@ def _run(output_format="waybar"):
                 if refresh != last_refresh:
                     last_refresh = refresh
                     should_update = True
-            
-            if now - last_update_check >= 3600:
-                fetch.check_for_updates()
-                last_update_check = now
             
             config_mtime = tuple(os.path.getmtime(p) if os.path.exists(p) else 0
                                  for p in (cfgmod.CONFIG_FILE, cfgmod.accounts_file()))

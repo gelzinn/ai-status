@@ -916,7 +916,8 @@ class DesktopTests(IsolatedState):
 
     def test_refresh_worker_delivers_results_and_releases_lock(self):
         from core import fetch
-        def collect(on_result=None, on_error=None):
+        def collect(on_result=None, on_error=None, check_updates=False):
+            self.assertTrue(check_updates)
             data = [{"provider": "Codex", "_dir": "codex", "_idx": 0,
                      "metrics": [{"type": "rolling", "percentage": 42}]}]
             on_result("codex", data)

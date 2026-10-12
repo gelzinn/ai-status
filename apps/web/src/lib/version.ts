@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { repo } from "./env";
 
-/** Prefer the published release; use the app's version file when GitHub is unavailable. */
+/** Prefer the published release; use package.json when GitHub is unavailable. */
 export async function getLatestVersion(): Promise<string> {
   try {
     const response = await fetch(repo.apiUrl, {
@@ -18,6 +18,9 @@ export async function getLatestVersion(): Promise<string> {
   } catch {
     // The local version does not depend on the release API or its rate limits.
   }
-  const version = await readFile(path.resolve(process.cwd(), "../../packages/lib/VERSION"), "utf-8");
-  return `v${version.trim()}`;
+  const { version } = JSON.parse(await readFile(path.resolve(process.cwd(), "../../package.json"), "utf-8"));
+  if (typeof version !== "string" || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) {
+	throw new Error("package.json must contain a stable application version");
+  }
+  return `v${version}`;
 }

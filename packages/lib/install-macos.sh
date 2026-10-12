@@ -9,7 +9,8 @@ SCRIPT_IS_FILE=false
 case "$0" in */install-macos.sh|install-macos.sh) SCRIPT_IS_FILE=true ;; esac
 if [ "$SCRIPT_IS_FILE" = true ] && [ -f "$SCRIPT_DIR/config.sh" ]; then
     # shellcheck source=./config.sh
-    source "$SCRIPT_DIR/config.sh"
+    # Version validation uses the staged tree, including legacy workspace layouts.
+    source "$SCRIPT_DIR/config.sh" --repository-only
 fi
 : "${REPO_URL:=https://github.com/gelzinn/ai-status}"
 INSTALL_DIR="$HOME/.local/share/ai-status"
@@ -112,6 +113,9 @@ copy_library() {
     mkdir -p "$STAGE_DIR/packages"
     cp -a -- "$1/packages/lib" "$STAGE_DIR/packages/lib"
     cp -a -- "$1/packages/shared" "$STAGE_DIR/packages/shared"
+    if [ -e "$1/package.json" ] || [ -L "$1/package.json" ]; then
+        cp -- "$1/package.json" "$STAGE_DIR/package.json"
+    fi
 }
 
 if [ "$ROLLBACK" = true ]; then
@@ -163,7 +167,7 @@ with tarfile.open(archive, "r:gz") as tar:
         parts = PurePosixPath(member.name).parts
         if member.name.startswith("/") or ".." in parts:
             sys.exit("Unsafe path in release archive")
-        if len(parts) < 2 or parts[0] != "packages" or parts[1] not in ("lib", "shared"):
+        if parts != ("package.json",) and (len(parts) < 2 or parts[0] != "packages" or parts[1] not in ("lib", "shared")):
             continue
         target = root.joinpath(*parts)
         if member.isdir():
@@ -180,13 +184,13 @@ fi
 
 # Validate imported CLI and all sources without querying a provider or touching
 # credentials. Old releases without macOS sources fail before activation.
-"$PYTHON" - "$STAGE_DIR" "${RELEASE_TAG#v}" "$MODE" <<'PY'
-import json, sys
+INSTALL_VERSION="$("$PYTHON" - "$STAGE_DIR" "${RELEASE_TAG#v}" "$MODE" <<'PY'
+import json, re, sys
 from pathlib import Path
 sys.dont_write_bytecode = True
 root = Path(sys.argv[1])
 lib = root / "packages/lib"
-required = [lib / "VERSION", lib / "src/bin/ai-status", root / "packages/shared/providers/providers.json"]
+required = [lib / "src/bin/ai-status", root / "packages/shared/providers/providers.json"]
 if sys.argv[3] == "native":
     required += [lib / "macos/AIStatus.swift", lib / "macos/Info.plist", lib / "src/core/macos.py", lib / "assets/app.png"]
 else:
@@ -194,15 +198,32 @@ else:
 for path in required:
     if not path.is_file():
         sys.exit(f"This release is missing {path.relative_to(root)}; choose a release with macOS support.")
-version = (lib / "VERSION").read_text().strip()
+manifest = root / "package.json"
+if manifest.exists():
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    if isinstance(data, dict) and "version" not in data and (lib / "VERSION").is_file():
+        # Pre-migration package.json describes npm workspaces, not product versions.
+        manifest.unlink()
+        version = (lib / "VERSION").read_text(encoding="utf-8").strip()
+    else:
+        version = data.get("version") if isinstance(data, dict) else None
+else:
+    version = (lib / "VERSION").read_text(encoding="utf-8").strip()
+if not isinstance(version, str) or not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version):
+    sys.exit("Release metadata has an invalid stable version")
 if sys.argv[2] and version != sys.argv[2]:
-    sys.exit("Release tag and VERSION disagree")
+    sys.exit("Release tag and version metadata disagree")
 json.loads((root / "packages/shared/providers/providers.json").read_text())
 for script in lib.rglob("*.py"):
     compile(script.read_bytes(), str(script), "exec")
 sys.path.insert(0, str(lib / "src"))
 import core.cli
+import core
+if core.__version__ != version:
+    sys.exit("CLI and release version metadata disagree")
+print(version)
 PY
+)"
 
 APP="$STAGE_DIR/AI Status.app"
 PLUGIN_DIR=""
@@ -212,14 +233,14 @@ if [ "$MODE" = native ]; then
     mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
     cp "$STAGE_DIR/packages/lib/macos/Info.plist" "$APP/Contents/Info.plist"
     cp -R "$STAGE_DIR/packages/lib/assets" "$APP/Contents/Resources/assets"
-    "$PYTHON" - "$APP/Contents" "$PYTHON" "$INSTALL_DIR/packages/lib/src/bin/ai-status" "$STAGE_DIR/packages/lib/VERSION" <<'PY'
+    "$PYTHON" - "$APP/Contents" "$PYTHON" "$INSTALL_DIR/packages/lib/src/bin/ai-status" "$INSTALL_VERSION" <<'PY'
 import json, plistlib, sys
 from pathlib import Path
 contents = Path(sys.argv[1])
 (contents / "Resources/runtime.json").write_text(json.dumps({"python": sys.argv[2], "cli": sys.argv[3]}))
 plist = contents / "Info.plist"
 info = plistlib.loads(plist.read_bytes())
-info["CFBundleShortVersionString"] = info["CFBundleVersion"] = Path(sys.argv[4]).read_text().strip()
+info["CFBundleShortVersionString"] = info["CFBundleVersion"] = sys.argv[4]
 plist.write_bytes(plistlib.dumps(info))
 PY
     ARCH="$(uname -m)"
@@ -233,17 +254,17 @@ else
     PLUGIN_DIR="$(defaults read com.ameba.SwiftBar PluginDirectory 2>/dev/null || true)"
     [ -n "$PLUGIN_DIR" ] || PLUGIN_DIR="$HOME/Library/Application Support/SwiftBar/Plugins"
     if [ "$MODE" = stream ]; then PLUGIN_FILE="$PLUGIN_DIR/ai-status.5s.py"; else PLUGIN_FILE="$PLUGIN_DIR/ai-status.30s.py"; fi
-    "$PYTHON" - "$WORK_DIR/plugin.py" "$PYTHON" "$INSTALL_DIR/packages/lib/src/bin/ai-status" "$MODE" "$STAGE_DIR/packages/lib/VERSION" <<'PY'
+    "$PYTHON" - "$WORK_DIR/plugin.py" "$PYTHON" "$INSTALL_DIR/packages/lib/src/bin/ai-status" "$MODE" "$INSTALL_VERSION" <<'PY'
 import shlex, sys
 from pathlib import Path
-path, python, cli, mode, version_file = sys.argv[1:]
+path, python, cli, mode, version = sys.argv[1:]
 command = "swiftbar-stream" if mode == "stream" else "swiftbar"
 metadata = ""
 if mode == "stream":
     metadata = "# <swiftbar.type>streamable</swiftbar.type>\n# <swiftbar.useTrailingStreamSeparator>true</swiftbar.useTrailingStreamSeparator>\n"
 Path(path).write_text(f'''#!/bin/bash
 # <xbar.title>AI Status</xbar.title>
-# <xbar.version>v{Path(version_file).read_text().strip()}</xbar.version>
+# <xbar.version>v{version}</xbar.version>
 # <xbar.author>gelzin</xbar.author>
 # <xbar.desc>AI provider usage limits, using the shared AI Status core.</xbar.desc>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>

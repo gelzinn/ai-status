@@ -656,17 +656,11 @@ class UsageWorker(QObject):
     error = Signal(str, str)
     finished = Signal(object)
 
-    def __init__(self, check_updates=False):
-        super().__init__()
-        self.check_updates = check_updates
-
     def work(self):
         data = []
         try:
-            data = fetch.fetch_all_data(on_result=self.result.emit, on_error=self.error.emit)
+            data = fetch.fetch_all_data(on_result=self.result.emit, on_error=self.error.emit, check_updates=True)
             state.save_cache(data)
-            if self.check_updates:
-                fetch.check_for_updates()
         except Exception:
             logging.exception("Usage refresh failed")
             for name in config.enabled_connection_order():
@@ -1071,7 +1065,6 @@ class Dashboard(QWidget):
         self.structure = None
         self.queued = False
         self.quitting = False
-        self.last_update_check = 0
         self.last_config = config.load_config()
         self.last_refresh = paths.read_json(state.REFRESH_FILE)
         self.last_activation = paths.read_json(paths.RUNTIME_DIR / "desktop-request.json")
@@ -1473,10 +1466,7 @@ class Dashboard(QWidget):
         self.refresh_button.set_loading(True)
         self.status.setText("Updating…")
         self.draw()
-        check_updates = time.monotonic() - self.last_update_check >= 3600
-        if check_updates:
-            self.last_update_check = time.monotonic()
-        self.worker = UsageWorker(check_updates)
+        self.worker = UsageWorker()
         self.worker.result.connect(self.on_result)
         self.worker.error.connect(self.on_error)
         self.worker.finished.connect(self.on_finished)

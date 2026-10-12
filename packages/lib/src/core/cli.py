@@ -151,7 +151,7 @@ def _swiftbar_refresh():
     if not state.acquire_lock():
         return
     try:
-        data = fetch.fetch_all_data(include_errors=True)
+        data = fetch.fetch_all_data(include_errors=True, check_updates=True)
         if data:
             state.save_cache(data)
     finally:

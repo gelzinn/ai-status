@@ -65,14 +65,22 @@ class StableInstallerTests(unittest.TestCase):
         (self.repo / "packages/shared/provider.txt").write_text("metadata\n")
         (self.repo / "apps/web/unreleased.txt").write_text("website\n")
         for version in ("0.9.0", "0.10.0", "0.11.0"):
-            (lib / "VERSION").write_text(version + "\n")
+            if version == "0.9.0":
+                (lib / "VERSION").write_text(version + "\n")
+                (self.repo / "package.json").write_text(json.dumps({"name": "legacy-workspace", "private": True}))
+            else:
+                (lib / "VERSION").unlink(missing_ok=True)
+                (self.repo / "package.json").write_text(json.dumps({"version": version}))
             (lib / "marker").write_text(version)
             self.git("add", ".")
             self.git("-c", "commit.gpgsign=false", "commit", "-m", "feat: " + version)
             if version != "0.11.0":
                 self.git("tag", "v" + version)
-                release_builder.build(self.repo, self.root / "assets" / ("v" + version), version)
-        self.git("tag", "v9.9.9")  # Deliberately disagrees with VERSION.
+                if version == "0.9.0":
+                    self.make_legacy_release(version)
+                else:
+                    release_builder.build(self.repo, self.root / "assets" / ("v" + version), version)
+        self.git("tag", "v9.9.9")  # Deliberately disagrees with canonical metadata.
         self.bootstrap = self.root / "bootstrap/install.sh"
         self.bootstrap.parent.mkdir()
         shutil.copyfile(INSTALLER, self.bootstrap)
@@ -134,12 +142,24 @@ sys.exit(result.returncode)
         )
 
     def assert_installed(self, version):
-        self.assertEqual((self.installed / "packages/lib/VERSION").read_text().strip(), version)
+        self.assertEqual(self.installed_version(self.installed), version)
         self.assertEqual((self.installed / "packages/lib/marker").read_text(), version)
         self.assertTrue((self.installed / "packages/shared/provider.txt").exists())
         self.assertFalse((self.installed / "apps").exists())
         self.assertFalse((self.installed / ".git").exists())
         self.assertTrue((self.home / ".local/bin/ai-status").is_symlink())
+
+    def installed_version(self, root):
+        manifest = root / "package.json"
+        return json.loads(manifest.read_text())["version"] if manifest.exists() else (root / "packages/lib/VERSION").read_text().strip()
+
+    def make_legacy_release(self, version):
+        directory = self.root / "assets" / ("v" + version)
+        directory.mkdir(parents=True)
+        archive = directory / f"ai-status-v{version}.tar.gz"
+        with tarfile.open(archive, "w:gz") as package:
+            package.add(self.repo / "packages", arcname="packages")
+        (directory / "SHA256SUMS").write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + "  " + archive.name + "\n")
 
     def seed_existing_install(self):
         self.installed.mkdir(parents=True)
@@ -158,6 +178,31 @@ sys.exit(result.returncode)
         self.assert_installed("0.10.0")
         self.assertEqual((self.root / "curl.log").read_text().splitlines()[0],
                          "https://api.github.com/repos/gelzinn/ai-status/releases/latest")
+
+    def test_canonical_manifest_is_staged_and_version_file_is_optional(self):
+        self.rewrite_package(lambda member: member.name != "packages/lib/VERSION")
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assert_installed("0.10.0")
+        self.assertEqual(json.loads((self.installed / "package.json").read_text())["version"], "0.10.0")
+        self.assertFalse((self.installed / "packages/lib/VERSION").exists())
+
+    def test_invalid_canonical_manifest_does_not_fall_back_to_legacy_version(self):
+        self.seed_existing_install()
+        directory = self.root / "assets/v0.10.0"
+        archive = directory / "ai-status-v0.10.0.tar.gz"
+        replacement = io.BytesIO()
+        with tarfile.open(archive, "r:gz") as source, tarfile.open(fileobj=replacement, mode="w:gz") as target:
+            for member in source:
+                if member.name == "package.json":
+                    data = b'{"version":"invalid"}'
+                    member.size = len(data)
+                    target.addfile(member, io.BytesIO(data))
+                else:
+                    target.addfile(member, source.extractfile(member))
+        archive.write_bytes(replacement.getvalue())
+        (directory / "SHA256SUMS").write_text(hashlib.sha256(archive.read_bytes()).hexdigest() + "  " + archive.name + "\n")
+        self.assert_failed_preserving_install()
 
     def test_upgrade_and_rollback_use_exact_versions(self):
         for args, version in ((["--version", "0.9.0"], "0.9.0"),
@@ -224,6 +269,14 @@ sys.exit(result.returncode)
         result = self.run_installer("--version", "v0.9.0")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_installed("0.9.0")
+        self.assertFalse((self.installed / "package.json").exists())
+
+    def test_legacy_local_checkout_omits_its_unversioned_workspace_manifest(self):
+        self.git("checkout", "v0.9.0")
+        result = self.run_installer(local=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assert_installed("0.9.0")
+        self.assertFalse((self.installed / "package.json").exists())
 
     def test_bad_checksum_preserves_install(self):
         self.seed_existing_install()
@@ -250,7 +303,10 @@ sys.exit(result.returncode)
             result = self.run_installer(*args)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assert_installed("0.9.0")
-        self.assertEqual((self.home / ".local/share/ai-status.previous/packages/lib/VERSION").read_text().strip(), "0.10.0")
+        previous = self.home / ".local/share/ai-status.previous"
+        self.assertEqual(self.installed_version(previous), "0.10.0")
+        self.assertTrue((previous / "package.json").exists())
+        self.assertFalse((self.installed / "package.json").exists())
 
     def test_internal_setup_without_git_preserves_settings(self):
         result = self.run_installer()

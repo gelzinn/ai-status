@@ -30,21 +30,26 @@ jobs:
       # GITHUB_TOKEN opens release PRs as github-actions[bot]. A maintainer
       # must select "Approve workflows to run" before their PR checks start.
       # https://docs.github.com/en/actions/concepts/security/github_token
-      - uses: googleapis/release-please-action@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          target-branch: main
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Release Please
+        run: npm install --prefix "$RUNNER_TEMP/release-please" --no-audit --no-fund release-please@17.3.0
+      - name: Update the release PR and create pending drafts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_PATH: ${{ runner.temp }}/release-please/node_modules
+        run: node .github/scripts/release_please.cjs
       - name: Find the pending stable draft
         id: pending
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="v$(cat packages/lib/VERSION)"
+          version=$(python3 -c 'import json; print(json.load(open("package.json", encoding="utf-8"))["version"])')
+          tag="v$version"
           draft=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease --jq '.isDraft and (.isPrerelease | not)')
           if [ "$draft" = true ]; then
             echo "tag=$tag" >> "$GITHUB_OUTPUT"
