@@ -3,8 +3,8 @@
 These screenshots render the production Settings panels with simulated Codex
 and Claude usage, four enabled providers and the product version from the root
 manifest. They contain no live account data or credentials.
-There are 31 PNGs: ten Quickshell captures, eleven Windows adapter captures and
-ten native macOS captures.
+There are 32 PNGs: ten Quickshell captures, eleven Windows adapter captures and
+eleven native macOS captures.
 Each interface has six sections in this order: General, Appearance, Alerts,
 Providers, Guide and About. Guide presents controls and keyboard bindings in a
 table; About contains project details and links to Guide, Report a bug,
@@ -26,7 +26,7 @@ Alerts has an additional expanded `*-alerts-advanced.png` capture and its scroll
 views. When the top and bottom views leave a gap beneath the fixed tabs, the
 helper adds a `*-middle.png` capture so the full content remains reviewable.
 Advanced, Providers and Guide have bottom views on all three platforms. Guide also
-has a middle view on Windows. General, Appearance, collapsed Alerts and About
+has a middle view on Windows and macOS. General, Appearance, collapsed Alerts and About
 fit without vertical scrolling in these fixtures.
 
 - `quickshell-*.png` uses Qt Quick Test with Mesa/OpenGL on a temporary Xvfb
@@ -45,7 +45,7 @@ fit without vertical scrolling in these fixtures.
   desktop capture. Checkboxes and selectors share the idle outline color,
   navigation links place their arrows at the right, and the General startup
   option uses a switch beside its label.
-- `macos-*.png` is copied unchanged from the `macos-panel-preview` artifact for
+- Ten native `macos-*.png` files are copied unchanged from the `macos-panel-preview` artifact for
   commit `e9b4fac260913b7511be134e29f2d5a012dcf567`, produced by the successful
   [native macOS job in CI run 38304713965](https://github.com/gelzinn/ai-status/actions/runs/38304713965/job/114995883059).
   The production SwiftUI/AppKit app runs on `macos-14`. Its smoke fixture uses
@@ -53,6 +53,11 @@ fit without vertical scrolling in these fixtures.
   controls and scrolls each overflowing Settings page to its end. The header and
   About version come from the built app bundle (`v0.15.0`). General, Appearance
   and About use their compact native panel heights.
+  `macos-guide-middle.png` is copied unchanged from the artifact for commit
+  `458388347b024e374bfa2208f7f9ed5f73a6afde` in the successful
+  [native macOS job in CI run 38305454005](https://github.com/gelzinn/ai-status/actions/runs/38305454005/job/114998344429).
+  It captures the actual middle scroll position and completes coverage of the
+  Guide's shortcut rows. The UI is unchanged from the earlier native captures.
 
 The macOS native smoke test also captures `settings-general.png`,
 `settings-appearance.png`, `settings-alerts.png`, `settings-providers.png`,
