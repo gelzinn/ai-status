@@ -73,8 +73,8 @@ When a newer stable release is available, the blue **Update available** link use
 # Place the widget (defaults to right on first enable):
 omarchy bar move io.github.gelzinn.ai-status --section right
 
-# Update only this plugin:
-omarchy plugin update io.github.gelzinn.ai-status
+# Update this plugin, then restart the shell after success:
+omarchy plugin update io.github.gelzinn.ai-status && omarchy restart shell
 
 # Disable or remove the plugin without deleting shared credentials/preferences:
 omarchy plugin disable io.github.gelzinn.ai-status

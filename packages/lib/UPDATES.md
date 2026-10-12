@@ -14,7 +14,7 @@ ai-status update
 |---|---|
 | Windows installer | Downloads the stable installer, verifies its SHA-256 checksum, then opens setup |
 | Windows portable ZIP | Opens instructions for downloading and replacing the portable copy |
-| Omarchy plugin | Opens a terminal with `omarchy plugin update io.github.gelzinn.ai-status --yes` |
+| Omarchy plugin | Opens a terminal with `omarchy plugin update io.github.gelzinn.ai-status --yes && omarchy restart shell` |
 | Linux public installer | Opens a terminal with the public installer, preserving the desktop bar |
 | macOS public installer | Opens Terminal with the public installer, preserving native or SwiftBar mode |
 | Checkout or custom location | Shows manual instructions; does not replace the checkout |
@@ -135,17 +135,16 @@ same command covers every case:
 | Local checkout | Extracts from your working tree, local edits included |
 | Older full-repo install | Replaced with the lean copy automatically |
 
-After updating, the script reloads only the selected bar. Waybar receives its existing reload signal; Quickshell uses Omarchy's plugin add/update mechanism and hot reload. Use `--bar waybar` or `--bar quickshell` to choose explicitly. Existing display preferences are preserved unless changed in the wizard or by flags.
+After updating, the script reloads only the selected bar. Waybar receives its existing reload signal; Quickshell updates the existing plugin, then runs `omarchy restart shell` to load the updated QML components. First-time Quickshell installation uses Omarchy's plugin add/enable mechanism. Use `--bar waybar` or `--bar quickshell` to choose explicitly. Existing display preferences are preserved unless changed in the wizard or by flags.
 
 For a plugin installed directly through Omarchy, update only AI Status with:
 
 ```bash
-omarchy plugin update io.github.gelzinn.ai-status
+omarchy plugin update io.github.gelzinn.ai-status && omarchy restart shell
 ```
 
-If the panel still shows the previous UI after updating, hot reload may have
-kept older QML components in memory. Run `omarchy restart shell` to load the
-updated components, then reopen the panel and check its labels and navigation.
+The shell restarts only after the plugin update succeeds, so the panel loads
+the updated QML components. Reopen the panel after the restart.
 
 Omarchy keeps the plugin's bar placement and refuses updates it cannot fast-forward. Shared preferences and provider credentials remain outside the plugin checkout.
 Downloads, checksums, Python validation, CLI import, and dependency checks
