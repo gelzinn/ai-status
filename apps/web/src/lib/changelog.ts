@@ -15,6 +15,26 @@ export type ReleaseResult =
 export const RELEASES_PER_PAGE = 10;
 const API_PAGE_SIZE = 100;
 
+export interface ReleaseDayGroup {
+	day: string;
+	releases: Release[];
+}
+
+/** Group a selected page by UTC publication day, preserving publication order. */
+export function groupReleasesByDay(releases: Release[]): ReleaseDayGroup[] {
+	const groups = new Map<string, ReleaseDayGroup>();
+	for (const release of releases) {
+		const day = new Date(release.publishedAt).toISOString().slice(0, 10);
+		const group = groups.get(day);
+		if (group) {
+			group.releases.push(release);
+		} else {
+			groups.set(day, { day, releases: [release] });
+		}
+	}
+	return [...groups.values()];
+}
+
 interface FetchReleasesOptions {
 	apiRepo: string;
 	userAgent: string;
