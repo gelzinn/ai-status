@@ -1574,14 +1574,22 @@ class DesktopTests(IsolatedState):
             {"type": "rolling", "percentage": 80}, {"type": "weekly", "percentage": 20}]}])
         self.dashboard.on_result("copilot", [{"provider": "Copilot", "metrics": [
             {"type": "monthly", "percentage": 7}]}])
+        bars = [row.bar for row in self.dashboard.metric_buttons]
+        # Keep the real scheduling, but advance animation explicitly below.
+        # A slow runner may expire these timers while processing the first show.
+        for bar in bars:
+            bar.start_delay.timeout.disconnect(bar.start_fill)
         self.dashboard.show()
         self.app.processEvents()
-        bar = self.dashboard.metric_buttons[0].bar
+        for bar in bars:
+            bar.start_delay.stop()
+            bar.start_delay.timeout.connect(bar.start_fill)
+        bar = bars[0]
         self.assertEqual(bar.displayed, 0)
-        self.assertLess(bar.start_delay.remainingTime(), self.dashboard.metric_buttons[2].bar.start_delay.remainingTime())
+        self.assertLess(bar.start_delay.interval(), bars[2].start_delay.interval())
         initial = bar.grab().toImage()
-        bar.start_delay.stop()
         bar.start_fill()
+        bar.fill.pause()
         bar.fill.setCurrentTime(500)
         self.assertGreater(bar.displayed, 0)
         self.assertLess(bar.displayed, 80)
