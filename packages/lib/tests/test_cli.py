@@ -609,6 +609,29 @@ class CLICommandTests(unittest.TestCase):
         request.assert_called_once_with("https://api.github.com/", timeout=10)
         query.assert_not_called()
 
+    def test_doctor_https_smoke_records_server_replies_without_querying_accounts(self):
+        for status in (403, 429, 503):
+            with self.subTest(status=status), \
+                    patch.object(paths, "IS_WINDOWS", True), \
+                    patch.object(fetch, "fetch_all_data") as query, \
+                    patch.object(provider_http, "request", side_effect=provider_http.QueryError("Server reply", status=status)):
+                result, output, errors = self.invoke(["doctor", "--http-smoke"])
+                self.assertEqual((result, errors), (0, ""))
+                info = json.loads(output)
+                self.assertTrue(info["native_https"])
+                self.assertEqual(info["native_https_http_status"], status)
+                query.assert_not_called()
+
+    def test_doctor_https_smoke_keeps_transport_and_certificate_failures_fatal(self):
+        for message in ("Usage API unreachable; check your connection.", "TLS certificate validation failed"):
+            error = provider_http.QueryError(message)
+            with self.subTest(message=message), \
+                    patch.object(paths, "IS_WINDOWS", True), \
+                    patch.object(provider_http, "request", side_effect=error), \
+                    self.assertRaises(provider_http.QueryError) as caught:
+                self.invoke(["doctor", "--http-smoke"])
+            self.assertIs(caught.exception, error)
+
     def test_providers_lists_installed_ids_and_enable_state_without_collecting(self):
         with patch.object(config, "available_providers", return_value=["codex", "openrouter"]), \
                 patch.object(config, "enabled_order", return_value=["codex"]), \

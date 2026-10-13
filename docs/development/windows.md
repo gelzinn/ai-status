@@ -65,8 +65,12 @@ docstrings/assertions; runtime input validation uses explicit exceptions.
 
 CI renders the packaged widgets/logos, runs real ConPTY input/output checks,
 tests native HTTP against localhost (including invalid TLS certificates), and
-verifies public HTTPS from the frozen executable. It also tests the native
-launcher, silent install/upgrade/uninstall in a Unicode path (including removal
+verifies public HTTPS from the frozen executable.
+
+The public HTTPS probe records HTTP error statuses, including anonymous API
+rate limits, as successful TLS round trips in `doctor --http-smoke` output.
+Certificate, hostname and transport failures still fail the packaged smoke.
+CI also tests the native launcher, silent install/upgrade/uninstall in a Unicode path (including removal
 of obsolete runtime DLLs and preservation of user data), and enforces size budgets
 of 56 MiB installed, 23 MiB for the portable ZIP, and 18 MiB for the installer.
 These budgets include the required SQLite runtime for Cursor/Kiro credential
