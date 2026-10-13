@@ -147,7 +147,9 @@ def _run(output_format="waybar"):
             logos.write_tooltip(output.get("tooltip", ""))
             logos.signal_waybar()
 
-    next_auto_update = time.time() + 300
+    refresh_interval = state.get_refresh_interval_seconds(selected)
+    last_update_completed = time.time()
+    next_auto_update = last_update_completed + refresh_interval
     last_config_mtime = None
     last_selected_mtime = 0
     last_refresh = paths.read_json(state.REFRESH_FILE)
@@ -181,8 +183,13 @@ def _run(output_format="waybar"):
             # cheap (the idle hot path is just two getmtime calls).
             if selected_mtime != last_selected_mtime:
                 selected = state.load_selected() or {}
+                interval = state.get_refresh_interval_seconds(selected)
+                if interval != refresh_interval:
+                    refresh_interval = interval
+                    next_auto_update = last_update_completed + notifications.next_check_delay(
+                        latest_data, default=refresh_interval, now=last_update_completed)
 
-            if should_update and not is_updating:
+            if (should_update or now >= next_auto_update) and not is_updating:
                 should_update = False
                 is_updating = True
 
@@ -207,7 +214,10 @@ def _run(output_format="waybar"):
                     time.sleep(0.15)
 
                 emit(latest_data, selected)
-                next_auto_update = time.time() + notifications.next_check_delay(latest_data)
+                last_update_completed = time.time()
+                refresh_interval = state.get_refresh_interval_seconds(selected)
+                next_auto_update = last_update_completed + notifications.next_check_delay(
+                    latest_data, default=refresh_interval, now=last_update_completed)
                 last_selected_mtime = selected_mtime
 
             # Re-render on scroll (selected file changed, no re-fetch needed).
@@ -234,9 +244,6 @@ def _run(output_format="waybar"):
             # as fast as the logo (which updates instantly via its signal),
             # keeping the two in sync. The per-iteration work is tiny.
             time.sleep(0.15 if output_format in ("quickshell", "macos") else 0.02)
-            if now >= next_auto_update:
-                should_update = True
-                
         except KeyboardInterrupt:
             break
         except BrokenPipeError:

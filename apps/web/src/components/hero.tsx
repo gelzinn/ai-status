@@ -15,7 +15,7 @@ export function Hero() {
 				Monitor your AI usage on your desktop
 			</h1>
 			<p className="max-w-xl text-lg text-muted-foreground motion-safe:animate-fade-up [animation-delay:100ms]">
-				Track usage limits across Claude, Copilot, Codex, Z.AI, Kiro, Antigravity, OpenCode, and Command Code. Refreshes every five minutes.
+				Track usage limits across Claude, Copilot, Codex, Z.AI, Kiro, Antigravity, OpenCode, and Command Code. Choose automatic refresh from 5 to 60 minutes.
       </p>
 
 			<InstallTabs

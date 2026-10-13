@@ -21,6 +21,8 @@ Item {
             Backend.Model.resetApplying = false
             Backend.Model.resetTarget = null
             Backend.Model.resetAttempts = []
+            Backend.Model.settingsSaving = false
+            Backend.Model.settingsError = ""
             activation.clear()
         }
         function snapshot(identity) {
@@ -50,6 +52,26 @@ Item {
             Backend.Model.release(secondWidget)
             compare(Backend.Model.notificationOwner, null)
             compare(Backend.Model.consumers, 0)
+        }
+        function test_settings_writer_serializes_refresh_interval_with_existing_draft() {
+            Backend.Model.consumers = 1
+            Backend.Model.snapshot = {settings: {refreshIntervalMinutes: 5}}
+            const process = findChild(Backend.Model, "settings-process")
+            const draft = {enabled: ["claude"], usageDisplay: "remaining", refreshIntervalMinutes: 30,
+                selected: {provider: "claude", idx: 0, metric: "weekly"}}
+            Backend.Model.saveSettings(draft)
+            verify(Backend.Model.settingsSaving)
+            compare(process.command[2], "save-settings")
+            compare(process.command[4], "quickshell")
+            compare(JSON.parse(process.command[6]).refreshIntervalMinutes, 30)
+            compare(JSON.parse(process.command[6]).usageDisplay, "remaining")
+            compare(Backend.Model.snapshot.settings.refreshIntervalMinutes, 5)
+            const command = JSON.stringify(process.command)
+            Backend.Model.saveSettings({refreshIntervalMinutes: 60})
+            compare(JSON.stringify(process.command), command)
+            process.exited(0, 0)
+            process.running = false
+            verify(!Backend.Model.settingsSaving)
         }
         function test_update_and_reset_do_not_dispatch_while_the_other_is_running() {
             Backend.Model.consumers = 1

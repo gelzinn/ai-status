@@ -72,6 +72,105 @@ Item {
             compare(settings.enabledProviders.length, 2)
             compare(settings.order[0], "claude")
         }
+        function test_refresh_interval_draft_save_cancel_and_legacy_default() {
+            compare(settings.refreshIntervalMinutes, 5)
+            settings.refreshIntervalMinutes = 25
+            compare(Plugin.Model.snapshot.settings.refreshIntervalMinutes, 5)
+            compare(Plugin.Model.saved, null)
+            compare(Plugin.Model.actions.length, 0)
+            settings.save()
+            compare(Plugin.Model.saved.refreshIntervalMinutes, 25)
+            settings.begin()
+            compare(settings.refreshIntervalMinutes, 5)
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.settings.refreshIntervalMinutes = 40
+            Plugin.Model.snapshot = snapshot
+            settings.begin()
+            compare(settings.refreshIntervalMinutes, 40)
+            settings.saved = true
+            settings.refreshIntervalMinutes = 45
+            verify(!settings.saved)
+            delete snapshot.settings.refreshIntervalMinutes
+            Plugin.Model.snapshot = Object.assign({}, snapshot)
+            settings.begin()
+            compare(settings.refreshIntervalMinutes, 5)
+        }
+        function test_refresh_interval_rejects_unsafe_or_off_step_drafts_data() {
+            return [0, 1, 4, 6, 12, 61, 65].map(value => ({tag: String(value), value: value}))
+        }
+        function test_refresh_interval_rejects_unsafe_or_off_step_drafts(data) {
+            settings.refreshIntervalMinutes = data.value
+            verify(!settings.valid)
+            compare(settings.validationSection, "general")
+            settings.save()
+            compare(Plugin.Model.saved, null)
+            settings.selectSection("providers")
+            mouseClick(findChild(settings, "settings-review-validation"))
+            compare(settings.section, "general")
+            settings.focusFirstControl()
+            verify(findChild(settings, "refresh-interval-slider").activeFocus)
+        }
+        function test_refresh_interval_slider_keyboard_steps_and_bounds_do_not_refresh() {
+            const slider = findChild(settings, "refresh-interval-slider")
+            compare(slider.from, 5)
+            compare(slider.to, 60)
+            compare(slider.stepSize, 5)
+            slider.forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Right)
+            compare(settings.refreshIntervalMinutes, 10)
+            verify(slider.activeFocus)
+            keyClick(Qt.Key_Left)
+            keyClick(Qt.Key_Left)
+            compare(settings.refreshIntervalMinutes, 5)
+            for (let index = 0; index < 13; index++) keyClick(Qt.Key_Right)
+            compare(settings.refreshIntervalMinutes, 60)
+            compare(slider.value, 60)
+            keyClick(Qt.Key_Left)
+            compare(settings.refreshIntervalMinutes, 55)
+            verify(settings.valid)
+            compare(Plugin.Model.saved, null)
+            compare(Plugin.Model.actions.length, 0)
+            compare(Plugin.Model.snapshot.settings.refreshIntervalMinutes, 5)
+            settings.save()
+            compare(Plugin.Model.saved.refreshIntervalMinutes, 55)
+            Plugin.Model.settingsSaving = true
+            verify(!slider.enabled)
+            Plugin.Model.settingsSaving = false
+        }
+        function test_refresh_interval_slider_drag_snaps_without_saving_or_refreshing() {
+            const slider = findChild(settings, "refresh-interval-slider")
+            mousePress(slider, 1, slider.height / 2)
+            mouseMove(slider, slider.width / 2, slider.height / 2)
+            mouseRelease(slider, slider.width / 2, slider.height / 2)
+            verify(settings.refreshIntervalMinutes >= 5 && settings.refreshIntervalMinutes <= 60)
+            compare(settings.refreshIntervalMinutes % 5, 0)
+            verify(settings.refreshIntervalMinutes > 5)
+            compare(Plugin.Model.saved, null)
+            compare(Plugin.Model.actions.length, 0)
+            mouseClick(slider, slider.width - 1, slider.height / 2)
+            compare(settings.refreshIntervalMinutes, 60)
+            mouseClick(slider, 1, slider.height / 2)
+            compare(settings.refreshIntervalMinutes, 5)
+        }
+        function test_general_unifies_usage_display_and_refresh_in_one_draft() {
+            compare(settings.sections.map(item => item.key).join(","), "general,alerts,providers,guide,about")
+            verify(findChild(settings, "settings-section-general").visible)
+            verify(findChild(settings, "settings-usage-display").visible)
+            verify(findChild(settings, "settings-refresh-interval").visible)
+            compare(findChild(settings, "settings-section-appearance"), null)
+            settings.usageDisplay = "remaining"
+            settings.refreshIntervalMinutes = 20
+            settings.selectSection("alerts")
+            settings.selectSection("general")
+            compare(settings.usageDisplay, "remaining")
+            compare(settings.refreshIntervalMinutes, 20)
+            settings.save()
+            compare(Plugin.Model.saved.usageDisplay, "remaining")
+            compare(Plugin.Model.saved.refreshIntervalMinutes, 20)
+            settings.begin()
+            compare(settings.usageDisplay, "used")
+            compare(settings.refreshIntervalMinutes, 5)
+        }
         function test_quota_alert_draft_save_and_cancel_preserve_account_rules() {
             settings.alertThresholds = "95,100"
             settings.setAlert("muted_until", 1234567890)
@@ -346,6 +445,10 @@ Item {
             settings.begin()
             settings.display = {show_provider: false, show_model: false, show_metric: false, show_pct: false}
             verify(!settings.valid)
+            compare(settings.validationSection, "general")
+            verify(settings.validationMessage.indexOf("General") !== -1)
+            settings.focusFirstControl()
+            verify(findChild(settings, "usage-display").activeFocus)
             settings.save()
             compare(Plugin.Model.saved, null)
         }
@@ -363,7 +466,7 @@ Item {
             verify(settings.selectedLabel.indexOf("Fable") !== -1)
         }
         function test_controls_respond_to_click_and_keyboard() {
-            settings.selectSection("appearance")
+            settings.selectSection("general")
             wait(20)
             const checkbox = findChild(settings, "display-show_pct")
             verify(checkbox !== null)
@@ -457,7 +560,7 @@ Item {
             const usageDisplay = findChild(settings, "usage-display")
             wait(20)
             for (const trigger of [provider, icon, usageDisplay]) {
-                settings.selectSection(trigger === provider ? "general" : "appearance")
+                settings.selectSection("general")
                 wait(20)
                 const height = settings.implicitHeight
                 compare(trigger.trailingIconName, "chevron-down")
@@ -479,7 +582,7 @@ Item {
             compare(settings.selected.metric, "weekly")
             compare(settings.iconMode, "logo")
             compare(settings.usageDisplay, "remaining")
-            settings.selectSection("appearance")
+            settings.selectSection("general")
             wait(20)
             mouseClick(icon)
             wait(20)
@@ -493,7 +596,7 @@ Item {
             keyClick(Qt.Key_Escape)
             verify(!provider.popupOpen)
             verify(settings.visible)
-            settings.selectSection("appearance")
+            settings.selectSection("general")
             wait(20)
             const height = settings.implicitHeight
             mouseClick(icon)
@@ -506,7 +609,7 @@ Item {
             const provider = findChild(settings, "active-provider")
             mouseClick(provider)
             verify(settings.selectionOpen)
-            settings.selectSection("appearance")
+            settings.selectSection("general")
             verify(!settings.selectionOpen)
             settings.usageDisplay = "remaining"
             settings.iconMode = "logo"
@@ -533,7 +636,7 @@ Item {
         }
         function test_invalid_hidden_section_has_a_visible_review_action() {
             settings.alertThresholds = "101"
-            settings.selectSection("appearance")
+            settings.selectSection("general")
             wait(20)
             verify(!settings.valid)
             compare(settings.validationSection, "alerts")

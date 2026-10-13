@@ -1478,10 +1478,10 @@ class ProviderSettings(QWidget):
         self.navigation.setWidget(navigation_content)
         self.section_group = QButtonGroup(self)
         self.section_buttons = {}
-        section_icons = {"general": "settings", "appearance": "paintbrush", "alerts": "bell",
+        section_icons = {"general": "settings", "alerts": "bell",
                          "providers": "server", "guide": "book-open", "about": "info"}
-        for key, label in (("general", "General"), ("appearance", "Appearance"),
-                           ("alerts", "Alerts"), ("providers", "Providers"), ("guide", "Guide"), ("about", "About")):
+        for key, label in (("general", "General"), ("alerts", "Alerts"),
+                           ("providers", "Providers"), ("guide", "Guide"), ("about", "About")):
             button = SettingsTabButton(label, section_icons[key])
             button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             button.setCheckable(True)
@@ -1510,6 +1510,27 @@ class ProviderSettings(QWidget):
         self.active.setIconSize(QSize(16, 16))
         self.active.setAccessibleName("Active provider and limit")
         general.addWidget(self.active)
+        selected = state.load_selected() or {}
+        general.addSpacing(8)
+        general.addWidget(SettingsHeading("Refresh interval", "Check usage every 5–60 minutes. Provider cooldowns still apply."))
+        refresh_row = QHBoxLayout()
+        refresh_row.setSpacing(12)
+        self.refresh_interval = QSlider(Qt.Orientation.Horizontal)
+        self.refresh_interval.setObjectName("refreshInterval")
+        self.refresh_interval.setAccessibleName("Usage refresh interval in minutes")
+        self.refresh_interval.setRange(0, len(state.REFRESH_INTERVAL_MINUTES) - 1)
+        self.refresh_interval.setSingleStep(1)
+        self.refresh_interval.setPageStep(1)
+        self.refresh_interval.setValue(state.REFRESH_INTERVAL_MINUTES.index(state.get_refresh_interval_minutes(selected)))
+        self.refresh_interval.setAccessibleDescription(
+            f"Refresh every {self.refresh_interval_minutes()} minutes. Choose 5 to 60 minutes in 5-minute steps.")
+        self.refresh_interval_label = plain_label(f"{self.refresh_interval_minutes()} min", "#dddddd")
+        self.refresh_interval_label.setFixedWidth(56)
+        self.refresh_interval.valueChanged.connect(self.refresh_interval_changed)
+        refresh_row.addWidget(self.refresh_interval, 1)
+        refresh_row.addWidget(self.refresh_interval_label)
+        general.addLayout(refresh_row)
+        general.addSpacing(8)
         self.startup_row = QWidget()
         startup_layout = QHBoxLayout(self.startup_row)
         startup_layout.setContentsMargins(0, 0, 0, 0)
@@ -1524,17 +1545,16 @@ class ProviderSettings(QWidget):
         if paths.IS_WINDOWS:
             general.addSpacing(8)
         general.addWidget(self.startup_row)
-        appearance = self.sections["appearance"].layout()
-        selected = state.load_selected() or {}
-        appearance.addWidget(SettingsHeading("Usage display"))
+        general.addSpacing(8)
+        general.addWidget(SettingsHeading("Usage display"))
         self.usage_display = QComboBox()
         self.usage_display.setAccessibleName("Usage display")
         for value, label in (("used", "Used"), ("remaining", "Remaining")):
             self.usage_display.addItem(label, value)
         self.usage_display.setCurrentIndex(self.usage_display.findData(state.get_usage_display(selected)))
-        appearance.addWidget(self.usage_display)
-        appearance.addSpacing(8)
-        appearance.addWidget(SettingsHeading("Bar display"))
+        general.addWidget(self.usage_display)
+        general.addSpacing(8)
+        general.addWidget(SettingsHeading("Bar display"))
         self.display = {}
         for key, label, default in (("show_provider", "Provider name", True),
                                     ("show_model", "Model / plan", True),
@@ -1543,13 +1563,13 @@ class ProviderSettings(QWidget):
             checkbox = QCheckBox(label)
             checkbox.setChecked(selected.get(key, default))
             self.display[key] = checkbox
-            appearance.addWidget(checkbox)
+            general.addWidget(checkbox)
         self.icon_mode = QComboBox()
         self.icon_mode.setAccessibleName("Bar icon")
         for value, label in (("off", "None"), ("bot", "Bot"), ("logo", "Provider logo")):
             self.icon_mode.addItem("Icon: " + label, value)
         self.icon_mode.setCurrentIndex(self.icon_mode.findData(state.get_icon_mode(selected)))
-        appearance.addWidget(self.icon_mode)
+        general.addWidget(self.icon_mode)
         providers = self.sections["providers"].layout()
         providers.addWidget(SettingsHeading("Providers", "Enable providers and set their order."))
         self.providers = ProviderList()
@@ -1597,6 +1617,26 @@ class ProviderSettings(QWidget):
         self.active.currentIndexChanged.connect(self.clear_message)
         self.active.currentIndexChanged.connect(self.notification_choice_changed)
         self.startup.toggled.connect(self.clear_message)
+        self.saved_draft = self.draft_signature(self.collect_notification_settings())
+        self.refresh_required = True
+
+    def refresh_interval_minutes(self):
+        return state.REFRESH_INTERVAL_MINUTES[self.refresh_interval.value()]
+
+    def refresh_interval_changed(self):
+        self.refresh_interval_label.setText(f"{self.refresh_interval_minutes()} min")
+        self.refresh_interval.setAccessibleDescription(
+            f"Refresh every {self.refresh_interval_minutes()} minutes. Choose 5 to 60 minutes in 5-minute steps.")
+        self.clear_message()
+
+    def draft_signature(self, notification_settings):
+        """Compare controls, including default selections, without publishing a draft."""
+        return (self.active.currentData(),
+                {key: checkbox.isChecked() for key, checkbox in self.display.items()},
+                self.icon_mode.currentData(), self.usage_display.currentData(),
+                [self.providers.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.providers.count())
+                 if self.providers.item(i).checkState() == Qt.CheckState.Checked],
+                self.startup.isChecked(), notification_settings)
 
     def reveal_provider_row(self):
         if self.dashboard and self.dashboard.configuring() and self.current_section == "providers":
@@ -1606,8 +1646,8 @@ class ProviderSettings(QWidget):
         if not self.dashboard or not self.dashboard.configuring():
             return
         fields = {
-            "general": [self.active, self.startup],
-            "appearance": [self.usage_display, *self.display.values(), self.icon_mode],
+            "general": [self.active, self.refresh_interval, self.startup, self.usage_display,
+                        *self.display.values(), self.icon_mode],
             "providers": [self.providers],
             "guide": [],
             "about": self.sections["about"].findChildren(SettingsLinkButton),
@@ -1972,13 +2012,13 @@ class ProviderSettings(QWidget):
                  if self.providers.item(i).checkState() == Qt.CheckState.Checked]
         display = {key: checkbox.isChecked() for key, checkbox in self.display.items()}
         if not any(display.values()):
-            self.select_section("appearance")
+            self.select_section("general")
             self.message.setText("Show at least one text field in the bar.")
             self.message.show()
             return
         usage_display = self.usage_display.currentData()
         if usage_display not in state.USAGE_DISPLAY_MODES:
-            self.select_section("appearance")
+            self.select_section("general")
             self.message.setText("Choose Used or Remaining for usage display.")
             self.message.show()
             return
@@ -1994,21 +2034,29 @@ class ProviderSettings(QWidget):
             self.message.show()
             return
         selected = dict(state.load_selected() or {})
+        refresh_interval = state.validate_refresh_interval_minutes(self.refresh_interval_minutes())
+        signature = self.draft_signature(notification_settings)
+        interval_only = signature == self.saved_draft
         choice = self.active.currentData()
         if choice:
             selected.update(zip(("provider", "idx", "metric"), choice))
-        selected.update(display, icon_mode=self.icon_mode.currentData(), usage_display=usage_display)
+        selected.update(display, icon_mode=self.icon_mode.currentData(), usage_display=usage_display,
+                        refresh_interval_minutes=refresh_interval)
         try:
-            if paths.IS_WINDOWS:
+            if paths.IS_WINDOWS and not interval_only:
                 set_startup(self.startup.isChecked())
-            config.save_connection_order(order)
+            if not interval_only:
+                config.save_connection_order(order)
             state._save_json(state.SELECTED_FILE, selected)
-            notifications.save_settings(notification_settings)
+            if not interval_only:
+                notifications.save_settings(notification_settings)
         except OSError:
             self.message.setText("Unable to save settings. Check access to your user configuration directory.")
             self.message.show()
             return
         self.notification_settings = notification_settings
+        self.saved_draft = signature
+        self.refresh_required = not interval_only
         self.message.setText("Saved")
         self.message.show()
         self.saved.emit()
@@ -2125,6 +2173,7 @@ class GuideView(QWidget):
         ("Move focus", "Tab / Shift+Tab."),
         ("Activate", "Space on buttons; Enter on usage / header controls."),
         ("Choose an option", "Up / Down in an open select; Enter confirms and Esc closes."),
+        ("Refresh interval", "General slider: 5–60 minutes in 5-minute steps, then Save."),
         ("Adjust alert levels", "Drag a slider or Left / Right / Home / End when focused."),
         ("Reorder providers", "Row arrows or Alt+Up / Alt+Down in Providers."),
         ("Save changes", "Save applies every Settings tab."),
@@ -2660,6 +2709,9 @@ class Dashboard(QWidget):
             self.data.setdefault(render.connection_key(item), []).append(item)
         self.errors = {}
         self.selected = state.load_selected() or {}
+        self.last_checked = None
+        self.status_has_update = False
+        self.refresh_completed_at = time.monotonic()
         self.busy = False
         self.pending = set()
         self.metric_values = []
@@ -2714,7 +2766,7 @@ class Dashboard(QWidget):
         self.settings_button.clicked.connect(self.configure)
         header_layout.addWidget(self.settings_button)
         self.panel_layout.addWidget(header)
-        self.status = QLabel("Updates every 5 minutes")
+        self.status = QLabel(f"Updates every {state.get_refresh_interval_minutes(self.selected)} minutes")
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -2784,8 +2836,9 @@ class Dashboard(QWidget):
         self.poll.timeout.connect(self.poll_state)
         self.poll.start(1000)
         self.auto_refresh = QTimer(self)
-        self.auto_refresh.timeout.connect(self.refresh)
-        self.auto_refresh.start(300_000)
+        self.auto_refresh.setSingleShot(True)
+        self.auto_refresh.timeout.connect(self.refresh_automatically)
+        self.schedule_auto_refresh()
         self.animation_frame = 0
         self.animation = QTimer(self)
         self.animation.timeout.connect(self.animate)
@@ -2924,6 +2977,7 @@ class Dashboard(QWidget):
         if self.quitting or self.reset_applying or self.busy or self.updating:
             return
         self.reset_applying = True
+        self.auto_refresh.stop()
         self.credits_view.running = True
         self.credits_view.attempts.add(payload["fingerprint"])
         self.reset_target = (payload["provider"], payload["idx"])
@@ -2991,6 +3045,7 @@ class Dashboard(QWidget):
         if not guide.get("canUpdate") or not version.get("has_update"):
             return
         self.updating = True
+        self.auto_refresh.stop()
         self.update_view.running = True
         self.update_view.failed = False
         self.update_view.completed = False
@@ -3028,6 +3083,11 @@ class Dashboard(QWidget):
         self.update_view.update_action()
         if self.quitting and not self.busy and not self.reset_applying:
             self.app.quit()
+        elif self.queued and not self.busy and not self.reset_applying:
+            self.queued = False
+            self.refresh()
+        elif not self.quitting:
+            self.schedule_auto_refresh()
 
     def show_about(self):
         self.configure()
@@ -3108,9 +3168,14 @@ class Dashboard(QWidget):
 
     def settings_saved(self):
         self.last_config = config.load_config()
+        old_interval = state.get_refresh_interval_minutes(self.selected)
         self.selected = state.load_selected() or {}
         self.draw()
-        self.refresh()
+        if self.settings_view.refresh_required:
+            self.refresh()
+        elif state.get_refresh_interval_minutes(self.selected) != old_interval:
+            self.schedule_auto_refresh()
+            self.update_refresh_status()
 
     def show_diagnostics(self):
         dialog = QDialog(self)
@@ -3161,15 +3226,49 @@ class Dashboard(QWidget):
         cfg = config.load_config()
         selected = state.load_selected() or {}
         if selected != self.selected:
+            old_interval = state.get_refresh_interval_minutes(self.selected)
             self.selected = selected
             self.draw()
+            if state.get_refresh_interval_minutes(selected) != old_interval:
+                self.schedule_auto_refresh()
+                self.update_refresh_status()
         if cfg != self.last_config or refresh != self.last_refresh:
             self.last_config, self.last_refresh = cfg, refresh
             self.draw()
             self.refresh()
 
+    def schedule_auto_refresh(self):
+        """Rearm after completion or a saved preference, without starting a query."""
+        providers = [provider for entries in self.data.values() for provider in entries]
+        elapsed = max(0, int(time.monotonic() - self.refresh_completed_at))
+        delay = notifications.next_check_delay(
+            providers, default=max(1, state.get_refresh_interval_minutes(self.selected) * 60 - elapsed))
+        self.auto_refresh.setInterval(int(delay * 1000))
+        if self.quitting or self.busy or self.reset_applying or self.updating:
+            self.auto_refresh.stop()
+        else:
+            self.auto_refresh.start()
+
+    def refresh_automatically(self):
+        # Automatic ticks never add a second query behind an active worker.
+        # Its completion will rearm the timer with the latest saved interval.
+        if not (self.quitting or self.busy or self.reset_applying or self.updating):
+            self.refresh()
+
+    def update_refresh_status(self):
+        if self.busy or self.quitting:
+            return
+        interval = state.get_refresh_interval_minutes(self.selected)
+        self.status.setText(f"Last checked {self.last_checked} · updates every {interval} minutes"
+                            if self.last_checked else f"Updates every {interval} minutes")
+        if self.status_has_update:
+            self.status.setText(self.status.text() + " · update available")
+
     def refresh(self):
         if self.quitting:
+            return
+        if self.updating:
+            self.queued = True
             return
         if self.reset_applying:
             self.queued = True
@@ -3182,6 +3281,7 @@ class Dashboard(QWidget):
             QTimer.singleShot(5000, self.refresh)
             return
         self.busy = True
+        self.auto_refresh.stop()
         self.pending = set(config.enabled_connection_order())
         self.errors = {}
         self.refresh_action.setEnabled(False)
@@ -3244,17 +3344,18 @@ class Dashboard(QWidget):
         self.refresh_button.setEnabled(True)
         self.refresh_button.set_loading(False)
         self.worker.deleteLater()
-        self.status.setText("Last checked " + time.strftime("%H:%M:%S") + " · updates every 5 minutes")
-        providers = [provider for entries in self.data.values() for provider in entries]
-        self.auto_refresh.setInterval(int(notifications.next_check_delay(providers) * 1000))
-        if fetch.get_version_info()["has_update"]:
-            self.status.setText(self.status.text() + " · update available")
+        self.last_checked = time.strftime("%H:%M:%S")
+        self.refresh_completed_at = time.monotonic()
+        self.status_has_update = fetch.get_version_info()["has_update"]
+        self.update_refresh_status()
         self.draw()
         if self.quitting and not self.updating and not self.reset_applying:
             self.app.quit()
         elif self.queued:
             self.queued = False
             self.refresh()
+        else:
+            self.schedule_auto_refresh()
 
     def choose_metric(self, value):
         self.selected.update(provider=value[0], idx=value[1], metric=value[2])

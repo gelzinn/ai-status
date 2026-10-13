@@ -96,6 +96,7 @@ def settings_snapshot(selected):
         )},
         "iconMode": state.get_icon_mode(selected),
         "usageDisplay": state.get_usage_display(selected),
+        "refreshIntervalMinutes": state.get_refresh_interval_minutes(selected),
         "notifications": notifications.load_settings(),
     }
 
@@ -128,15 +129,30 @@ def save_settings(payload):
     usage_display = payload.get("usageDisplay", state.get_usage_display(selected))
     if usage_display not in state.USAGE_DISPLAY_MODES:
         raise ValueError("Invalid usage display")
+    refresh_interval = state.validate_refresh_interval_minutes(payload.get(
+        "refreshIntervalMinutes", state.get_refresh_interval_minutes(selected)))
     alert_settings = notifications.validate_settings(payload["notifications"]) if "notifications" in payload else None
+    refresh_only = (
+        enabled == config.enabled_connection_order()
+        and {key: choice[key] for key in ("provider", "idx", "metric")}
+            == {key: selected.get(key) for key in ("provider", "idx", "metric")}
+        and display == {key: selected.get(key, default) for key, default in (
+            ("show_provider", True), ("show_model", True), ("show_metric", False), ("show_pct", True))}
+        and icon_mode == state.get_icon_mode(selected)
+        and usage_display == state.get_usage_display(selected)
+        and (alert_settings is None or alert_settings == notifications.load_settings())
+    )
     selected.update({key: choice[key] for key in ("provider", "idx", "metric")})
-    selected.update({key: display[key] for key in fields}, icon_mode=icon_mode, usage_display=usage_display)
+    selected.update({key: display[key] for key in fields}, icon_mode=icon_mode, usage_display=usage_display,
+                    refresh_interval_minutes=refresh_interval)
     # Report I/O errors to the form instead of using the best-effort wrappers.
-    if alert_settings is not None:
-        notifications.save_settings(alert_settings)
-    config.save_connection_order(enabled)
+    if not refresh_only:
+        if alert_settings is not None:
+            notifications.save_settings(alert_settings)
+        config.save_connection_order(enabled)
     state._save_json(state.SELECTED_FILE, selected)
-    state.trigger_refresh()
+    if not refresh_only:
+        state.trigger_refresh()
 
 
 def usable_metrics(entry):
