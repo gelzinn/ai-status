@@ -96,6 +96,7 @@ def settings_snapshot(selected):
         )},
         "iconMode": state.get_icon_mode(selected),
         "usageDisplay": state.get_usage_display(selected),
+        "items": state.get_selected_items(selected),
         "notifications": notifications.load_settings(),
     }
 
@@ -119,17 +120,29 @@ def save_settings(payload):
     icon_mode = payload.get("iconMode")
     if icon_mode not in state.ICON_MODES:
         raise ValueError("Invalid provider icon")
-    choice = payload.get("selected")
-    if (not isinstance(choice, dict) or choice.get("provider") not in enabled
-            or type(choice.get("idx")) is not int or choice["idx"] < 0
-            or not isinstance(choice.get("metric"), str) or not choice["metric"]):
-        raise ValueError("Choose an enabled provider and limit")
     selected = dict(state.load_selected() or {})
+
+    def valid_choice(choice):
+        return (isinstance(choice, dict) and isinstance(choice.get("provider"), str)
+                and choice["provider"] in enabled and type(choice.get("idx")) is int and choice["idx"] >= 0
+                and isinstance(choice.get("metric"), str) and bool(choice["metric"]))
+
+    if "items" in payload:
+        items = payload["items"]
+        if (not isinstance(items, list) or not items or not all(valid_choice(choice) for choice in items)
+                or len(state.get_selected_items({"items": items})) != len(items)):
+            raise ValueError("Choose at least one enabled provider and limit, without duplicates")
+        state.set_selected_items(selected, items)
+    else:
+        choice = payload.get("selected")
+        if not valid_choice(choice):
+            raise ValueError("Choose an enabled provider and limit")
+        state.select_primary(selected, choice)
+        state.set_selected_items(selected, [item for item in state.get_selected_items(selected) if item["provider"] in enabled])
     usage_display = payload.get("usageDisplay", state.get_usage_display(selected))
     if usage_display not in state.USAGE_DISPLAY_MODES:
         raise ValueError("Invalid usage display")
     alert_settings = notifications.validate_settings(payload["notifications"]) if "notifications" in payload else None
-    selected.update({key: choice[key] for key in ("provider", "idx", "metric")})
     selected.update({key: display[key] for key in fields}, icon_mode=icon_mode, usage_display=usage_display)
     # Report I/O errors to the form instead of using the best-effort wrappers.
     if alert_settings is not None:
@@ -141,17 +154,7 @@ def save_settings(payload):
 
 def usable_metrics(entry):
     """Keep genuine zero usage and cached successes, but omit error placeholders."""
-    if fetch._is_error_result(entry):
-        return []
-    metrics = []
-    for metric in render.entry_metrics(entry):
-        if metric.get("percentage") is not None:
-            usable = render.metric_percentage(metric) is not None
-        else:
-            usable = render.metric_is_amount(metric) or (isinstance(metric.get("value"), str) and bool(metric["value"]))
-        if usable:
-            metrics.append(metric)
-    return metrics
+    return render.usable_metrics(entry)
 
 
 def select_metric(selection):
@@ -165,7 +168,7 @@ def select_metric(selection):
         if render.connection_key(entry) == provider and entry.get("_idx", 0) == idx and provider in config.enabled_connection_order():
             if key in [render.metric_key(metric) for metric in usable_metrics(entry)]:
                 selected = state.load_selected() or {}
-                selected.update(provider=provider, idx=idx, metric=key)
+                state.select_primary(selected, {"provider": provider, "idx": idx, "metric": key})
                 state.save_selected(selected)
                 return
     raise ValueError("This usage metric is no longer available")
@@ -173,6 +176,7 @@ def select_metric(selection):
 
 def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=None):
     selected = dict(selected or {})
+    preferences = dict(selected)
     pending = set(pending or ())
     logo_paths = logo_paths or {}
     order = config.enabled_connection_order()
@@ -219,9 +223,24 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
         selected.update(provider=current["id"], idx=current["idx"])
     if current and current["metrics"] and selected.get("metric") not in [m["key"] for m in current["metrics"]]:
         selected["metric"] = current["metrics"][0]["key"]
-    selected_loading = selected.get("provider") in pending
     enabled_data = [dict(p, metrics=usable_metrics(p)) for p in data if render.connection_key(p) in order and usable_metrics(p)]
-    text = render.get_selected_metric_text(enabled_data, selected, spinner="…" if selected_loading else None)
+    choices = render.get_bar_metric_choices(enabled_data, preferences) if "items" in preferences else state.get_selected_items(selected)
+    bar_items = []
+    for choice in choices:
+        provider = next((p for p in providers if p["id"] == choice["provider"] and p["idx"] == choice["idx"]), None)
+        if provider is None:
+            continue
+        loading = choice["provider"] in pending
+        item_text = render._get_single_metric_text(enabled_data, dict(selected, **choice), spinner="…" if loading else None)
+        item_logo = logo_paths.get(provider["providerId"], logo_path if choice == choices[0] else "") if state.get_icon_mode(selected) == "logo" else ""
+        bar_items.append(dict(choice, text=item_text, logoPath=item_logo, loading=loading))
+    if bar_items:
+        selected.update({key: bar_items[0][key] for key in ("provider", "idx", "metric")})
+        current = next(p for p in providers if p["id"] == selected["provider"] and p["idx"] == selected["idx"])
+    elif "items" in preferences:
+        selected = preferences
+        current = None
+    text = " · ".join(item["text"] for item in bar_items)
     if not current:
         text = "AI Status …" if pending else "AI Status"
         logo_path = ""
@@ -233,10 +252,11 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
         "version": fetch.get_version_info(),
         "update": updates.update_guide(),
         "text": text,
+        "barItems": bar_items,
         "selected": selected,
         "iconMode": state.get_icon_mode(selected),
         "logoPath": logo_path,
         "loading": bool(pending),
         "providers": providers,
-        "settings": settings_snapshot(selected),
+        "settings": settings_snapshot(preferences if "items" in preferences else selected),
     }

@@ -11,6 +11,15 @@ refresh, settings Save/Cancel and reordering, reset-credit and update navigation
 multiple displays, and launch at sign-in. Check both light and dark
 appearance, provider errors, missing credentials and cached results.
 
+Select one and several menu bar items, including two limits from one account
+and two accounts for one provider. Check individual logos, loading and
+used/remaining values, Save/Cancel, empty-selection validation and migration
+from existing single-item preferences. Clicking a usage metric must replace
+the first item while retaining the rest without duplicates. Temporarily
+unavailable items must remain saved and reappear when data returns. Check the
+combined menu bar width and popover position on a crowded bar and multiple
+displays.
+
 Production builds use `-Osize`, whole-module optimization, linker dead stripping
 and symbol stripping before ad-hoc signing. They omit the developer fixture code.
 The installed app's `--smoke` validates bundled fonts/icons and constructs the

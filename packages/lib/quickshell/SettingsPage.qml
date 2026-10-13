@@ -13,6 +13,7 @@ Column {
     property string iconMode: "bot"
     property string usageDisplay: "used"
     property var selected: ({})
+    property var selectedItems: []
     property var alertSettings: ({enabled: true, thresholds: [80,95,100], recovery: true, muted_until: 0, rules: [], quiet_hours: {start: "", end: ""}, work_hours: {start: "", end: ""}, recent_only: false})
     property string alertThresholds: "80,95,100"
     property string alertQuietHours: ""
@@ -30,7 +31,7 @@ Column {
     readonly property var invalidAlertRules: (alertSettings.rules || []).filter(rule => !validThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] : rule.thresholds.join(",")))
     readonly property string ruleSelectionLabel: ruleLabel(ruleSelection.provider, ruleSelection.metric)
     property Item popupParent: parent
-    readonly property bool selectionOpen: providerSelector.popupOpen || iconSelector.popupOpen || usageDisplaySelector.popupOpen
+    readonly property bool selectionOpen: iconSelector.popupOpen || usageDisplaySelector.popupOpen
     property bool saved: false
     property bool inlineValidation: true
     property string section: "general"
@@ -44,11 +45,11 @@ Column {
     ]
     readonly property string validationSection: enabledProviders.length === 0 ? "providers"
         : !Object.keys(display).some(key => display[key]) || ["used", "remaining"].indexOf(usageDisplay) === -1 ? "appearance"
-        : !choices.some(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) ? "general"
+        : !validItems ? "general"
         : !valid ? "alerts" : ""
     readonly property string validationMessage: validationSection === "providers" ? "Enable at least one provider in Providers."
         : validationSection === "appearance" ? "Choose a usage display and at least one bar text field in Appearance."
-        : validationSection === "general" ? "Choose an active provider and limit in General."
+        : validationSection === "general" ? "Choose at least one bar item in General."
         : validationSection === "alerts" ? "Review alert levels and schedules in Alerts."
         : ""
     readonly property var choices: {
@@ -97,11 +98,19 @@ Column {
                     items.push(Object.assign({}, group, {metric: "rolling", label: "Usage"}))
             }
         }
+        // Keep unavailable pinned limits editable without silently replacing them.
+        for (const pinned of selectedItems) {
+            if (!items.some(item => sameItem(item, pinned)))
+                items.push(Object.assign({}, pinned, {groupKey: pinned.provider + "/" + pinned.idx,
+                    groupLabel: providerName(pinned.provider), groupLogoSource: order.indexOf(pinned.provider) !== -1 ? providerLogo(pinned.provider, null) : "",
+                    label: pinned.metric + " (unavailable)"}))
+        }
         return items
     }
     readonly property var selectedChoice: choices.find(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) || null
     readonly property string selectedLabel: selectedChoice ? selectedChoice.groupLabel + " · " + selectedChoice.label : "Choose a provider and limit"
-    readonly property bool valid: enabledProviders.length > 0 && Object.keys(display).some(key => display[key]) && ["used", "remaining"].indexOf(usageDisplay) !== -1 && choices.some(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) && validThresholds(alertThresholds) && validHours(alertQuietHours) && validHours(alertWorkHours) && (alertSettings.rules || []).every(rule => validThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] : rule.thresholds.join(",")))
+    readonly property bool validItems: selectedItems.length > 0 && selectedItems.every(item => enabledProviders.indexOf(item.provider) !== -1 && choices.some(choice => sameItem(choice, item)))
+    readonly property bool valid: enabledProviders.length > 0 && Object.keys(display).some(key => display[key]) && ["used", "remaining"].indexOf(usageDisplay) !== -1 && validItems && validThresholds(alertThresholds) && validHours(alertQuietHours) && validHours(alertWorkHours) && (alertSettings.rules || []).every(rule => validThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] : rule.thresholds.join(",")))
     spacing: Style.space(16)
     enabled: !Plugin.Model.settingsSaving
     onOrderChanged: saved = false
@@ -109,7 +118,12 @@ Column {
     onDisplayChanged: saved = false
     onIconModeChanged: saved = false
     onUsageDisplayChanged: saved = false
-    onSelectedChanged: { saved = false; alertRuleTarget = null }
+    onSelectedChanged: {
+        saved = false; alertRuleTarget = null
+        if (selected.provider && selected.metric)
+            selectedItems = [itemIdentity(selected)].concat(selectedItems.slice(1).filter(item => !sameItem(item, selected)))
+    }
+    onSelectedItemsChanged: saved = false
     onAlertSettingsChanged: saved = false
     onAlertThresholdsChanged: saved = false
     onAlertRuleTextsChanged: saved = false
@@ -154,7 +168,6 @@ Column {
     }
 
     function closeSelectors() {
-        providerSelector.dismiss()
         iconSelector.dismiss()
         usageDisplaySelector.dismiss()
     }
@@ -167,7 +180,8 @@ Column {
         display = Object.assign({}, settings.display || {})
         iconMode = settings.iconMode || "bot"
         usageDisplay = settings.usageDisplay === "remaining" ? "remaining" : "used"
-        selected = Object.assign({}, Plugin.Model.snapshot.selected)
+        selectedItems = (settings.items || []).map(itemIdentity)
+        selected = selectedItems.length ? Object.assign({}, selectedItems[0]) : Object.assign({}, Plugin.Model.snapshot.selected)
         alertSettings = JSON.parse(JSON.stringify(settings.notifications || {enabled: true, thresholds: [80,95,100], recovery: true, muted_until: 0, rules: [], quiet_hours: {start: "", end: ""}, work_hours: {start: "", end: ""}, recent_only: false}))
         alertThresholds = alertSettings.thresholds.join(",")
         alertRuleTexts = {}
@@ -189,7 +203,8 @@ Column {
                 : !validHours(alertWorkHours) ? workHoursField.inputItem
                 : invalidAlertRules.length ? ruleThresholdField.inputItem : alertEnabled
             : section === "guide" ? null
-            : section === "providers" && providerRows.count > 0 ? providerRows.itemAt(0).firstControl : providerSelector
+            : section === "providers" && providerRows.count > 0 ? providerRows.itemAt(0).firstControl
+            : barItemRows.count > 0 ? barItemRows.itemAt(0) : null
         if (first) first.forceActiveFocus(Qt.TabFocusReason)
     }
 
@@ -204,10 +219,39 @@ Column {
 
     function toggleProvider(name) {
         enabledProviders = enabledProviders.indexOf(name) === -1 ? enabledProviders.concat([name]) : enabledProviders.filter(item => item !== name)
-        if (enabledProviders.indexOf(selected.provider) === -1) {
+        selectedItems = selectedItems.filter(item => enabledProviders.indexOf(item.provider) !== -1)
+        if (selectedItems.length) {
+            selected = Object.assign({}, selectedItems[0])
+        } else {
             const first = choices[0]
             selected = first ? {provider: first.provider, idx: first.idx, metric: first.metric} : {}
         }
+    }
+
+    function sameItem(left, right) {
+        return left.provider === right.provider && left.idx === right.idx && left.metric === right.metric
+    }
+
+    function itemIdentity(item) {
+        return {provider: item.provider, idx: item.idx, metric: item.metric}
+    }
+
+    function toggleItem(choice) {
+        selectedItems = selectedItems.some(item => sameItem(item, choice))
+            ? selectedItems.filter(item => !sameItem(item, choice))
+            : selectedItems.concat([itemIdentity(choice)])
+        selected = selectedItems.length ? Object.assign({}, selectedItems[0]) : {}
+        Qt.callLater(() => {
+            if (!root.visible || root.section !== "general") return
+            for (let index = 0; index < barItemRows.count; index++) {
+                const row = barItemRows.itemAt(index)
+                if (row && sameItem(row.modelData, choice)) {
+                    row.forceActiveFocus(Qt.TabFocusReason)
+                    return
+                }
+            }
+            focusFirstControl()
+        })
     }
 
     function moveProvider(index, direction) {
@@ -234,7 +278,8 @@ Column {
                     thresholds: alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? parseThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric]) : rule.thresholds
                 }))
             }),
-            selected: {provider: selected.provider, idx: selected.idx, metric: selected.metric}
+            selected: {provider: selected.provider, idx: selected.idx, metric: selected.metric},
+            items: selectedItems.map(itemIdentity)
         })
     }
 
@@ -374,24 +419,23 @@ Column {
         width: parent.width
         spacing: Style.space(8)
         SectionHeading {
-            title: "Active provider & limit"
-            description: "Choose the account and limit shown in the bar."
+            title: "Bar items"
+            description: "Select as many account limits as you want. Items appear in the order you select them."
         }
-        Plugin.PanelSelect {
-            id: providerSelector
-            objectName: "active-provider"
-            width: parent.width
-            text: root.selectedLabel
-            logoSource: root.selectedChoice ? root.selectedChoice.groupLogoSource : ""
-            popupParent: root.popupParent
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            choices: root.choices.map(item => Object.assign({}, item, {objectName: "active-provider-option-" + item.provider + "-" + item.idx + "-" + item.metric}))
-            currentIndex: root.choices.indexOf(root.selectedChoice)
-            onPopupOpenChanged: if (popupOpen) { iconSelector.dismiss(); usageDisplaySelector.dismiss() }
-            onActivated: index => {
-                const choice = root.choices[index]
-                root.selected = {provider: choice.provider, idx: choice.idx, metric: choice.metric}
+        Repeater {
+            id: barItemRows
+            model: root.choices
+            delegate: Button {
+                required property var modelData
+                objectName: "bar-item-" + modelData.provider + "-" + modelData.idx + "-" + modelData.metric
+                width: parent.width
+                alignLeft: true
+                logoSource: modelData.groupLogoSource
+                readonly property bool checked: root.selectedItems.some(item => root.sameItem(item, modelData))
+                text: (checked ? "[x]  " : "[ ]  ") + modelData.groupLabel + " · " + modelData.label
+                Accessible.role: Accessible.CheckBox
+                Accessible.checked: checked
+                onClicked: root.toggleItem(modelData)
             }
         }
     }
@@ -411,7 +455,7 @@ Column {
             popupParent: root.popupParent
             choices: [{value: "used", label: "Used"}, {value: "remaining", label: "Remaining"}]
             currentIndex: ["used", "remaining"].indexOf(root.usageDisplay)
-            onPopupOpenChanged: if (popupOpen) { providerSelector.dismiss(); iconSelector.dismiss() }
+            onPopupOpenChanged: if (popupOpen) iconSelector.dismiss()
             onActivated: index => root.usageDisplay = choices[index].value
         }
     }
@@ -452,7 +496,7 @@ Column {
             popupParent: root.popupParent
             choices: [{value: "off", label: "None"}, {value: "bot", label: "Bot"}, {value: "logo", label: "Provider logo"}]
             currentIndex: ["off", "bot", "logo"].indexOf(root.iconMode)
-            onPopupOpenChanged: if (popupOpen) { providerSelector.dismiss(); usageDisplaySelector.dismiss() }
+            onPopupOpenChanged: if (popupOpen) usageDisplaySelector.dismiss()
             onActivated: index => root.iconMode = choices[index].value
         }
     }

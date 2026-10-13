@@ -1505,11 +1505,21 @@ class ProviderSettings(QWidget):
         self.navigation.setFixedHeight(navigation_content.sizeHint().height())
         layout.addStretch()
         general = self.sections["general"].layout()
-        general.addWidget(SettingsHeading("Active provider & limit", "Choose the account and limit shown in the bar."))
-        self.active = QComboBox()
+        general.addWidget(SettingsHeading("Bar items", "Check each account and limit to show in the tray. Choose as many as you need."))
+        self.active = QComboBox(self)
         self.active.setIconSize(QSize(16, 16))
         self.active.setAccessibleName("Active provider and limit")
-        general.addWidget(self.active)
+        # Keep a choice model for per-metric alert settings and primary focus.
+        self.active.hide()
+        self.bar_selections = state.get_selected_items(state.load_selected() or {})
+        self.bar_items = QListWidget()
+        self.bar_items.setAccessibleName("Bar items")
+        self.bar_items.setIconSize(QSize(16, 16))
+        self.bar_items.setMinimumHeight(90)
+        self.bar_items.setMaximumHeight(240)
+        self.bar_items.setStyleSheet("QListWidget { border: 1px solid #303030; border-radius: 6px; padding: 4px; }")
+        general.addWidget(self.bar_items)
+        self.bar_items.itemChanged.connect(self.bar_item_changed)
         self.startup_row = QWidget()
         startup_layout = QHBoxLayout(self.startup_row)
         startup_layout.setContentsMargins(0, 0, 0, 0)
@@ -1606,7 +1616,7 @@ class ProviderSettings(QWidget):
         if not self.dashboard or not self.dashboard.configuring():
             return
         fields = {
-            "general": [self.active, self.startup],
+            "general": [self.bar_items, self.startup],
             "appearance": [self.usage_display, *self.display.values(), self.icon_mode],
             "providers": [self.providers],
             "guide": [],
@@ -1931,6 +1941,18 @@ class ProviderSettings(QWidget):
     def clear_message(self):
         self.message.hide()
 
+    def bar_item_changed(self, item):
+        choice = dict(zip(("provider", "idx", "metric"), item.data(Qt.ItemDataRole.UserRole)))
+        if item.checkState() == Qt.CheckState.Checked:
+            if choice not in self.bar_selections:
+                self.bar_selections.append(choice)
+        else:
+            self.bar_selections = [value for value in self.bar_selections if value != choice]
+        if self.bar_selections:
+            primary = self.bar_selections[0]
+            self.active.setCurrentIndex(self.active.findData([primary[key] for key in ("provider", "idx", "metric")]))
+        self.clear_message()
+
     def update_choices(self):
         self.store_notification_rule()
         choice = self.active.currentData()
@@ -1939,12 +1961,16 @@ class ProviderSettings(QWidget):
             choice = [selected.get("provider"), selected.get("idx", 0), selected.get("metric")]
         self.active.blockSignals(True)
         self.active.clear()
+        self.bar_items.blockSignals(True)
+        self.bar_items.clear()
         data = getattr(self.dashboard, "data", {})
+        enabled = []
         for i in range(self.providers.count()):
             item = self.providers.item(i)
             if item.checkState() != Qt.CheckState.Checked:
                 continue
             name = item.data(Qt.ItemDataRole.UserRole)
+            enabled.append(name)
             entries = data.get(name) or [{"provider": provider_name(name), "metrics": []}]
             for entry in entries:
                 metrics = render.entry_metrics(entry) or [{"type": "rolling"}]
@@ -1954,10 +1980,30 @@ class ProviderSettings(QWidget):
                     detail = " (" + key.split(":", 1)[1] + ")" if ":" in key and not metric.get("id") and not metric.get("name") else ""
                     self.active.addItem(provider_icon(name), f"{Dashboard.entry_name(name, entry)} · {title}{detail}",
                                         [name, entry.get("_idx", 0), key])
+        had_selection = bool(self.bar_selections)
+        self.bar_selections = [value for value in self.bar_selections if value["provider"] in enabled]
+        for value in self.bar_selections:
+            identity = [value[key] for key in ("provider", "idx", "metric")]
+            if self.active.findData(identity) < 0:
+                self.active.addItem(provider_icon(value["provider"]),
+                                    provider_name(value["provider"]) + " · " + value["metric"] + " (unavailable)", identity)
+        if (not self.bar_selections and self.active.count()
+                and (had_selection or not getattr(self, "choices_initialized", False))):
+            self.bar_selections = [dict(zip(("provider", "idx", "metric"), self.active.itemData(0)))]
+        self.choices_initialized = True
+        for index in range(self.active.count()):
+            identity = self.active.itemData(index)
+            option = QListWidgetItem(self.active.itemIcon(index), self.active.itemText(index), self.bar_items)
+            option.setData(Qt.ItemDataRole.UserRole, identity)
+            option.setFlags(option.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            option.setCheckState(Qt.CheckState.Checked if dict(zip(("provider", "idx", "metric"), identity)) in self.bar_selections
+                                 else Qt.CheckState.Unchecked)
+        self.bar_items.setFixedHeight(min(240, max(90, self.bar_items.sizeHintForRow(0) * self.bar_items.count() + 10)))
         index = self.active.findData(choice)
         self.active.setCurrentIndex(index if index >= 0 else 0)
         self.active.setEnabled(self.active.count() > 0)
         self.active.blockSignals(False)
+        self.bar_items.blockSignals(False)
         self.notification_choice_changed()
         self.clear_message()
 
@@ -1971,6 +2017,12 @@ class ProviderSettings(QWidget):
         order = [self.providers.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.providers.count())
                  if self.providers.item(i).checkState() == Qt.CheckState.Checked]
         display = {key: checkbox.isChecked() for key, checkbox in self.display.items()}
+        if order and not self.bar_selections:
+            self.select_section("general")
+            self.message.setText("Choose at least one bar item.")
+            self.message.show()
+            self.bar_items.setFocus(Qt.FocusReason.TabFocusReason)
+            return
         if not any(display.values()):
             self.select_section("appearance")
             self.message.setText("Show at least one text field in the bar.")
@@ -1994,9 +2046,7 @@ class ProviderSettings(QWidget):
             self.message.show()
             return
         selected = dict(state.load_selected() or {})
-        choice = self.active.currentData()
-        if choice:
-            selected.update(zip(("provider", "idx", "metric"), choice))
+        state.set_selected_items(selected, self.bar_selections)
         selected.update(display, icon_mode=self.icon_mode.currentData(), usage_display=usage_display)
         try:
             if paths.IS_WINDOWS:
@@ -2759,6 +2809,9 @@ class Dashboard(QWidget):
         self.panel_layout.addWidget(self.update_view.footer)
         self.update_view.footer.hide()
         self.tray = QSystemTrayIcon(status_icon(), self)
+        self.metric_trays = {}
+        self.anchor_tray = self.tray
+        self.app.aboutToQuit.connect(self.hide_trays)
         menu = QMenu(self)
         menu.setFont(panel_font())
         menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -2793,14 +2846,23 @@ class Dashboard(QWidget):
         self.draw()
         QTimer.singleShot(0, self.refresh)
 
-    def activate(self, reason):
+    def hide_trays(self):
+        self.tray.hide()
+        for icon in self.metric_trays.values():
+            icon.hide()
+
+    def activate(self, reason, icon=None):
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick,
+                      QSystemTrayIcon.ActivationReason.Context):
+            self.anchor_tray = icon or self.tray
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
             self.hide() if self.isVisible() else self.show_dashboard()
 
     def show_dashboard(self):
-        screen = self.app.screenAt(self.tray.geometry().center()) or self.app.primaryScreen()
+        anchor_icon = self.anchor_tray
+        screen = self.app.screenAt(anchor_icon.geometry().center()) or self.app.primaryScreen()
         area = screen.availableGeometry()
-        anchor = self.tray.geometry()
+        anchor = anchor_icon.geometry()
         x = anchor.right() - self.width() if anchor.isValid() else area.right() - self.width() - 12
         y = anchor.top() - self.height() - 8 if anchor.isValid() else area.bottom() - self.height() - 12
         if y < area.top():
@@ -3063,7 +3125,7 @@ class Dashboard(QWidget):
         for button in self.metric_buttons:
             if button.value[0] in self.pending:
                 button.percentage.setText(render.SPINNERS[self.animation_frame % len(render.SPINNERS)])
-        if self.selected.get("provider") in self.pending:
+        if any(item["provider"] in self.pending for item in state.get_selected_items(self.selected)):
             self.update_tooltip()
 
     def request_exit(self):
@@ -3257,12 +3319,16 @@ class Dashboard(QWidget):
             self.refresh()
 
     def choose_metric(self, value):
-        self.selected.update(provider=value[0], idx=value[1], metric=value[2])
+        state.select_primary(self.selected, dict(zip(("provider", "idx", "metric"), value)))
         state.save_selected(self.selected)
         self.draw()
 
     def selected_value(self):
         return (self.selected.get("provider"), self.selected.get("idx", 0), self.selected.get("metric"))
+
+    def pinned_values(self):
+        return {tuple(item[key] for key in ("provider", "idx", "metric"))
+                for item in state.get_selected_items(self.selected)}
 
     def cycle_metric(self, step):
         if self.metric_values:
@@ -3270,21 +3336,59 @@ class Dashboard(QWidget):
             self.choose_metric(self.metric_values[(index + step) % len(self.metric_values)])
 
     def update_tooltip(self):
-        for name, entry, metric, value in self.visible_metrics:
-            if value == self.selected_value():
-                loading = name in self.pending
-                percentage = render.SPINNERS[self.animation_frame % len(render.SPINNERS)] if loading else render.metric_value(metric, self.selected)
-                text = f"{self.entry_name(name, entry)} {percentage}"
-                if entry.get("_cached"):
-                    text += " · cached"
-                if getattr(self, "tray_provider", None) != name:
-                    self.tray.setIcon(provider_icon(name))
-                    self.tray_provider = name
-                self.tray.setToolTip(text[:120])
-                return
-        self.tray.setIcon(status_icon())
-        self.tray_provider = None
-        self.tray.setToolTip("AI Status · No usage available")
+        metrics = {value: (name, entry, metric) for name, entry, metric, value in self.visible_metrics}
+        pinned = [tuple(item[key] for key in ("provider", "idx", "metric"))
+                  for item in state.get_selected_items(self.selected)]
+        visible = [value for value in pinned if value in metrics]
+        extra = set(visible[1:])
+        for value in list(self.metric_trays):
+            if value not in extra:
+                icon = self.metric_trays.pop(value)
+                if self.anchor_tray is icon:
+                    self.anchor_tray = self.tray
+                icon.hide()
+                icon.deleteLater()
+        if not visible:
+            self.tray.setIcon(status_icon())
+            self.tray.provider_key = None
+            self.tray.setToolTip("AI Status · No usage available")
+            return
+        for index, value in enumerate(visible):
+            name, entry, metric = metrics[value]
+            if index == 0:
+                icon = self.tray
+            else:
+                icon = self.metric_trays.get(value)
+                if icon is None:
+                    icon = QSystemTrayIcon(provider_icon(name), self)
+                    icon.setContextMenu(self.menu)
+                    icon.activated.connect(lambda reason, icon=icon: self.activate(reason, icon))
+                    icon.messageClicked.connect(self.open_notification)
+                    self.metric_trays[value] = icon
+                    icon.show()
+            if getattr(icon, "provider_key", None) != name:
+                icon.setIcon(provider_icon(name))
+                icon.provider_key = name
+            amount = (render.SPINNERS[self.animation_frame % len(render.SPINNERS)]
+                      if name in self.pending else render.metric_value(metric, self.selected))
+            suffix = " · cached" if entry.get("_cached") else ""
+            # Windows reserves 128 UTF-16 code units, including the terminator.
+            # Bound long account/metric labels separately so the value survives.
+            def shorten(text, limit):
+                units = 0
+                output = []
+                for character in str(text):
+                    width = 2 if ord(character) > 0xffff else 1
+                    if units + width > limit - 1:
+                        return "".join(output) + "…"
+                    output.append(character)
+                    units += width
+                return "".join(output)
+            text = (shorten(self.entry_name(name, entry), 40) + " · "
+                    + shorten(render.metric_title(metric, self.selected), 40) + " · "
+                    + shorten(amount, 30) + suffix)
+            if icon.toolTip() != text:
+                icon.setToolTip(text)
 
     @staticmethod
     def entry_name(name, entry):
@@ -3303,8 +3407,9 @@ class Dashboard(QWidget):
         if self.metric_values and self.selected_value() not in self.metric_values:
             value = next((value for value in self.metric_values if value[:2] == self.selected_value()[:2]),
                          self.metric_values[0])
-            self.selected.update(provider=value[0], idx=value[1], metric=value[2])
-            state.save_selected(self.selected)
+            if "items" not in self.selected:
+                self.selected.update(provider=value[0], idx=value[1], metric=value[2])
+                state.save_selected(self.selected)
         structure = tuple((value, render.metric_is_amount(metric),
                            metric.get("id") in {row["id"] for row in usage_credits.presentation(entry)})
                           for _, entry, metric, value in self.visible_metrics)
@@ -3315,6 +3420,8 @@ class Dashboard(QWidget):
             self.fit_content()
             return
         self.structure = structure
+        pinned = self.pinned_values()
+        pinned_providers = {value[:2] for value in pinned}
         self.metric_buttons = []
         self.provider_buttons = {}
         content = QWidget()
@@ -3342,7 +3449,7 @@ class Dashboard(QWidget):
                 group_layout = QVBoxLayout(group)
                 group_layout.setContentsMargins(0, 0, 0, 0)
                 group_layout.setSpacing(12)
-                active_provider = (name, entry.get("_idx", 0)) == self.selected_value()[:2]
+                active_provider = (name, entry.get("_idx", 0)) in pinned_providers
                 heading = UsageButton()
                 self.provider_buttons[(name, entry.get("_idx", 0))] = heading
                 row = QHBoxLayout(heading)
@@ -3370,7 +3477,7 @@ class Dashboard(QWidget):
                 for metric in metrics:
                     title = render.metric_title(metric, self.selected)
                     value = (name, entry.get("_idx", 0), render.metric_key(metric))
-                    active = value == self.selected_value()
+                    active = value in pinned
                     color = "#eeeeee" if active else "#888888"
                     pct = render.metric_percentage(metric, self.selected)
                     button = UsageButton()
@@ -3457,12 +3564,14 @@ class Dashboard(QWidget):
         self.update_link.setAccessibleName(self.update_title.text() + ". Open update guide")
         if self.viewing_updates():
             self.update_view.set_guide(self.update_view.guide, version)
+        pinned = self.pinned_values()
+        pinned_providers = {value[:2] for value in pinned}
         groups = {}
         for name, entry, metric, value in self.visible_metrics:
             groups.setdefault(value[:2], (name, entry))
         for key, (name, entry) in groups.items():
             heading = self.provider_buttons[key]
-            active = key == self.selected_value()[:2]
+            active = key in pinned_providers
             heading.arrow.setText("→" if active else "")
             heading.name_label.setText(self.entry_name(name, entry))
             heading.name_label.setStyleSheet(f"color: {'#eeeeee' if active else '#888888'}; font-weight: 500;")
@@ -3475,7 +3584,7 @@ class Dashboard(QWidget):
             heading.credits.setAccessibleName(f"{self.entry_name(name, entry)}: {available} reset credits. Open reset details")
         group_indices = {key: index for index, key in enumerate(groups)}
         for button, (name, entry, metric, value) in zip(self.metric_buttons, self.visible_metrics):
-            active = value == self.selected_value()
+            active = value in pinned
             loading = name in self.pending
             color = "#eeeeee" if active else "#888888"
             pct = render.metric_percentage(metric, self.selected)
@@ -3611,5 +3720,5 @@ def run(configure=False):
     if configure:
         QTimer.singleShot(0, dashboard.configure)
     app.exec()
-    dashboard.tray.hide()
+    dashboard.hide_trays()
     lock.unlock()

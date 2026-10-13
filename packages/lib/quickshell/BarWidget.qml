@@ -71,23 +71,44 @@ Ui.BarWidget {
             anchors.centerIn: parent
             spacing: Style.spacing.controlGap
             rotation: root.vertical ? 90 : 0
-            Image {
-                id: logo
-                source: Plugin.Model.snapshot.logoPath ? "file://" + Plugin.Model.snapshot.logoPath : ""
-                visible: Plugin.Model.snapshot.iconMode === "logo" && status === Image.Ready
-                width: visible ? Style.font.icon : 0
-                height: Style.font.icon
-                anchors.verticalCenter: parent.verticalCenter
-                fillMode: Image.PreserveAspectFit
-                asynchronous: true
-            }
-            Text {
-                text: (Plugin.Model.snapshot.text || "AI Status").replace(/…/g, Plugin.Model.spinner)
-                textFormat: Text.PlainText
-                color: button.foreground
-                font.family: button.fontFamily
-                font.pixelSize: Style.font.body
-                anchors.verticalCenter: parent.verticalCenter
+            Repeater {
+                model: Plugin.Model.snapshot.barItems && Plugin.Model.snapshot.barItems.length
+                    ? Plugin.Model.snapshot.barItems : [{text: Plugin.Model.snapshot.text || "AI Status", logoPath: Plugin.Model.snapshot.logoPath || ""}]
+                delegate: Row {
+                    required property var modelData
+                    required property int index
+                    objectName: "bar-item-" + index
+                    spacing: Style.spacing.controlGap
+                    anchors.verticalCenter: parent.verticalCenter
+                    Text {
+                        visible: index > 0
+                        text: "·"
+                        color: button.foreground
+                        opacity: 0.5
+                        font.family: button.fontFamily
+                        font.pixelSize: Style.font.body
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Image {
+                        objectName: "bar-item-logo-" + index
+                        source: modelData.logoPath ? "file://" + modelData.logoPath : ""
+                        visible: Plugin.Model.snapshot.iconMode === "logo" && status === Image.Ready
+                        width: visible ? Style.font.icon : 0
+                        height: Style.font.icon
+                        anchors.verticalCenter: parent.verticalCenter
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                    }
+                    Text {
+                        objectName: "bar-item-label-" + index
+                        text: (modelData.text || "AI Status").replace(/…/g, Plugin.Model.spinner)
+                        textFormat: Text.PlainText
+                        color: button.foreground
+                        font.family: button.fontFamily
+                        font.pixelSize: Style.font.body
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
             }
         }
     }

@@ -756,12 +756,12 @@ class CLICommandTests(unittest.TestCase):
 
 @unittest.skipIf(sys.platform == "win32", "The terminal configuration UI uses curses")
 class TerminalConfigTests(unittest.TestCase):
-    def run_config(self, keys, selected, height=24):
+    def run_config(self, keys, selected, height=24, items=None):
         from core import tui
         screen = Mock()
         screen.getmaxyx.return_value = (height, 100)
         screen.getch.side_effect = keys
-        items = [{"provider": "codex", "idx": 1, "metric": "weekly", "label": "Codex · Weekly Usage"}]
+        items = items or [{"provider": "codex", "idx": 1, "metric": "weekly", "label": "Codex · Weekly Usage"}]
         with patch.multiple(tui.curses, initscr=Mock(return_value=screen), noecho=Mock(), cbreak=Mock(),
                             curs_set=Mock(), nocbreak=Mock(), echo=Mock(), endwin=Mock()), \
                 patch.object(config, "available_connections", return_value=["codex", "claude"]), \
@@ -773,6 +773,26 @@ class TerminalConfigTests(unittest.TestCase):
                 patch.object(state, "trigger_refresh") as refresh:
             tui.run()
         return screen, save, order, refresh
+
+    def test_bar_checklist_appends_metrics_in_selection_order(self):
+        items = [dict(provider="codex", idx=1, metric="weekly", label="Codex · Weekly"),
+                 dict(provider="claude", idx=0, metric="rolling", label="Claude · Rolling")]
+        initial = dict(provider="codex", idx=1, metric="weekly", icon_mode="off")
+        screen, save, order, refresh = self.run_config(
+            [ord(" "), ord("j"), ord(" "), ord("\n"), ord("\n")], initial, items=items)
+        self.assertEqual(save.call_args.args[0]["items"], [{key: item[key] for key in ("provider", "idx", "metric")} for item in items])
+        order.assert_not_called()
+        refresh.assert_not_called()
+
+    def test_canceling_bar_checklist_discards_draft_without_a_write(self):
+        items = [dict(provider="codex", idx=1, metric="weekly", label="Codex · Weekly"),
+                 dict(provider="claude", idx=0, metric="rolling", label="Claude · Rolling")]
+        initial = dict(provider="codex", idx=1, metric="weekly")
+        screen, save, order, refresh = self.run_config(
+            [ord(" "), ord("j"), ord(" "), 27, ord("\n")], initial, items=items)
+        save.assert_not_called()
+        order.assert_not_called()
+        refresh.assert_not_called()
 
     def test_usage_display_saves_remaining_and_preserves_other_preferences(self):
         initial = {"provider": "codex", "idx": 1, "metric": "weekly", "icon_mode": "off",

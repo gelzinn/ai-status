@@ -50,7 +50,7 @@ On the Omarchy Quattro shell:
 omarchy plugin add https://github.com/gelzinn/ai-status.git --enable
 ```
 
-The plugin includes its Python backend. Click the widget for usage; right-click or use the settings icon to configure providers, limits and the bar appearance. The panel shares your existing AI Status preferences and cache with Waybar.
+The plugin includes its Python backend. Click the widget for usage; right-click or use the settings icon to configure providers, select one or more limits for the bar, and change its appearance. The panel shares your existing AI Status preferences and cache with Waybar.
 
 Update the plugin with:
 
@@ -108,7 +108,7 @@ Then reference it in whichever bar section you use — a module that's defined b
 }
 ```
 
-**Want the provider's logo too?** Install with `--icon-mode logo` (or add it by hand — see [LINUX.md](packages/lib/LINUX.md)). It adds an `image#ai-status` module next to the text that shows the same tooltip on hover; just remember to list `"image#ai-status"` in `modules-right` alongside `"custom/ai-status"`.
+**Want the provider's logo too?** Install with `--icon-mode logo` (or add it by hand — see [LINUX.md](packages/lib/LINUX.md)). It adds an `image#ai-status` module next to the text that shows the first available selected item's provider logo and the same tooltip on hover; all selected usage labels appear in the text. Remember to list `"image#ai-status"` in `modules-right` alongside `"custom/ai-status"`.
 
 </details>
 
@@ -121,7 +121,7 @@ Then reference it in whichever bar section you use — a module that's defined b
 
 1. Open the [latest release](https://github.com/gelzinn/ai-status/releases/latest).
 2. Download `ai-status-<version>-windows-x64-setup.exe` and run it as your normal user, or extract the portable `ai-status-<version>-windows-x64.zip`.
-3. Launch **AI Status** from the Start menu, or open `ai-status.exe` in the extracted portable folder. Click the tray logo to see usage.
+3. Launch **AI Status** from the Start menu, or open `ai-status.exe` in the extracted portable folder. Click a tray logo to see usage. Settings lets you select several limits, with one tray icon and an account/limit/value tooltip for each. Windows controls which icons appear beside the clock or in the hidden-icons menu.
 
 The packaged app includes its runtime. Installation needs no administrator access, Python setup or WSL. Provider apps and authenticated sessions remain separate prerequisites. Enable **Start when I sign in to Windows** in Settings if you want it to launch at sign-in.
 
@@ -138,7 +138,7 @@ The packaged app includes its runtime. Installation needs no administrator acces
 curl -fsSL https://ai-status.gelzin.com/install/macos | bash
 ```
 
-The installer builds a native SwiftUI/AppKit menu bar app with the same usage, Settings, reset-credit and About page structure as Windows and Quickshell. Click the menu bar item to open the panel, choose a provider or limit, and use the header's **Refresh** and **Settings** controls.
+The installer builds a native SwiftUI/AppKit menu bar app with the same usage, Settings, reset-credit and About page structure as Windows and Quickshell. Click the menu bar item to open the panel, use **Settings** to select one or more limits for the menu bar, and use **Refresh** to update usage.
 
 Requires macOS 13+, Python 3.10+ and Xcode Command Line Tools (`xcode-select --install`). The native integration does not require SwiftBar. Re-run to update while keeping your preferences. Existing SwiftBar users can select `--mode stream` or `--mode periodic` instead.
 
@@ -248,7 +248,7 @@ process. The connection stores the variable reference, not the key value.
 ## What you get
 
 - **29 providers in one view.** Track subscription limits, API costs and prepaid balances, including separate rolling, weekly, monthly and per-model windows.
-- **Choose what stays visible.** Pick the active provider and limit, then choose the provider name, plan, limit name, percentage and icon shown in the bar. The Windows tray and macOS menu bar follow your selection.
+- **Choose what stays visible.** Select one or more account/limit items in Settings, with no fixed item count. Linux and macOS show their usage together in the bar; Windows creates a tray icon for each item with its account, limit and value in the tooltip. Choose the provider name, plan, limit name, percentage and icon style. Windows controls icon visibility in its notification area.
 - **Multiple accounts.** Add as many connections as you need for each provider, with independent labels, credentials, caches and selected metrics. Manage connections with `ai-status accounts`; enable and reorder them in the desktop Settings.
 - **Native settings.** Enable providers, reorder them and select limits inside the Omarchy, Windows and macOS panels. Windows also supports drag and drop; Waybar uses an interactive configuration TUI.
 - **Apply available resets.** See reset countdowns and Claude/Codex reset credits, with expiry dates, remaining time and time zones when reported. Choose **Apply** in the native panels to confirm within that row, then hold the confirmation button for **3 seconds** to consume one credit. Releasing early resets the progress. Usage refreshes afterward; uncertain results require checking the account before confirming another reset. [Reset eligibility →](packages/lib/PROVIDERS.md#claude)

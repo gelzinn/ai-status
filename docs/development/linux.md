@@ -21,3 +21,13 @@ before validating the updated panel: hot reload can retain older components.
 Check the selected account and limit label, grouped provider list, scrolling,
 Tab/Shift+Tab, Enter/Space, and Escape/Back across pages. Confirm that saved
 preferences and bar placement are preserved.
+
+Check one and several selected bar items, including two limits from one account,
+two accounts for one provider, and monetary values. Verify checkbox keyboard
+navigation, Save/Cancel, legacy single-item preferences, and rejection of an
+empty selection. Click/scroll/middle-click must change the first item while
+keeping the others without duplicates. Temporarily unavailable selections
+must remain saved and return when usable data does. Check per-item loading
+and used/remaining values in both Quickshell and Waybar, individual Quickshell
+logos, and Waybar's single image following the first available selected item.
+Ensure several labels fit or clip predictably on horizontal and vertical bars.

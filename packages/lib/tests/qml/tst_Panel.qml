@@ -921,9 +921,9 @@ Item {
             keyClick(Qt.Key_Tab)
             verify(findChild(panel, "settings-nav-about").activeFocus)
             keyClick(Qt.Key_Tab)
-            verify(findChild(settings, "active-provider").activeFocus)
+            verify(findChild(settings, "bar-item-claude-0-rolling").activeFocus)
             // Controls in the other sections are skipped by the focus chain.
-            keyClick(Qt.Key_Tab)
+            for (let index = 0; index < settings.choices.length; index++) keyClick(Qt.Key_Tab)
             verify(findChild(panel, "settings-cancel").activeFocus)
             Plugin.Model.settingsSaving = true
             verify(!navigation.enabled)
@@ -1009,10 +1009,10 @@ Item {
         }
         function test_tab_dismisses_selector_without_scrolling_to_popup_overlay() {
             const settings = configureManyProviders()
-            settings.selectSection("general")
+            settings.selectSection("appearance")
             wait(20)
             const scroller = findChild(panel, "panel-scroller")
-            const selector = findChild(settings, "active-provider")
+            const selector = findChild(settings, "icon-mode")
             selector.forceActiveFocus(Qt.TabFocusReason)
             verifyControlInViewport(selector, scroller)
             const position = scroller.contentY

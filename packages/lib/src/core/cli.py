@@ -70,9 +70,7 @@ def _scroll(direction, frontend="waybar"):
     new_dir, new_idx = items[(idx + direction) % len(items)]
     new_metric = _first_metric_for(cache, new_dir, new_idx)
     
-    selected["provider"] = new_dir
-    selected["idx"] = new_idx
-    selected["metric"] = new_metric
+    state.select_primary(selected, {"provider": new_dir, "idx": new_idx, "metric": new_metric})
 
     state.save_selected(selected)
     if frontend == "waybar":
@@ -105,9 +103,7 @@ def cycle_metric(frontend="waybar"):
     
     new_metric = keys[(pos + 1) % len(keys)]
     
-    selected["provider"] = provider
-    selected["idx"] = idx
-    selected["metric"] = new_metric
+    state.select_primary(selected, {"provider": provider, "idx": idx, "metric": new_metric})
 
     state.save_selected(selected)
 
@@ -319,6 +315,12 @@ def print_logo():
     if state.get_icon_mode(selected) != "logo":
         print("")
         return
+    if "items" in selected:
+        choices = render.get_bar_metric_choices(state.load_cache(), selected)
+        if not choices:
+            print("")
+            return
+        selected = dict(selected, **choices[0])
     # current.png is kept up to date by the daemon (startup + selection change)
     # and the scroll command; only seed it here if it's missing so this hot path
     # (called once per loading frame) stays a couple of file reads.

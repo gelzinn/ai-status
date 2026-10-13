@@ -86,6 +86,14 @@ def handle_signal(signum, frame):
     global should_update
     should_update = True
 
+
+def _waybar_logo_selection(data, selected):
+    if "items" not in selected:
+        return selected
+    choices = render.get_bar_metric_choices(data, selected)
+    return dict(selected, **choices[0]) if choices else dict(selected, icon_mode="off")
+
+
 def _run(output_format="waybar"):
     global should_update, is_updating, latest_data, _results_by_dir, _pending
 
@@ -105,10 +113,6 @@ def _run(output_format="waybar"):
                 selected.update(provider=providers[0], idx=0, metric="rolling")
                 state.save_selected(selected)
 
-    # Seed the waybar logo (current.png) for the selected provider on startup.
-    if output_format == "waybar":
-        logos.update_current(state.load_selected())
-
     if output_format == "macos":
         from .macos import LogoCache
         logo_cache = LogoCache()
@@ -117,9 +121,10 @@ def _run(output_format="waybar"):
     last_snapshot = None
     last_credit_signature = None
     last_credit_check = 0
+    last_logo = None
 
     def emit(data, selected, frame=None):
-        nonlocal last_snapshot, last_credit_signature
+        nonlocal last_snapshot, last_credit_signature, last_logo
         if output_format in ("quickshell", "macos"):
             logo_paths = {name: logo_cache.get(name) for name in cfgmod.available_providers()}
             logo = logo_paths.get((cfgmod.connection_info(selected.get("provider", "")) or {}).get("provider", ""), "") if state.get_icon_mode(selected) == "logo" else ""
@@ -130,14 +135,19 @@ def _run(output_format="waybar"):
                 activation = paths.read_json(paths.RUNTIME_DIR / "notification-activation.json")
                 stamp = activation.get("time") if isinstance(activation, dict) else None
                 output["notificationActivation"] = activation if type(stamp) in (float, int) and 0 <= time.time() - stamp < 60 else None
-            if output["providers"] and any(selected.get(key) != output["selected"].get(key) for key in ("provider", "idx", "metric")):
-                selected.update(output["selected"])
+            if "items" not in selected and output["providers"] and any(selected.get(key) != output["selected"].get(key) for key in ("provider", "idx", "metric")):
+                state.select_primary(selected, output["selected"])
                 state.save_selected(selected)
             serialized = json.dumps(output, ensure_ascii=False, allow_nan=False)
             if serialized != last_snapshot:
                 print(serialized, flush=True)
                 last_snapshot = serialized
         else:
+            logo_selection = _waybar_logo_selection(data, selected)
+            logo_identity = (logo_selection.get("provider"), state.get_icon_mode(logo_selection))
+            if logo_identity != last_logo:
+                logos.update_current(logo_selection, notify=False)
+                last_logo = logo_identity
             # Observe before rendering: a deadline crossed while rendering is
             # then detected by the next idle check instead of being missed.
             last_credit_signature = _credit_signature(data)
@@ -216,8 +226,6 @@ def _run(output_format="waybar"):
             elif selected_mtime != last_selected_mtime and not is_updating:
                 last_selected_mtime = selected_mtime
                 emit(latest_data, selected)
-                if output_format == "waybar":
-                    logos.update_current(selected)
 
             elif output_format in ("quickshell", "macos"):
                 # Publish asynchronously downloaded logos without a new fetch.

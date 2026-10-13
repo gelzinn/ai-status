@@ -72,6 +72,76 @@ Item {
             compare(settings.enabledProviders.length, 2)
             compare(settings.order[0], "claude")
         }
+        function test_bar_items_toggle_with_keyboard_retains_focus_and_saved_order() {
+            const target = "bar-item-codex-0-weekly"
+            mouseClick(findChild(settings, target))
+            wait(20)
+            verify(findChild(settings, target).activeFocus)
+            keyClick(Qt.Key_Space)
+            wait(20)
+            compare(settings.selectedItems.length, 1)
+            verify(findChild(settings, target).activeFocus)
+            keyClick(Qt.Key_Space)
+            wait(20)
+            settings.toggleItem(settings.choices.find(item => item.provider === "claude" && item.metric === "weekly:Fable"))
+            settings.save()
+            compare(Plugin.Model.saved.items.length, 3)
+            compare(Plugin.Model.saved.items[0].metric, "rolling")
+            compare(Plugin.Model.saved.items[1].provider, "codex")
+            compare(Plugin.Model.saved.items[2].metric, "weekly:Fable")
+            compare(Plugin.Model.snapshot.selected.provider, "claude")
+        }
+        function test_pinned_unavailable_item_is_retained_and_can_be_removed() {
+            const snapshot = Plugin.Model.snapshot
+            snapshot.settings.items = [{provider: "claude", idx: 0, metric: "missing"}, {provider: "codex", idx: 0, metric: "weekly"}]
+            Plugin.Model.snapshot = Object.assign({}, snapshot)
+            settings.begin()
+            verify(findChild(settings, "bar-item-claude-0-missing") !== null)
+            settings.save()
+            compare(Plugin.Model.saved.items[0].metric, "missing")
+            settings.toggleItem(settings.selectedItems[0])
+            compare(settings.selected.provider, "codex")
+            settings.toggleItem(settings.selectedItems[0])
+            verify(!settings.valid)
+            compare(settings.validationSection, "general")
+        }
+        function test_orphaned_saved_pin_is_visible_and_removable_without_mutating_snapshot() {
+            const snapshot = Plugin.Model.snapshot
+            snapshot.settings.items = [{provider: "account:removed", idx: 0, metric: "weekly"},
+                {provider: "claude", idx: 0, metric: "rolling"}]
+            Plugin.Model.snapshot = Object.assign({}, snapshot)
+            const before = JSON.stringify(Plugin.Model.snapshot.settings.items)
+            settings.begin()
+            wait(20)
+            const orphan = findChild(settings, "bar-item-account:removed-0-weekly")
+            verify(orphan !== null && orphan.visible)
+            verify(orphan.text.indexOf("(unavailable)") !== -1)
+            verify(!settings.valid)
+            compare(settings.validationSection, "general")
+            compare(JSON.stringify(Plugin.Model.snapshot.settings.items), before)
+            mouseClick(orphan)
+            verify(settings.valid)
+            compare(settings.selectedItems.length, 1)
+            compare(settings.selected.provider, "claude")
+            settings.save()
+            compare(Plugin.Model.saved.items.length, 1)
+            compare(Plugin.Model.saved.items[0].provider, "claude")
+            compare(JSON.stringify(Plugin.Model.snapshot.settings.items), before)
+        }
+        function test_usage_highlights_every_pinned_metric_and_keeps_primary_for_actions() {
+            const snapshot = Plugin.Model.snapshot
+            snapshot.settings.items = [{provider: "claude", idx: 0, metric: "rolling"},
+                {provider: "claude", idx: 0, metric: "weekly:Fable"}, {provider: "codex", idx: 0, metric: "weekly"}]
+            Plugin.Model.snapshot = Object.assign({}, snapshot)
+            usage.visible = true
+            settings.visible = false
+            wait(20)
+            verify(findChild(usage, "usage-metric-claude-0-rolling").selected)
+            verify(findChild(usage, "usage-metric-claude-0-weekly:Fable").selected)
+            verify(findChild(usage, "usage-metric-codex-0-weekly").selected)
+            verify(!findChild(usage, "usage-metric-codex-0-rolling").selected)
+            compare(Plugin.Model.snapshot.selected.metric, "rolling")
+        }
         function test_quota_alert_draft_save_and_cancel_preserve_account_rules() {
             settings.alertThresholds = "95,100"
             settings.setAlert("muted_until", 1234567890)
@@ -377,36 +447,29 @@ Item {
             compare(settings.selected.provider, "codex")
             settings.selectSection("general")
             wait(20)
-            mouseClick(findChild(settings, "active-provider"))
-            verify(settings.selectionOpen)
+            const item = findChild(settings, "bar-item-codex-0-weekly")
+            mouseClick(item)
+            compare(settings.selectedItems.length, 2)
+            keyClick(Qt.Key_Space)
+            compare(settings.selectedItems.length, 1)
         }
-        function test_provider_selector_logos_render_once_per_account_and_in_trigger() {
+        function test_bar_checklist_preserves_order_and_shows_logos_independent_of_icon_mode() {
             settings.iconMode = "off"
-            const trigger = findChild(settings, "active-provider")
-            const triggerLogo = findChild(trigger, "provider-logo")
-            tryCompare(triggerLogo, "status", Image.Ready)
-            verify(trigger.logoSource.toString().endsWith("/claude.png"))
-            mouseClick(trigger)
-            verify(settings.selectionOpen)
-            wait(20)
             for (const choice of settings.choices) {
-                const option = findChild(trigger.popupItem, "active-provider-option-" + choice.provider + "-" + choice.idx + "-" + choice.metric)
+                const option = findChild(settings, "bar-item-" + choice.provider + "-" + choice.idx + "-" + choice.metric)
                 verify(option.visible)
-                compare(option.logoSource.toString(), "")
-                compare(option.height, 30)
-                const header = findChild(trigger.popupItem, "active-provider-group-" + choice.groupKey)
-                verify(header !== null && header.visible)
+                verify(option.logoSource.toString().endsWith("/" + choice.provider + ".png"))
             }
-            mouseClick(findChild(trigger.popupItem, "active-provider-option-codex-0-weekly"))
+            mouseClick(findChild(settings, "bar-item-codex-0-weekly"))
+            compare(settings.selected.provider, "claude")
+            compare(settings.selectedItems.length, 2)
+            settings.toggleItem(settings.choices.find(item => item.provider === "claude" && item.metric === "rolling"))
             compare(settings.selected.provider, "codex")
             compare(settings.selected.metric, "weekly")
-            verify(trigger.logoSource.toString().endsWith("/codex.png"))
-            tryCompare(triggerLogo, "status", Image.Ready)
-            // Enabling a provider before its first query still uses its bundled logo.
+            settings.save()
+            compare(Plugin.Model.saved.items[0].provider, "codex")
             settings.toggleProvider("kiro")
-            settings.selected = {provider: "kiro", idx: 0, metric: "rolling"}
-            verify(trigger.logoSource.toString().endsWith("/kiro.png"))
-            tryCompare(triggerLogo, "status", Image.Ready)
+            verify(findChild(settings, "bar-item-kiro-0-rolling").logoSource.toString().endsWith("/kiro.png"))
         }
         function test_account_groups_keep_identity_and_omit_internal_key_labels() {
             const snapshot = Plugin.Model.snapshot
@@ -428,12 +491,9 @@ Item {
             compare(settings.choices.filter(item => item.provider === "cursor").map(item => item.label).join(","), "Cursor Models,Other Models,On-demand spend")
             settings.selected = {provider: "cursor", idx: 0, metric: "monthly:On-demand spend this billing cycle (USD)"}
             compare(settings.selectedLabel, "Cursor · On-demand spend")
-            const trigger = findChild(settings, "active-provider")
-            mouseClick(trigger)
+            settings.toggleItem(settings.selected)
             wait(20)
-            keyClick(Qt.Key_Home)
-            for (let i = 0; i < 3; i++) keyClick(Qt.Key_Down)
-            keyClick(Qt.Key_Return)
+            mouseClick(findChild(settings, "bar-item-account:work-0-weekly"))
             compare(settings.selected.provider, "account:work")
             compare(settings.selectedLabel, "Claude (Max) · Work · Weekly")
             settings.save()
@@ -452,12 +512,11 @@ Item {
             compare(Plugin.Model.saved.selected.idx, 1)
         }
         function test_all_selectors_overlay_without_resizing_and_support_keyboard() {
-            const provider = findChild(settings, "active-provider")
             const icon = findChild(settings, "icon-mode")
             const usageDisplay = findChild(settings, "usage-display")
             wait(20)
-            for (const trigger of [provider, icon, usageDisplay]) {
-                settings.selectSection(trigger === provider ? "general" : "appearance")
+            for (const trigger of [icon, usageDisplay]) {
+                settings.selectSection("appearance")
                 wait(20)
                 const height = settings.implicitHeight
                 compare(trigger.trailingIconName, "chevron-down")
@@ -475,8 +534,8 @@ Item {
                 verify(!trigger.popupOpen)
                 verify(trigger.activeFocus)
             }
-            compare(settings.selected.provider, "codex")
-            compare(settings.selected.metric, "weekly")
+            compare(settings.selected.provider, "claude")
+            compare(settings.selected.metric, "rolling")
             compare(settings.iconMode, "logo")
             compare(settings.usageDisplay, "remaining")
             settings.selectSection("appearance")
@@ -486,13 +545,6 @@ Item {
             keyClick(Qt.Key_Home)
             keyClick(Qt.Key_Return)
             compare(settings.iconMode, "off")
-            settings.selectSection("general")
-            wait(20)
-            mouseClick(provider)
-            wait(20)
-            keyClick(Qt.Key_Escape)
-            verify(!provider.popupOpen)
-            verify(settings.visible)
             settings.selectSection("appearance")
             wait(20)
             const height = settings.implicitHeight
@@ -503,9 +555,7 @@ Item {
             compare(settings.implicitHeight, height)
         }
         function test_submenus_keep_one_draft_and_cancel_reloads_every_section() {
-            const provider = findChild(settings, "active-provider")
-            mouseClick(provider)
-            verify(settings.selectionOpen)
+            settings.toggleItem(settings.choices.find(item => item.provider === "codex" && item.metric === "weekly"))
             settings.selectSection("appearance")
             verify(!settings.selectionOpen)
             settings.usageDisplay = "remaining"
@@ -574,15 +624,11 @@ Item {
             compare(settings.usageDisplay, "used")
         }
         function test_usage_display_selector_dismisses_other_selectors_and_on_page_exit() {
-            const provider = findChild(settings, "active-provider")
             const icon = findChild(settings, "icon-mode")
             const usageDisplay = findChild(settings, "usage-display")
-            provider.popupOpen = true
-            verify(provider.popupOpen)
             usageDisplay.popupOpen = true
             verify(usageDisplay.popupOpen)
             verify(settings.selectionOpen)
-            verify(!provider.popupOpen)
             icon.popupOpen = true
             verify(icon.popupOpen)
             verify(!usageDisplay.popupOpen)

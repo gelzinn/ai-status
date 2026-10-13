@@ -30,6 +30,14 @@ source. Windows and macOS use [WINDOWS.md](WINDOWS.md) and [MACOS.md](MACOS.md).
 This document is the platform directory; platform-specific setup remains in
 those guides.
 
+Native Settings can select any number of account/limit items, with at least
+one required. Linux and macOS show the selected usage labels in the bar;
+Windows uses one native tray icon per item, with the account, limit and value
+in its tooltip. Windows decides whether an icon is beside the clock or in the
+hidden-icons menu. Clicking a usage metric or cycling changes the first item
+while retaining the additional selections. Updating preserves existing
+single-item preferences.
+
 ## Shared references
 
 - [Supported providers and authentication](https://ai-status.gelzin.com/providers)

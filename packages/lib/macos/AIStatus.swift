@@ -198,6 +198,7 @@ struct Settings: Decodable {
     let iconMode: String
     let usageDisplay: String?
     let notifications: NotificationPreferences?
+    let items: [Selection]?
 }
 
 struct NotificationHours: Codable {
@@ -373,6 +374,16 @@ struct UpdateProgress: Decodable {
     }
 }
 
+struct BarItem: Decodable {
+    let provider: String
+    let idx: Int
+    let metric: String
+    let text: String
+    let logoPath: String
+    let loading: Bool
+    var selection: Selection { Selection(provider: provider, idx: idx, metric: metric) }
+}
+
 struct Snapshot: Decodable {
     let schemaVersion: Int
     let text: String
@@ -386,6 +397,19 @@ struct Snapshot: Decodable {
     let version: VersionInfo
     let update: UpdateGuide?
     let notifications: [QuotaNotification]?
+    let barItems: [BarItem]?
+    var visibleBarItems: [BarItem] {
+        if let items = barItems {
+            if !items.isEmpty { return items }
+            return [BarItem(provider: "", idx: 0, metric: "", text: text, logoPath: "", loading: loading)]
+        }
+        return [BarItem(provider: selected.provider, idx: selected.idx, metric: selected.metric,
+                        text: text, logoPath: logoPath, loading: loading)]
+    }
+    var pinnedItems: [Selection] {
+        if let items = settings.items, !items.isEmpty { return items }
+        return [selected]
+    }
 }
 
 enum Page: Equatable {
@@ -408,7 +432,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     }
     var detail: String {
         switch self {
-        case .general: return "Choose the account and limit shown in your menu bar."
+        case .general: return "Choose as many accounts and limits as you want in your menu bar."
         case .appearance: return "Customize the menu bar icon and usage text."
         case .alerts: return "Set quota notifications and account-specific rules."
         case .providers: return "Enable providers and arrange their order in Usage."
@@ -456,11 +480,53 @@ struct SettingsDraft {
     var display: [String: Bool] = [:]
     var iconMode = "bot"
     var usageDisplay = "used"
-    var selected = Selection()
+    var items: [Selection] = []
+    var selected: Selection {
+        get { items.first ?? Selection() }
+        set {
+            if items.isEmpty { items = [newValue] }
+            else { items = [newValue] + items.dropFirst().filter { $0 != newValue } }
+        }
+    }
     var notifications = NotificationPreferences()
     var notificationThresholds = "80, 95, 100"
     var notificationRuleThresholds: [String: String] = [:]
     var saved = false
+}
+
+enum MenuBarRenderer {
+    static func title(_ items: [BarItem], iconMode: String, providers: [Provider], spinnerFrame: Int) -> NSAttributedString {
+        let result = NSMutableAttributedString(string: "")
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+            .foregroundColor: NSColor.labelColor,
+        ]
+        let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][spinnerFrame % 10]
+        for (index, item) in items.enumerated() {
+            if index > 0 { result.append(NSAttributedString(string: "   ", attributes: attributes)) }
+            if iconMode != "off" {
+                let provider = providers.first { $0.connectionID == item.provider && $0.idx == item.idx }
+                let source = Assets.image(provider: iconMode == "logo" ? provider?.providerID ?? "" : "",
+                                          path: iconMode == "logo" ? item.logoPath : "")
+                if let image = source?.copy() as? NSImage {
+                    image.size = NSSize(width: 16, height: 16)
+                    // Preserve the artwork, including the opaque app icon background.
+                    image.isTemplate = false
+                    let attachment = NSTextAttachment(data: nil, ofType: nil)
+                    attachment.image = image
+                    attachment.attachmentCell = NSTextAttachmentCell(imageCell: image)
+                    attachment.bounds = NSRect(x: 0, y: -3, width: 16, height: 16)
+                    result.append(NSAttributedString(attachment: attachment))
+                    result.append(NSAttributedString(string: " ", attributes: attributes))
+                }
+            }
+            var text = item.text.replacingOccurrences(of: "\u{f06a9}", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if item.loading { text = text.replacingOccurrences(of: "…", with: spinner) }
+            result.append(NSAttributedString(string: text, attributes: attributes))
+        }
+        return result
+    }
 }
 
 enum Assets {
@@ -625,10 +691,25 @@ final class Model: ObservableObject {
     }
 
     var settingsValid: Bool { settingsValidation == nil }
+    var settingsChoices: [Choice] {
+        let available = choices
+        let known = Set(available.map(\.selection))
+        let missing = draft.items.filter { selection in
+            !known.contains(selection)
+        }.map { selection in
+            Choice(selection: selection, label: providerName(selection.provider) + " · " + selection.metric + " (unavailable)",
+                   provider: logoProviderID(selection.provider), logoPath: "")
+        }
+        return available + missing
+    }
     var settingsValidation: (section: SettingsSection, message: String)? {
         if draft.enabled.isEmpty { return (.providers, "Enable at least one provider.") }
-        if !choices.contains(where: { $0.selection == draft.selected }) {
-            return (.general, "Choose an active provider and limit.")
+        if draft.items.isEmpty || Set(draft.items).count != draft.items.count ||
+            !draft.items.allSatisfy({ selection in
+                !selection.provider.isEmpty && selection.idx >= 0 && !selection.metric.isEmpty &&
+                    draft.enabled.contains(selection.provider)
+            }) {
+            return (.general, "Choose at least one enabled provider and limit, without duplicates.")
         }
         if !draft.display.values.contains(true) { return (.appearance, "Choose at least one bar text field.") }
         if !["used", "remaining"].contains(draft.usageDisplay) { return (.appearance, "Choose a usage display mode.") }
@@ -639,7 +720,8 @@ final class Model: ObservableObject {
         return nil
     }
     var settingsSelectionLabel: String {
-        choices.first { $0.selection == draft.selected }?.label ?? "Choose a provider and limit in General."
+        let first = settingsChoices.first { $0.selection == draft.selected }?.label ?? "Choose a provider and limit in General."
+        return draft.items.count > 1 ? "\(draft.items.count) menu bar items · " + first : first
     }
     var invalidAdvancedNotifications: Bool {
         draft.notificationRuleThresholds.values.contains { Self.parseThresholds($0) == nil }
@@ -799,7 +881,7 @@ final class Model: ObservableObject {
         switch page {
         case .settings:
             switch settingsSection {
-            case .general: return 320
+            case .general: return min(680, max(320, CGFloat(230 + settingsChoices.count * 38)))
             case .appearance: return 480
             case .about: return 600
             case .alerts, .providers, .guide: return 680
@@ -901,7 +983,7 @@ final class Model: ObservableObject {
         draft = SettingsDraft(order: snapshot.settings.order, enabled: Set(snapshot.settings.enabled),
                               display: snapshot.settings.display, iconMode: snapshot.settings.iconMode,
                               usageDisplay: snapshot.settings.usageDisplay == "remaining" ? "remaining" : "used",
-                              selected: snapshot.selected)
+                              items: snapshot.pinnedItems)
         draft.notifications = snapshot.settings.notifications ?? NotificationPreferences()
         draft.notificationThresholds = draft.notifications.thresholds.map(String.init).joined(separator: ", ")
         draft.notificationRuleThresholds = Dictionary(uniqueKeysWithValues: draft.notifications.rules.map {
@@ -923,7 +1005,17 @@ final class Model: ObservableObject {
     }
     func toggleProvider(_ provider: String) {
         if draft.enabled.contains(provider) { draft.enabled.remove(provider) } else { draft.enabled.insert(provider) }
-        if !choices.contains(where: { $0.selection == draft.selected }) { draft.selected = choices.first?.selection ?? Selection() }
+        draft.items.removeAll { !draft.enabled.contains($0.provider) }
+        if draft.items.isEmpty, let first = choices.first { draft.items = [first.selection] }
+        draft.saved = false
+    }
+    func setBarItem(_ selection: Selection, enabled: Bool) {
+        guard !settingsSaving else { return }
+        if enabled {
+            if !draft.items.contains(selection) { draft.items.append(selection) }
+        } else if draft.items.count > 1 {
+            draft.items.removeAll { $0 == selection }
+        }
         draft.saved = false
     }
     func moveProvider(_ provider: String, _ direction: Int) {
@@ -931,8 +1023,8 @@ final class Model: ObservableObject {
         draft.order.swapAt(index, index + direction)
         draft.saved = false
     }
-    func saveSettings() {
-        guard settingsValid, !settingsSaving else { return }
+    func settingsPayload() -> [String: Any]? {
+        guard settingsValid else { return nil }
         let selection = ["provider": draft.selected.provider, "idx": draft.selected.idx, "metric": draft.selected.metric] as [String: Any]
         var alerts = draft.notifications
         alerts.thresholds = Self.parseThresholds(draft.notificationThresholds) ?? []
@@ -944,11 +1036,16 @@ final class Model: ObservableObject {
             }
         }
         guard let alertsData = try? JSONEncoder().encode(alerts),
-              let alertsObject = try? JSONSerialization.jsonObject(with: alertsData) else { return }
-        let payload: [String: Any] = ["enabled": draft.order.filter { draft.enabled.contains($0) },
-                                     "display": draft.display, "iconMode": draft.iconMode,
-                                     "usageDisplay": draft.usageDisplay, "selected": selection,
-                                     "notifications": alertsObject]
+              let alertsObject = try? JSONSerialization.jsonObject(with: alertsData),
+              let itemsData = try? JSONEncoder().encode(draft.items),
+              let items = try? JSONSerialization.jsonObject(with: itemsData) else { return nil }
+        return ["enabled": draft.order.filter { draft.enabled.contains($0) },
+                "display": draft.display, "iconMode": draft.iconMode,
+                "usageDisplay": draft.usageDisplay, "selected": selection, "items": items,
+                "notifications": alertsObject]
+    }
+    func saveSettings() {
+        guard !settingsSaving, let payload = settingsPayload() else { return }
         guard let data = try? JSONSerialization.data(withJSONObject: payload), let json = String(data: data, encoding: .utf8) else { return }
         settingsSaving = true
         settingsError = ""
@@ -1562,7 +1659,7 @@ struct UsagePage: View {
                 HoverButton(action: model.showSettings) { Text("Settings") }
             }
             ForEach(Array((model.snapshot?.providers ?? []).enumerated()), id: \.element.id) { groupIndex, provider in
-                let selected = provider.connectionID == model.snapshot?.selected.provider && provider.idx == model.snapshot?.selected.idx
+                let selected = model.snapshot?.pinnedItems.contains { $0.provider == provider.connectionID && $0.idx == provider.idx } == true
                 VStack(alignment: .leading, spacing: 16) {
                     HoverButton(action: { if let metric = provider.metrics.first { model.select(provider.selection(metric)) } }) {
                         HStack(spacing: 8) {
@@ -1586,7 +1683,7 @@ struct UsagePage: View {
                             }.padding(.leading, 18)
                                 .accessibilityLabel("\(provider.name), \(credit.title), \(credit.value), show details")
                         } else {
-                            let active = selected && metric.key == model.snapshot?.selected.metric
+                            let active = model.snapshot?.pinnedItems.contains(provider.selection(metric)) == true
                             HoverButton(padding: 4, action: { model.select(provider.selection(metric)) }) {
                                 HStack(alignment: .top, spacing: 8) {
                                     Text(active ? "•" : " ").frame(width: 16)
@@ -1726,12 +1823,22 @@ struct SettingsPage: View {
     private var general: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                SettingsHeading(title: "Active provider & limit", detail: SettingsSection.general.detail)
-                PanelSelect(title: "Active provider & limit", options: model.choices.map {
-                    PanelSelectOption(value: $0.selection, title: $0.label, provider: $0.provider, logoPath: $0.logoPath)
-                }, selection: Binding(get: { model.draft.selected }, set: {
-                    model.draft.selected = $0; model.draft.saved = false
-                }), placeholder: "Choose a provider and limit")
+                SettingsHeading(title: "Menu bar items", detail: SettingsSection.general.detail)
+                Text("Select at least one. Items appear in the order you add them.")
+                    .font(.custom("GeistMono-Regular", size: 11)).fixedSize(horizontal: false, vertical: true)
+                ForEach(model.settingsChoices) { choice in
+                    let checked = model.draft.items.contains(choice.selection)
+                    Toggle(isOn: Binding(get: { model.draft.items.contains(choice.selection) }, set: {
+                        model.setBarItem(choice.selection, enabled: $0)
+                    })) {
+                        HStack(spacing: 8) {
+                            ProviderLogo(provider: choice.provider, path: choice.logoPath)
+                            Text(choice.label).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }.toggleStyle(.checkbox).modifier(PanelFocusTarget())
+                        .disabled(checked && model.draft.items.count == 1)
+                        .accessibilityLabel(choice.label)
+                }
             }
         }
     }
@@ -3110,30 +3217,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     private func updateStatus() {
         guard let button = statusItem.button else { return }
         let snapshot = model.snapshot
-        let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][spinnerFrame % 10]
-        var text = (snapshot?.text ?? "AI Status …").replacingOccurrences(of: "\u{f06a9}", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if snapshot?.loading != false { text = text.replacingOccurrences(of: "…", with: spinner) }
-        button.title = text
-        button.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        button.toolTip = model.selectedProvider.map { $0.name + ($0.cached ? " · cached" : "") } ?? "AI Status"
+        let items = snapshot?.visibleBarItems ?? [BarItem(provider: "", idx: 0, metric: "", text: "AI Status …", logoPath: "", loading: true)]
         let mode = snapshot?.iconMode ?? "bot"
-        let source = mode == "off" ? nil : Assets.image(provider: mode == "logo" ? model.selectedProvider?.providerID ?? "" : "",
-                                                       path: mode == "logo" ? snapshot?.logoPath ?? "" : "")
-        if let image = source?.copy() as? NSImage {
-            image.size = NSSize(width: 16, height: 16)
-            // app.png includes an opaque background; treating its alpha as a
-            // template would replace the artwork with a solid square.
-            image.isTemplate = false
-            button.image = image
-        } else { button.image = nil }
-        button.imagePosition = .imageLeading
-        if snapshot?.loading != false && spinnerTimer == nil {
+        button.attributedTitle = MenuBarRenderer.title(items, iconMode: mode, providers: snapshot?.providers ?? [], spinnerFrame: spinnerFrame)
+        button.image = nil
+        button.imagePosition = .noImage
+        button.toolTip = items.map { item in
+            let provider = snapshot?.providers.first { $0.connectionID == item.provider && $0.idx == item.idx }
+            return item.text + (provider?.cached == true ? " · cached" : "")
+        }.joined(separator: "\n")
+        button.setAccessibilityLabel(items.map(\.text).joined(separator: ", "))
+        let loading = items.contains { $0.loading }
+        if loading && spinnerTimer == nil {
             spinnerTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
                 self?.spinnerFrame += 1
                 self?.updateStatus()
             }
-        } else if snapshot?.loading == false {
+        } else if !loading {
             spinnerTimer?.invalidate()
             spinnerTimer = nil
         }
@@ -3322,6 +3422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         try smokeFocusInput()
         try smokeMenuTracking()
         try smokeSettingsSelects(sample: sample)
+        try smokeBarItems(sample: sample, directory: previewDirectory)
         let model = Model()
         model.accept(Data(sample.utf8))
         guard let snapshot = model.snapshot, snapshot.providers.count == 2,
@@ -3366,7 +3467,154 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
         model.showAbout()
         try renderSmokePage(model, name: "about", directory: previewDirectory)
-        print("AI Status macOS smoke OK: usage, settings subnavigation and shared draft, quota notifications, reset credits, Cloud credits, live update progress, settings guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+        print("AI Status macOS smoke OK: usage, multiple menu bar items, settings subnavigation and shared draft, quota notifications, reset credits, Cloud credits, live update progress, settings guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+    }
+
+    private static func smokeBarItems(sample: String, directory: URL?) throws {
+        let model = Model()
+        model.accept(Data(sample.utf8))
+        guard let legacy = model.snapshot, legacy.barItems == nil,
+              legacy.visibleBarItems.map(\.selection) == [legacy.selected], legacy.pinnedItems == [legacy.selected] else {
+            throw AppError.message("Legacy menu bar selection did not decode as one item.")
+        }
+        guard var document = try JSONSerialization.jsonObject(with: Data(sample.utf8)) as? [String: Any],
+              var settings = document["settings"] as? [String: Any] else {
+            throw AppError.message("Multiple menu bar item fixture failed.")
+        }
+        let identities = [Selection(provider: "codex", metric: "weekly"), Selection(provider: "claude", metric: "rolling")]
+        let identityData = try JSONEncoder().encode(identities)
+        settings["items"] = try JSONSerialization.jsonObject(with: identityData)
+        document["settings"] = settings
+        document["barItems"] = [
+            ["provider": "codex", "idx": 0, "metric": "weekly", "text": "Codex 27%", "logoPath": "", "loading": false],
+            ["provider": "claude", "idx": 0, "metric": "rolling", "text": "Claude …", "logoPath": "", "loading": true],
+        ] as [[String: Any]]
+        let multiData = try JSONSerialization.data(withJSONObject: document)
+        model.accept(multiData)
+        guard let snapshot = model.snapshot, snapshot.visibleBarItems.map(\.selection) == identities,
+              snapshot.pinnedItems == identities else {
+            throw AppError.message("Multiple menu bar item identities or ordering were lost.")
+        }
+        let logo = MenuBarRenderer.title(snapshot.visibleBarItems, iconMode: "logo", providers: snapshot.providers, spinnerFrame: 1)
+        let hidden = MenuBarRenderer.title(snapshot.visibleBarItems, iconMode: "off", providers: snapshot.providers, spinnerFrame: 1)
+        var attachments: [NSTextAttachment] = []
+        logo.enumerateAttribute(.attachment, in: NSRange(location: 0, length: logo.length)) { value, _, _ in
+            if let attachment = value as? NSTextAttachment { attachments.append(attachment) }
+        }
+        guard attachments.count == 2, attachments.allSatisfy({ $0.image?.size == NSSize(width: 16, height: 16) && $0.attachmentCell != nil }),
+              logo.string.contains("Codex 27%"), logo.string.contains("Claude ⠙"), !hidden.string.contains("\u{fffc}"),
+              hidden.string == "Codex 27%   Claude ⠙" else {
+            throw AppError.message("Multiple menu bar logos, text, ordering or per-item loading were not rendered.")
+        }
+        let nativeItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        defer { NSStatusBar.system.removeStatusItem(nativeItem) }
+        guard let button = nativeItem.button else { throw AppError.message("Native menu bar button is unavailable.") }
+        button.attributedTitle = logo
+        guard button.attributedTitle.isEqual(to: logo), (button.cell?.cellSize.width ?? 0) > 120 else {
+            throw AppError.message("Native menu bar button dropped or clipped the combined title.")
+        }
+        var missingDocument = document
+        let missingItems = [Selection(provider: "codex", metric: "weekly:missing"), Selection(provider: "claude", metric: "rolling:missing")]
+        let missingItemsData = try JSONEncoder().encode(missingItems)
+        var missingSettings = settings
+        missingSettings["items"] = try JSONSerialization.jsonObject(with: missingItemsData)
+        missingDocument["settings"] = missingSettings
+        missingDocument["barItems"] = [] as [[String: Any]]
+        missingDocument["text"] = "AI Status"
+        missingDocument["selected"] = ["provider": "codex", "idx": 0, "metric": "weekly:missing"] as [String: Any]
+        model.accept(try JSONSerialization.data(withJSONObject: missingDocument))
+        guard let missing = model.snapshot, missing.visibleBarItems.count == 1,
+              missing.visibleBarItems[0].provider.isEmpty, missing.visibleBarItems[0].logoPath.isEmpty,
+              missing.visibleBarItems[0].text == "AI Status", missing.pinnedItems == missingItems else {
+            throw AppError.message("Missing menu bar metrics substituted an unrelated provider or lost saved selections.")
+        }
+        let fallback = MenuBarRenderer.title(missing.visibleBarItems, iconMode: "logo", providers: missing.providers, spinnerFrame: 0)
+        let fallbackAttachment = fallback.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment
+        let appImage = Assets.image()?.copy() as? NSImage
+        appImage?.size = NSSize(width: 16, height: 16)
+        guard fallbackAttachment?.image != nil, appImage != nil,
+              fallbackAttachment?.image?.tiffRepresentation == appImage?.tiffRepresentation else {
+            throw AppError.message("Missing menu bar metrics retained provider artwork instead of the app icon.")
+        }
+        model.accept(multiData)
+        model.showSettings()
+        guard model.draft.items == identities, model.settingsValid else {
+            throw AppError.message("Settings did not load all menu bar items.")
+        }
+        let extra = model.choices[2].selection
+        model.setBarItem(extra, enabled: true)
+        model.setBarItem(extra, enabled: true)
+        guard model.draft.items == identities + [extra], model.settingsValid,
+              let payload = model.settingsPayload(), let payloadItems = payload["items"] as? [[String: Any]],
+              payloadItems.count == 3, let primary = payload["selected"] as? [String: Any],
+              primary["provider"] as? String == identities[0].provider,
+              primary["metric"] as? String == identities[0].metric else {
+            throw AppError.message("Settings did not save ordered unique menu bar items with the first primary selection.")
+        }
+        let pending = model.draft.items
+        model.draft.selected = extra
+        guard model.draft.items == [extra, identities[1]] else {
+            throw AppError.message("Replacing the primary draft item erased another selection or added a duplicate.")
+        }
+        model.draft.items = pending
+        model.accept(Data(sample.utf8))
+        model.accept(multiData)
+        guard model.draft.items == pending else { throw AppError.message("A refresh replaced pending menu bar items.") }
+        model.draft.items = []
+        guard !model.settingsValid, model.settingsPayload() == nil else { throw AppError.message("An empty menu bar selection was accepted.") }
+        model.draft.items = identities + [identities[0]]
+        guard !model.settingsValid else { throw AppError.message("Duplicate menu bar selections were accepted.") }
+        model.draft.items = identities
+        model.toggleProvider("claude")
+        guard model.draft.items == [identities[0]], model.settingsValid else {
+            throw AppError.message("Disabling one provider removed another provider's menu bar item.")
+        }
+        model.setBarItem(identities[0], enabled: false)
+        guard model.draft.items == [identities[0]] else { throw AppError.message("The last menu bar checkbox could be deselected.") }
+        model.showSettings()
+        let unavailable = Selection(provider: "claude", metric: "weekly:temporarily-missing")
+        model.setBarItem(unavailable, enabled: true)
+        guard model.settingsValid, model.settingsChoices.contains(where: { $0.selection == unavailable }) else {
+            throw AppError.message("Unavailable saved menu bar items could not be kept or removed in Settings.")
+        }
+        model.setBarItem(unavailable, enabled: false)
+        guard model.draft.items == identities else { throw AppError.message("Removing an unavailable menu bar item changed the others.") }
+        for orphan in [Selection(provider: "claude", metric: "rolling"), Selection(provider: "account:deleted", metric: "weekly")] {
+            let orphanModel = Model()
+            var orphanDocument = document
+            var orphanSettings = settings
+            let orphanItemsData = try JSONEncoder().encode([orphan])
+            orphanSettings["items"] = try JSONSerialization.jsonObject(with: orphanItemsData)
+            orphanSettings["enabled"] = ["codex"]
+            orphanDocument["settings"] = orphanSettings
+            orphanDocument["barItems"] = [] as [[String: Any]]
+            orphanDocument["text"] = "AI Status"
+            orphanDocument["selected"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(orphan))
+            if let providers = orphanDocument["providers"] as? [[String: Any]] {
+                orphanDocument["providers"] = providers.filter { $0["id"] as? String == "codex" }
+            }
+            orphanModel.accept(try JSONSerialization.data(withJSONObject: orphanDocument))
+            orphanModel.showSettings()
+            guard orphanModel.draft.items == [orphan], orphanModel.snapshot?.pinnedItems == [orphan],
+                  orphanModel.settingsChoices.first(where: { $0.selection == orphan })?.label.contains("(unavailable)") == true,
+                  !orphanModel.settingsValid, orphanModel.settingsPayload() == nil,
+                  let replacement = orphanModel.choices.first?.selection else {
+                throw AppError.message("A disabled or deleted saved menu bar item was hidden, overwritten or accepted for saving.")
+            }
+            orphanModel.setBarItem(replacement, enabled: true)
+            orphanModel.setBarItem(orphan, enabled: false)
+            guard orphanModel.draft.items == [replacement], orphanModel.settingsValid, orphanModel.settingsPayload() != nil,
+                  orphanModel.snapshot?.pinnedItems == [orphan] else {
+                throw AppError.message("Settings could not recover a saved item from a disabled or deleted provider.")
+            }
+        }
+        // More than a few providers or metrics must remain scrollable and saveable.
+        model.draft.items = (0..<24).map { Selection(provider: "claude", metric: "weekly:fixture-\($0)") }
+        guard model.settingsValid, model.settingsChoices.count >= 24,
+              (model.settingsPayload()?["items"] as? [[String: Any]])?.count == 24 else {
+            throw AppError.message("Menu bar selections imposed a fixed item limit.")
+        }
+        try renderSmokePage(model, name: "settings-multiple-items", directory: directory)
     }
 
     private static func smokeSettingsSections(sample: String, directory: URL?) throws {

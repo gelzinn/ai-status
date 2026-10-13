@@ -47,6 +47,52 @@ def get_usage_display(selected):
     mode = (selected or {}).get("usage_display")
     return mode if mode in USAGE_DISPLAY_MODES else "used"
 
+
+def _selection_identity(item):
+    if not isinstance(item, dict):
+        return None
+    provider, idx, metric = item.get("provider"), item.get("idx", 0), item.get("metric", "rolling")
+    if (not isinstance(provider, str) or not provider or type(idx) is not int or idx < 0
+            or not isinstance(metric, str) or not metric):
+        return None
+    return {"provider": provider, "idx": idx, "metric": metric}
+
+
+def get_selected_items(selected):
+    """Read ordered bar items, including preferences saved before multi-select."""
+    if not isinstance(selected, dict):
+        return []
+    source = selected.get("items")
+    if not isinstance(source, list):
+        source = [selected]
+    items, seen = [], set()
+    for value in source:
+        item = _selection_identity(value)
+        if item is None:
+            continue
+        identity = (item["provider"], item["idx"], item["metric"])
+        if identity not in seen:
+            seen.add(identity)
+            items.append(item)
+    return items
+
+
+def set_selected_items(selected, items):
+    """Replace the bar list and mirror its first item for legacy consumers."""
+    selected["items"] = get_selected_items({"items": items})
+    if selected["items"]:
+        selected.update(selected["items"][0])
+    else:
+        for key in ("provider", "idx", "metric"):
+            selected.pop(key, None)
+    return selected
+
+
+def select_primary(selected, choice):
+    """Change the first bar slot while retaining the other pinned metrics."""
+    return set_selected_items(selected, [choice] + get_selected_items(selected)[1:])
+
+
 def load_cache():
     if os.path.exists(CACHE_FILE):
         try:

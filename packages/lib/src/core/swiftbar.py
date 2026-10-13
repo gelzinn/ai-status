@@ -74,7 +74,7 @@ def title_text(cache, selected, spinner=None):
 
 def render_menu(cache, selected, spinner=None, title_image=None):
     snapshot = _snapshot(cache, selected, spinner)
-    choice = snapshot["selected"]
+    bar_items = snapshot.get("barItems", [])
     title = snapshot["text"].replace("\U000f06a9", "").strip().replace("…", spinner or "…")
     title_params = []
     if title_image:
@@ -100,7 +100,7 @@ def render_menu(cache, selected, spinner=None, title_image=None):
     for index, provider in enumerate(snapshot["providers"]):
         if index:
             out.append("---")
-        active = provider["id"] == choice.get("provider") and provider["idx"] == choice.get("idx", 0)
+        active = any(item["provider"] == provider["id"] and item["idx"] == provider["idx"] for item in bar_items)
         select = (provider["id"], str(provider["idx"]))
         first = provider["metrics"][0]["key"]
         params = ["size=14", *_action("swiftbar-select", *select, first)]
@@ -114,7 +114,7 @@ def render_menu(cache, selected, spinner=None, title_image=None):
         if provider["error"]:
             out.append(_line(provider["error"], "size=11", f"color={FAINT}"))
         for metric in provider["metrics"]:
-            checked = active and metric["key"] == choice.get("metric")
+            checked = any(item["provider"] == provider["id"] and item["idx"] == provider["idx"] and item["metric"] == metric["key"] for item in bar_items)
             params = [f"font={BAR_FONT}", "size=13", *_action("swiftbar-select", *select, metric["key"])]
             params.append("checked=true" if checked else f"color={DIM}")
             value = metric["value"]
