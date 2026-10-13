@@ -106,6 +106,7 @@ class AffectedChecksTests(unittest.TestCase):
     def test_platform_test_changes_do_not_build_other_platforms(self):
         self.assertEqual(self.selected("tests/test_installer.py"), {"installer"})
         self.assertEqual(self.selected("tests/test_macos_installer.py"), {"macos-installer"})
+        self.assertEqual(self.selected("tests/test_macos_size.py"), {"macos-installer", "macos-native"})
         self.assertEqual(self.selected("packages/lib/tests/test_macos.py"), {"python-tests", "macos-native"})
         self.assertEqual(self.selected("packages/lib/tests/test_tray.py"), {"python-tests", "windows-package"})
 
