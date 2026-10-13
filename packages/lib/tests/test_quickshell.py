@@ -104,7 +104,8 @@ class SnapshotTests(unittest.TestCase):
     def test_native_metric_click_preserves_preferences_and_does_not_fetch(self):
         with patch.object(state, "load_cache", return_value=DATA), patch.object(state, "load_selected", return_value=SELECTED.copy()), patch.object(state, "save_selected") as save, patch.object(state, "trigger_refresh") as refresh:
             quickshell.select_metric(dict(provider="codex", idx=0, metric="rolling"))
-            self.assertEqual(save.call_args.args[0], dict(SELECTED, provider="codex", metric="rolling"))
+            self.assertEqual(save.call_args.args[0], dict(SELECTED, provider="codex", metric="rolling",
+                                                        items=[dict(provider="codex", idx=0, metric="rolling")]))
             with self.assertRaises(ValueError):
                 quickshell.select_metric(dict(provider="codex", idx=0, metric="missing"))
             self.assertEqual(save.call_count, 1)

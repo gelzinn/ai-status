@@ -11,6 +11,7 @@ Column {
     signal creditRequested(string provider, int idx, string creditId)
     signal settingsRequested()
     spacing: Style.space(20)
+    readonly property var selectedItems: (Plugin.Model.snapshot.settings || {}).items || [Plugin.Model.snapshot.selected]
 
     function syncProviders() {
         StableList.sync(providers, Plugin.Model.snapshot.providers, entry => entry.id + ":" + entry.idx)
@@ -70,7 +71,7 @@ Column {
             required property int index
             property alias resetLink: creditsLink
             readonly property var modelData: entry
-            readonly property bool selected: modelData.id === Plugin.Model.snapshot.selected.provider && modelData.idx === Plugin.Model.snapshot.selected.idx
+            readonly property bool selected: root.selectedItems.some(item => item.provider === modelData.id && item.idx === modelData.idx)
             width: root.width
             spacing: Style.space(10)
             function choose(key) { Plugin.Model.selectMetric(modelData.id, modelData.idx, key) }
@@ -151,7 +152,7 @@ Column {
                         objectName: "usage-metric-" + provider.modelData.id + "-" + provider.modelData.idx + "-" + modelData.key
                         required property var entry
                         readonly property var modelData: entry
-                        readonly property bool selected: provider.selected && modelData.key === Plugin.Model.snapshot.selected.metric
+                        readonly property bool selected: root.selectedItems.some(item => item.provider === provider.modelData.id && item.idx === provider.modelData.idx && item.metric === modelData.key)
                         readonly property var creditEntry: (provider.modelData.monetaryCredits || []).find(item => "credits:" + item.id === modelData.key) || null
                         readonly property bool inlineAmount: !!creditEntry || modelData.isAmount === true
                         width: provider.width

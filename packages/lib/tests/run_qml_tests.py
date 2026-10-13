@@ -13,7 +13,7 @@ def main():
         shutil.copytree(tests / "qml", root, dirs_exist_ok=True)
         plugin = root / "plugin"
         plugin.mkdir()
-        for name in ("Panel.qml", "UsagePage.qml", "UsageBar.qml", "StableList.js", "ResetCreditsPage.qml", "HoldToConfirmButton.qml", "UsageCreditsPage.qml", "SettingsPage.qml", "PanelButton.qml", "PanelSwitch.qml", "PanelSlider.qml", "PanelSelect.qml", "PanelIcon.qml", "PanelIconButton.qml", "PanelIcons.qml", "AboutPage.qml", "GuidePage.qml", "scroll-fade.frag.qsb", "UpdatePage.qml", "qmldir"):
+        for name in ("BarWidget.qml", "Panel.qml", "UsagePage.qml", "UsageBar.qml", "StableList.js", "ResetCreditsPage.qml", "HoldToConfirmButton.qml", "UsageCreditsPage.qml", "SettingsPage.qml", "PanelButton.qml", "PanelSwitch.qml", "PanelSlider.qml", "PanelSelect.qml", "PanelIcon.qml", "PanelIconButton.qml", "PanelIcons.qml", "AboutPage.qml", "GuidePage.qml", "scroll-fade.frag.qsb", "UpdatePage.qml", "qmldir"):
             shutil.copy2(tests.parent / "quickshell" / name, plugin / name)
         shutil.copy2(root / "Model.qml", plugin / "Model.qml")
         shutil.copy2(tests.parent / "quickshell/Model.qml", root / "modeltest/Model.qml")

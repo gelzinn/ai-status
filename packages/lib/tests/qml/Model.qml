@@ -5,6 +5,10 @@ Item {
     property string errorMessage: ""
     property var actions: []
     function action(command) { actions = actions.concat([command]) }
+    function acquire(owner) {}
+    function release(owner) {}
+    signal notificationActivated()
+    property var notificationOwner: null
     property var saved: null
     property var chosen: null
     property bool settingsSaving: false

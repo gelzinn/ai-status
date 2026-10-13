@@ -3,3 +3,4 @@ Panel 1.0 Panel.qml
 KeyboardPanel 1.0 KeyboardPanel.qml
 PanelKeyCatcher 1.0 PanelKeyCatcher.qml
 WidgetButton 1.0 WidgetButton.qml
+BarWidget 1.0 BarWidget.qml

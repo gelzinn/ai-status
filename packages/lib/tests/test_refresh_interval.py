@@ -59,6 +59,44 @@ class RefreshIntervalTests(unittest.TestCase):
         order.assert_not_called()
         alerts.assert_not_called()
 
+    def test_interval_only_multi_item_save_preserves_order_without_forcing_collection(self):
+        items = [dict(provider="codex", idx=0, metric="weekly"),
+                 dict(provider="codex", idx=0, metric="rolling")]
+        state.save_selected(state.set_selected_items(dict(self.selected), items))
+        with patch.object(state, "trigger_refresh") as refresh, \
+                patch.object(config, "save_connection_order") as order, \
+                patch.object(notifications, "save_settings") as alerts:
+            quickshell.save_settings(dict(self.payload, items=items, refreshIntervalMinutes=30))
+            quickshell.save_settings(dict(self.payload, refreshIntervalMinutes=45))
+        selected = state.load_selected()
+        self.assertEqual(selected["items"], items)
+        self.assertEqual(selected["metric"], "weekly")
+        self.assertEqual(selected["refresh_interval_minutes"], 45)
+        refresh.assert_not_called()
+        order.assert_not_called()
+        alerts.assert_not_called()
+
+    def test_editing_only_extra_pin_still_refreshes_with_unchanged_primary(self):
+        items = [dict(provider="codex", idx=0, metric="weekly"),
+                 dict(provider="codex", idx=0, metric="rolling")]
+        state.save_selected(state.set_selected_items(dict(self.selected), items))
+        changed = [items[0], dict(items[1], metric="monthly")]
+        with patch.object(state, "trigger_refresh") as refresh, patch.object(config, "save_connection_order"):
+            quickshell.save_settings(dict(self.payload, items=changed))
+        self.assertEqual(state.load_selected()["items"], changed)
+        self.assertEqual(state.load_selected()["metric"], "weekly")
+        refresh.assert_called_once()
+
+    def test_reordering_bar_items_refreshes_and_mirrors_new_primary(self):
+        items = [dict(provider="codex", idx=0, metric="weekly"),
+                 dict(provider="codex", idx=0, metric="rolling")]
+        state.save_selected(state.set_selected_items(dict(self.selected), items))
+        with patch.object(state, "trigger_refresh") as refresh, patch.object(config, "save_connection_order"):
+            quickshell.save_settings(dict(self.payload, items=list(reversed(items))))
+        self.assertEqual(state.load_selected()["items"], list(reversed(items)))
+        self.assertEqual(state.load_selected()["metric"], "rolling")
+        refresh.assert_called_once()
+
     def test_legacy_form_preserves_saved_interval_and_other_changes_still_refresh(self):
         state.save_selected(dict(self.selected, refresh_interval_minutes=45, legacy="keep"))
         payload = dict(self.payload, display=dict(self.payload["display"], show_model=False))

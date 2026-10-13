@@ -136,11 +136,25 @@ class ConnectionViewsTests(unittest.TestCase):
     @unittest.skipIf(sys.platform == "win32", "Windows configuration uses the tray dialog")
     def test_terminal_choices_use_readable_titles_and_preserve_selection_ids(self):
         from core import tui
-        metric = dict(type="credits", name="Credit balance", id="Account spend / total credits (USD)")
+        metric = dict(type="credits", name="Credit balance", id="Account spend / total credits (USD)",
+                      amount=75, percentage=None, unit="USD")
         with patch.object(state, "load_cache", return_value=[dict(self.data[0], metrics=[metric])]):
             options = tui.get_selectable_items()
         self.assertEqual(options[0]["metric"], "credits:Account spend / total credits (USD)")
         self.assertEqual(options[0]["label"], "OpenRouter · Personal · Credit balance")
+
+    @unittest.skipIf(sys.platform == "win32", "Windows configuration uses the tray dialog")
+    def test_terminal_choices_skip_failed_and_unusable_observations(self):
+        from core import tui
+        failed = dict(self.data[0], _error="Authentication failed", metrics=[
+            dict(type="generic", percentage=0, detail="Authentication failed")])
+        available = dict(self.data[1], metrics=self.data[1]["metrics"] + [
+            dict(type="credits", name="Unavailable balance", percentage=None),
+            dict(type="monthly", name="Invalid usage", percentage=float("nan"))])
+        with patch.object(state, "load_cache", return_value=[failed, available]):
+            options = tui.get_selectable_items()
+        self.assertEqual([(item["provider"], item["metric"]) for item in options],
+                         [("account:work", "balance:Available balance")])
 
     def test_monetary_values_keep_their_scope_and_have_no_invented_progress(self):
         values = [dict(type="balance", name=name, percentage=None, amount=amount, unit=unit)

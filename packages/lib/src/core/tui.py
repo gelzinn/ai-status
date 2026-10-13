@@ -18,7 +18,7 @@ def get_selectable_items():
             dir_name = render.connection_key(p)
             idx = p.get("_idx", 0)
             p_name = render.entry_name(p)
-            metrics = render.entry_metrics(p)
+            metrics = render.usable_metrics(p)
             for m in sorted(metrics, key=render.metric_sort_key):
                 mtype = render.metric_key(m)
                 title = render.metric_title(m)
@@ -58,6 +58,9 @@ def run():
         return
 
     current_selected = state.load_selected() or {}
+    bar_items = state.get_selected_items(current_selected)
+    if not bar_items:
+        bar_items = state.get_selected_items(selectable_items[0])
     
     # Selected provider index
     selected_item_idx = 0
@@ -118,8 +121,10 @@ def run():
                        curses.A_REVERSE | curses.A_BOLD)
 
         # 1. Active Provider
-        prov_label = selectable_items[selected_item_idx]["label"]
-        prov_text = f"  Active Provider: < {prov_label} >"
+        primary = bar_items[0]
+        prov_label = next((item["label"] for item in selectable_items if state.get_selected_items(item)[0] == primary),
+                          f"{primary['provider']} · {primary['metric']} (unavailable)")
+        prov_text = f"  Bar items ({len(bar_items)}): < {prov_label} >  SPACE to select items"
         if len(prov_text) > w:
             prov_text = prov_text[:w]
         attr = curses.A_REVERSE if selected_idx == 0 else curses.A_NORMAL
@@ -190,7 +195,7 @@ def run():
             safe_addstr(y, 0, text, attr)
 
         help_text = (
-            "\u2191\u2193 navigate  \u2190\u2192 change active  "
+            "\u2191\u2193 navigate  \u2190\u2192 change first  "
             "SPACE toggle  Shift+J/K move  ENTER save  ESC cancel"
         )
         if len(help_text) > w:
@@ -208,12 +213,17 @@ def run():
         if key in (ord("q"), 27):
             break
         elif key == ord("\n"):
+            if not enabled_set:
+                continue
             if config_changed or selected_changed:
                 if config_changed:
                     cfg = [p for p in order if p in enabled_set]
                     config.save_connection_order(cfg)
                 
-                sel_item = selectable_items[selected_item_idx]
+                chosen = [item for item in bar_items if item["provider"] in enabled_set]
+                if not chosen:
+                    chosen = state.get_selected_items(next((item for item in selectable_items if item["provider"] in enabled_set),
+                                                          {"provider": next(iter(enabled_set), order[0]), "idx": 0, "metric": "rolling"}))
                 
                 # Safeguard: if all options are disabled, force defaults (provider & percentage)
                 final_show_provider = show_provider
@@ -224,9 +234,6 @@ def run():
                     
                 new_selected = {
                     **current_selected,
-                    "provider": sel_item["provider"],
-                    "idx": sel_item["idx"],
-                    "metric": sel_item["metric"],
                     "show_provider": final_show_provider,
                     "show_model": show_model,
                     "show_metric": show_metric,
@@ -234,6 +241,7 @@ def run():
                     "icon_mode": state.ICON_MODES[icon_mode_idx],
                     "usage_display": state.USAGE_DISPLAY_MODES[usage_display_idx],
                 }
+                state.set_selected_items(new_selected, chosen)
                 state.save_selected(new_selected)
                 
                 # If only display settings changed, no need to trigger_refresh!
@@ -248,6 +256,8 @@ def run():
         elif key in (curses.KEY_LEFT,):
             if selected_idx == 0:
                 selected_item_idx = (selected_item_idx - 1) % len(selectable_items)
+                draft = state.select_primary({"items": bar_items}, selectable_items[selected_item_idx])
+                bar_items = state.get_selected_items(draft)
                 selected_changed = True
             elif selected_idx == 5:
                 icon_mode_idx = (icon_mode_idx - 1) % len(state.ICON_MODES)
@@ -258,6 +268,8 @@ def run():
         elif key in (curses.KEY_RIGHT,):
             if selected_idx == 0:
                 selected_item_idx = (selected_item_idx + 1) % len(selectable_items)
+                draft = state.select_primary({"items": bar_items}, selectable_items[selected_item_idx])
+                bar_items = state.get_selected_items(draft)
                 selected_changed = True
             elif selected_idx == 5:
                 icon_mode_idx = (icon_mode_idx + 1) % len(state.ICON_MODES)
@@ -267,8 +279,47 @@ def run():
                 selected_changed = True
         elif key == ord(" "):
             if selected_idx == 0:
-                selected_item_idx = (selected_item_idx + 1) % len(selectable_items)
-                selected_changed = True
+                choices = [item for item in selectable_items if item["provider"] in enabled_set]
+                for item in bar_items:
+                    if item["provider"] in enabled_set and not any(state.get_selected_items(choice)[0] == item for choice in choices):
+                        choices.append(dict(item, label=f"{item['provider']} · {item['metric']} (unavailable)"))
+                if not choices:
+                    continue
+                draft_items = list(bar_items)
+                cursor = 0
+                applied = False
+                while True:
+                    h, w = stdscr.getmaxyx()
+                    stdscr.clear()
+                    safe_addstr(0, 0, " Bar items — select as many limits as you want ", curses.A_REVERSE | curses.A_BOLD)
+                    height = max(1, h - 3)
+                    start = max(0, cursor - height + 1)
+                    for row, item in enumerate(choices[start:start + height]):
+                        identity = state.get_selected_items(item)[0]
+                        checked = identity in draft_items
+                        text = f" {'[x]' if checked else '[ ]'} {item['label']}"
+                        safe_addstr(row + 1, 0, text[:w], curses.A_REVERSE if row + start == cursor else curses.A_NORMAL)
+                    safe_addstr(h - 1, 0, "↑↓ navigate  SPACE toggle  ENTER apply  ESC cancel"[:w])
+                    stdscr.refresh()
+                    item_key = stdscr.getch()
+                    if item_key in (27, ord("q")):
+                        break
+                    if item_key == ord("\n"):
+                        if not draft_items:
+                            continue
+                        applied = bar_items != draft_items
+                        bar_items = draft_items
+                        selected_item_idx = next((index for index, item in enumerate(selectable_items)
+                                                  if state.get_selected_items(item)[0] == bar_items[0]), selected_item_idx)
+                        break
+                    if item_key in (curses.KEY_UP, ord("k")):
+                        cursor = max(0, cursor - 1)
+                    elif item_key in (curses.KEY_DOWN, ord("j")):
+                        cursor = min(len(choices) - 1, cursor + 1)
+                    elif item_key == ord(" "):
+                        identity = state.get_selected_items(choices[cursor])[0]
+                        draft_items = [item for item in draft_items if item != identity] if identity in draft_items else draft_items + [identity]
+                selected_changed = selected_changed or applied
             elif selected_idx == 1:
                 show_provider = not show_provider
                 selected_changed = True

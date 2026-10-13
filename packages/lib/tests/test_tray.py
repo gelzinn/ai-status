@@ -40,6 +40,157 @@ class DesktopTests(IsolatedState):
         self.addCleanup(self.dashboard.tray.hide)
         self.addCleanup(self.dashboard.deleteLater)
 
+    @staticmethod
+    def check_bar_items(settings, identities):
+        wanted = [list(value) for value in identities]
+        for index in range(settings.bar_items.count()):
+            item = settings.bar_items.item(index)
+            if item.data(tray.Qt.ItemDataRole.UserRole) not in wanted:
+                item.setCheckState(tray.Qt.CheckState.Unchecked)
+        for identity in wanted:
+            item = next(settings.bar_items.item(index) for index in range(settings.bar_items.count())
+                        if settings.bar_items.item(index).data(tray.Qt.ItemDataRole.UserRole) == identity)
+            item.setCheckState(tray.Qt.CheckState.Checked)
+
+    def test_bar_checklist_saves_multiple_metrics_and_cancel_keeps_saved_items(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "rolling", "percentage": 23}, {"type": "weekly", "percentage": 61}]}])
+        self.dashboard.on_result("copilot", [{"provider": "Copilot", "metrics": [
+            {"type": "monthly", "percentage": 42}]}])
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        choices = [("codex", 0, "weekly"), ("copilot", 0, "monthly")]
+        self.check_bar_items(settings, choices)
+        settings.select_section("general")
+        settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
+        settings.select_section("general")
+        with patch.object(self.dashboard, "refresh"), patch.object(tray.QSystemTrayIcon, "show"):
+            settings.save_button.click()
+        expected = [dict(zip(("provider", "idx", "metric"), value)) for value in choices]
+        self.assertEqual(state.get_selected_items(state.load_selected()), expected)
+        self.assertIn("39%", self.dashboard.tray.toolTip())
+        extra = self.dashboard.metric_trays[("copilot", 0, "monthly")]
+        self.assertIn("58%", extra.toolTip())
+        self.check_bar_items(settings, [("codex", 0, "rolling")])
+        settings.cancel_button.click()
+        self.dashboard.configure()
+        self.assertEqual(self.dashboard.settings_view.bar_selections, expected)
+
+    def test_bar_checklist_requires_an_item_and_keyboard_checks_any_number(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "weekly", "name": f"Limit {index}", "percentage": index} for index in range(12)]}])
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        self.check_bar_items(settings, [])
+        settings.save_button.click()
+        self.assertEqual(settings.message.text(), "Choose at least one bar item.")
+        self.assertTrue(settings.message.isVisible())
+        self.assertEqual(settings.current_section, "general")
+        for index in range(settings.bar_items.count()):
+            settings.bar_items.setCurrentRow(index)
+            QTest.keyClick(settings.bar_items, tray.Qt.Key.Key_Space)
+        self.assertEqual(len(settings.bar_selections), settings.bar_items.count())
+        self.assertGreater(len(settings.bar_selections), 10)
+        with patch.object(self.dashboard, "refresh"), patch.object(tray.QSystemTrayIcon, "show"):
+            settings.save_button.click()
+        self.assertEqual(len(state.get_selected_items(state.load_selected())), settings.bar_items.count())
+
+    def test_extra_bar_item_changes_are_saved_while_interval_only_changes_keep_all_pins(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "rolling", "percentage": 23}, {"type": "weekly", "percentage": 61}]}])
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        choices = [("codex", 0, "rolling"), ("codex", 0, "weekly")]
+        self.check_bar_items(settings, choices)
+        with patch.object(self.dashboard, "refresh") as refresh, patch.object(tray.QSystemTrayIcon, "show"):
+            settings.save_button.click()
+        refresh.assert_called_once()
+        pinned = state.get_selected_items(state.load_selected())
+        self.assertEqual(len(pinned), 2)
+        settings.refresh_interval.setValue(3)
+        with patch.object(self.dashboard, "refresh") as refresh, \
+             patch.object(config, "save_connection_order") as save_order:
+            settings.save_button.click()
+        refresh.assert_not_called()
+        save_order.assert_not_called()
+        self.assertEqual(state.get_selected_items(state.load_selected()), pinned)
+        self.assertEqual(state.get_refresh_interval_minutes(state.load_selected()), 20)
+
+    def test_multiple_trays_keep_identity_refresh_loading_and_clicked_anchor(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "rolling", "percentage": 23}, {"type": "weekly", "percentage": 61}]}])
+        self.dashboard.on_result("copilot", [{"provider": "Copilot", "metrics": [
+            {"type": "monthly", "percentage": 42}]}])
+        selections = [{"provider": "codex", "idx": 0, "metric": "rolling"},
+                      {"provider": "codex", "idx": 0, "metric": "weekly"},
+                      {"provider": "copilot", "idx": 0, "metric": "monthly"}]
+        state.set_selected_items(self.dashboard.selected, selections)
+        with patch.object(tray.QSystemTrayIcon, "show"):
+            self.dashboard.draw()
+        weekly = self.dashboard.metric_trays[("codex", 0, "weekly")]
+        copilot = self.dashboard.metric_trays[("copilot", 0, "monthly")]
+        self.assertTrue(all(button.bullet.text() == "•" for button in self.dashboard.metric_buttons))
+        self.assertIn("Weekly", weekly.toolTip())
+        self.assertIn("61%", weekly.toolTip())
+        self.assertIs(weekly.contextMenu(), self.dashboard.menu)
+        self.dashboard.pending.add("copilot")
+        self.dashboard.animate()
+        self.assertIn(tray.render.SPINNERS[self.dashboard.animation_frame % len(tray.render.SPINNERS)], copilot.toolTip())
+        self.dashboard.draw()
+        self.assertIs(self.dashboard.metric_trays[("copilot", 0, "monthly")], copilot)
+        self.dashboard.hide()
+        with patch.object(self.dashboard, "show_dashboard") as opened:
+            weekly.activated.emit(tray.QSystemTrayIcon.ActivationReason.Trigger)
+        opened.assert_called_once()
+        self.assertIs(self.dashboard.anchor_tray, weekly)
+        with patch.object(self.dashboard, "show_dashboard") as opened:
+            copilot.activated.emit(tray.QSystemTrayIcon.ActivationReason.Context)
+        opened.assert_not_called()
+        self.assertIs(self.dashboard.anchor_tray, copilot)
+        self.dashboard.anchor_tray = weekly
+        state.set_selected_items(self.dashboard.selected, selections[:1])
+        with patch.object(weekly, "hide") as hidden:
+            self.dashboard.draw()
+        hidden.assert_called_once()
+        self.assertFalse(self.dashboard.metric_trays)
+        self.assertIs(self.dashboard.anchor_tray, self.dashboard.tray)
+
+    def test_missing_pins_are_preserved_until_the_metric_returns(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "weekly", "percentage": 61}]}])
+        selections = [{"provider": "codex", "idx": 0, "metric": "rolling"},
+                      {"provider": "copilot", "idx": 0, "metric": "monthly"}]
+        state.set_selected_items(self.dashboard.selected, selections)
+        state.save_selected(self.dashboard.selected)
+        self.dashboard.draw()
+        self.assertIn("No usage", self.dashboard.tray.toolTip())
+        self.assertEqual(state.get_selected_items(state.load_selected()), selections)
+        self.dashboard.configure()
+        self.assertEqual(self.dashboard.settings_view.bar_selections, selections)
+        self.assertTrue(any("unavailable" in self.dashboard.settings_view.bar_items.item(index).text()
+                            for index in range(self.dashboard.settings_view.bar_items.count())))
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "rolling", "percentage": 17}]}])
+        self.assertIn("17%", self.dashboard.tray.toolTip())
+        self.assertEqual(state.get_selected_items(state.load_selected()), selections)
+
+    def test_primary_navigation_preserves_extra_pins_and_tooltip_value_with_long_names(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex " + "😀" * 100, "metrics": [
+            {"type": "rolling", "name": "Long " * 30, "percentage": 23},
+            {"type": "weekly", "percentage": 61}]}])
+        self.dashboard.on_result("copilot", [{"provider": "Copilot", "metrics": [
+            {"type": "monthly", "percentage": 42}]}])
+        selections = [{"provider": "codex", "idx": 0, "metric": "rolling:Long " + "Long " * 29},
+                      {"provider": "copilot", "idx": 0, "metric": "monthly"}]
+        state.set_selected_items(self.dashboard.selected, selections)
+        with patch.object(tray.QSystemTrayIcon, "show"):
+            self.dashboard.draw()
+        tooltip = self.dashboard.tray.toolTip()
+        self.assertIn("23%", tooltip)
+        self.assertLess(len(tooltip.encode("utf-16-le")) // 2, 128)
+        self.dashboard.choose_metric(("codex", 0, "weekly"))
+        self.assertEqual(state.get_selected_items(state.load_selected())[1], selections[1])
+
     def test_startup_cache_does_not_trigger_notifications(self):
         cached = [{"provider": "Codex", "_dir": "codex", "_idx": 0,
                    "_observed_at": time.time(), "metrics": [{"type": "weekly", "percentage": 100}]}]
@@ -544,7 +695,7 @@ class DesktopTests(IsolatedState):
         self.assertLess(self.dashboard.back_button.geometry().right(), self.dashboard.brand.geometry().left())
         self.assertTrue(self.dashboard.refresh_button.isHidden())
         self.assertTrue(self.dashboard.settings_button.isHidden())
-        settings.active.setCurrentIndex(settings.active.findData(["codex", 0, "weekly"]))
+        self.check_bar_items(settings, [("codex", 0, "weekly")])
         for i in range(settings.active.count()):
             self.assertTrue(tray.icon_has_pixels(settings.active.itemIcon(i)))
         self.assertEqual(settings.active.currentData()[0], "codex")
@@ -584,7 +735,7 @@ class DesktopTests(IsolatedState):
         self.dashboard.configure()
         settings = self.dashboard.settings_view
         self.assertEqual(settings.current_section, "general")
-        settings.active.setCurrentIndex(settings.active.findData(["codex", 0, "weekly"]))
+        self.check_bar_items(settings, [("codex", 0, "weekly")])
         settings.section_buttons["general"].click()
         settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
         settings.icon_mode.setCurrentIndex(settings.icon_mode.findData("logo"))
@@ -647,8 +798,8 @@ class DesktopTests(IsolatedState):
             QTest.keyClick(settings.section_buttons["alerts"], tray.Qt.Key.Key_Left)
             self.assertEqual(settings.current_section, "general")
             QTest.keyClick(settings.section_buttons["general"], tray.Qt.Key.Key_Tab)
-            self.assertIs(self.dashboard.focusWidget(), settings.active)
-            QTest.keyClick(settings.active, tray.Qt.Key.Key_Tab)
+            self.assertIs(self.dashboard.focusWidget(), settings.bar_items)
+            QTest.keyClick(settings.bar_items, tray.Qt.Key.Key_Tab)
             self.assertIs(self.dashboard.focusWidget(), settings.refresh_interval)
             settings.section_buttons["alerts"].setFocus()
             QTest.keyClick(settings.section_buttons["alerts"], tray.Qt.Key.Key_Space)
@@ -811,7 +962,7 @@ class DesktopTests(IsolatedState):
         with patch.object(self.dashboard, "isActiveWindow", return_value=True):
             self.dashboard.configure()
             settings = self.dashboard.settings_view
-            selectors = (("general", settings.active), ("general", settings.usage_display),
+            selectors = (("general", settings.usage_display),
                          ("general", settings.icon_mode), ("alerts", settings.notification_rule_selector))
             for section, combo in selectors:
                 with self.subTest(selector=combo.accessibleName()):
@@ -852,7 +1003,7 @@ class DesktopTests(IsolatedState):
         with patch.object(self.dashboard, "isActiveWindow", return_value=True):
             self.dashboard.configure()
             settings = self.dashboard.settings_view
-            selectors = (("general", settings.active), ("general", settings.usage_display),
+            selectors = (("general", settings.usage_display),
                          ("general", settings.icon_mode), ("alerts", settings.notification_rule_selector))
             for section, combo in selectors:
                 settings.select_section(section)
@@ -930,9 +1081,14 @@ class DesktopTests(IsolatedState):
     def test_settings_select_long_popup_scrolls_within_screen_and_reopens(self):
         with patch.object(self.dashboard, "isActiveWindow", return_value=True):
             self.dashboard.configure()
-            combo = self.dashboard.settings_view.active
+            settings = self.dashboard.settings_view
+            settings.select_section("alerts")
+            settings.notification_advanced_button.setChecked(True)
+            combo = settings.notification_rule_selector
             for index in range(40):
-                combo.addItem(f"Account {index} · Weekly", [f"account:{index}", 0, "weekly"])
+                combo.addItem(f"Account {index} · Weekly", [f"account:{index}", "weekly"])
+            self.app.processEvents()
+            self.dashboard.settings_scroll.ensureWidgetVisible(combo)
             self.app.processEvents()
             combo.showPopup()
             self.app.processEvents()
@@ -949,7 +1105,7 @@ class DesktopTests(IsolatedState):
                 last = combo.model().index(combo.count() - 1, 0)
                 self.assertTrue(view.viewport().rect().contains(view.visualRect(last)))
                 QTest.keyClick(view, tray.Qt.Key.Key_Return)
-                self.assertEqual(combo.currentData(), ["account:39", 0, "weekly"])
+                self.assertEqual(combo.currentData(), ["account:39", "weekly"])
                 self.assertFalse(popup.isVisible())
                 combo.showPopup()
                 self.app.processEvents()
@@ -958,7 +1114,7 @@ class DesktopTests(IsolatedState):
                 self.assertEqual(image.pixelColor(0, 0).alpha(), 0)
                 self.assertEqual(image.pixelColor(image.width() // 2, 2), QColor("#111111"))
                 QTest.keyClick(view, tray.Qt.Key.Key_Escape)
-                self.assertEqual(combo.currentData(), ["account:39", 0, "weekly"])
+                self.assertEqual(combo.currentData(), ["account:39", "weekly"])
             finally:
                 combo.hidePopup()
 
@@ -1238,7 +1394,7 @@ class DesktopTests(IsolatedState):
             settings.notification_rule_custom.setChecked(True)
             settings.notification_rule_thresholds.setText("unfinished")
             settings.select_section("general")
-            settings.active.setCurrentIndex(settings.active.findData(["claude", 0, "weekly"]))
+            self.check_bar_items(settings, [("claude", 0, "weekly")])
             selected = settings.active.currentData()
             settings.select_section("alerts")
             self.assertEqual(settings.notification_rule_choice, ("codex", "weekly"))
@@ -1330,7 +1486,7 @@ class DesktopTests(IsolatedState):
         button = self.dashboard.metric_buttons[0]
         self.assertEqual(button.percentage.text(), "$42.50")
         self.assertTrue(button.bar.isHidden())
-        self.assertIn("Work $42.50", self.dashboard.tray.toolTip())
+        self.assertIn("Work · Credits · $42.50", self.dashboard.tray.toolTip())
         button.click()
         self.assertEqual(state.load_selected()["provider"], "account:work")
 
@@ -1401,7 +1557,7 @@ class DesktopTests(IsolatedState):
         self.assertEqual(settings.active.count(), 2)
         choices = [settings.active.itemData(index) for index in range(settings.active.count())]
         self.assertIn(["account:cloud-work", 0, "credits:claude-cloud"], choices)
-        settings.active.setCurrentIndex(settings.active.findData(["account:cloud-work", 0, "credits:claude-cloud"]))
+        self.check_bar_items(settings, [("account:cloud-work", 0, "credits:claude-cloud")])
         with patch.object(self.dashboard, "refresh"):
             settings.save()
         self.assertEqual(state.load_selected()["provider"], "account:cloud-work")
@@ -1485,7 +1641,7 @@ class DesktopTests(IsolatedState):
         self.assertFalse(self.dashboard.refresh_button.isHidden())
         self.assertTrue(self.dashboard.settings_button.isHidden())
         self.assertEqual(state.load_selected(), selected)
-        self.assertEqual(self.dashboard.tray.toolTip(), "Claude (Max) · Personal 9%")
+        self.assertEqual(self.dashboard.tray.toolTip(), "Claude (Max) · Personal · Rolling Usage · 9%")
 
     def test_cloud_details_isolate_accounts_subaccounts_and_credit_ids(self):
         from core import accounts
@@ -1513,7 +1669,7 @@ class DesktopTests(IsolatedState):
         self.assertIn("Another credit", self.dashboard.monetary_view.provider_label.text())
         self.assertEqual(self.dashboard.monetary_view.balance.text(), "$9.75")
         self.assertEqual(state.load_selected(), selected)
-        self.assertEqual(self.dashboard.tray.toolTip(), "Codex 23%")
+        self.assertEqual(self.dashboard.tray.toolTip(), "Codex · Weekly Usage · 23%")
 
     def test_cloud_details_table_matches_reset_header_and_has_only_one_top_border(self):
         config.save_config(["claude"])
@@ -1814,7 +1970,7 @@ class DesktopTests(IsolatedState):
                 self.assertEqual(row.description.text(), "$36.10 of $40.00 used (90%)")
                 self.assertAlmostEqual(row.bar.target, progress)
                 self.assertFalse(row.bar_container.isHidden())
-                self.assertEqual(self.dashboard.tray.toolTip(), "OpenRouter $3.90")
+                self.assertEqual(self.dashboard.tray.toolTip(), "OpenRouter · Credit balance · $3.90")
                 self.assertEqual(state.load_selected()["metric"], "credits:Account spend / total credits (USD)")
 
     def test_openrouter_legacy_balance_selection_stays_on_account_after_rows_merge(self):
@@ -1833,7 +1989,7 @@ class DesktopTests(IsolatedState):
                          ("openrouter", 0, "credits:Account spend / total credits (USD)"))
         self.assertEqual(state.load_selected()["provider"], "openrouter")
         self.assertEqual(state.load_selected()["metric"], "credits:Account spend / total credits (USD)")
-        self.assertEqual(self.dashboard.tray.toolTip(), "OpenRouter $0.00")
+        self.assertEqual(self.dashboard.tray.toolTip(), "OpenRouter · Credit balance · $0.00")
         self.assertEqual(len([row for row in self.dashboard.metric_buttons
                              if row.value[0] == "openrouter"]), 1)
 
@@ -1968,7 +2124,7 @@ class DesktopTests(IsolatedState):
         self.dashboard.back_button.click()
         self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
         self.assertTrue(heading.credits.isHidden())
-        self.assertEqual(self.dashboard.tray.toolTip(), "Codex (Pro) 23%")
+        self.assertEqual(self.dashboard.tray.toolTip(), "Codex (Pro) · Weekly Usage · 23%")
 
     def test_reset_submenu_uses_the_clicked_provider_and_account(self):
         config.save_config(["claude", "codex"])
@@ -1990,7 +2146,7 @@ class DesktopTests(IsolatedState):
         self.assertIn("2 credits", text)
         self.assertNotIn("Max reset", text)
         self.assertEqual(state.load_selected(), selected)
-        self.assertEqual(self.dashboard.tray.toolTip(), "Codex (Pro) 23%")
+        self.assertEqual(self.dashboard.tray.toolTip(), "Codex (Pro) · Weekly Usage · 23%")
 
     def test_reset_details_refresh_in_place_and_back_restores_focus_and_position(self):
         self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
@@ -2025,7 +2181,7 @@ class DesktopTests(IsolatedState):
         self.app.processEvents()
         self.assertTrue(heading.credits.hasFocus())
         self.assertEqual(self.dashboard.geometry().bottom(), bottom)
-        self.assertEqual(self.dashboard.tray.toolTip(), "Codex (Pro) 24%")
+        self.assertEqual(self.dashboard.tray.toolTip(), "Codex (Pro) · Weekly Usage · 24%")
 
     def test_reset_submenu_keyboard_back_and_missing_provider(self):
         self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [
@@ -2747,10 +2903,10 @@ class DesktopTests(IsolatedState):
             "metrics": [{"type": "monthly", "percentage": 7}]}])
         codex_icon = self.dashboard.tray.icon().pixmap(32, 32).toImage()
         self.dashboard.provider_buttons[("copilot", 0)].click()
-        self.assertEqual(self.dashboard.tray.toolTip(), "Copilot 7%")
+        self.assertEqual(self.dashboard.tray.toolTip(), "Copilot · Monthly Usage · 7%")
         self.assertNotEqual(codex_icon, self.dashboard.tray.icon().pixmap(32, 32).toImage())
         self.dashboard.cycle_metric(1)
-        self.assertEqual(self.dashboard.tray.toolTip(), "Codex (Pro) 23%")
+        self.assertEqual(self.dashboard.tray.toolTip(), "Codex (Pro) · Weekly Usage · 23%")
         self.assertEqual(state.load_selected()["provider"], "codex")
 
     def test_failed_selected_provider_falls_back_to_available_data(self):
@@ -2760,7 +2916,7 @@ class DesktopTests(IsolatedState):
         self.dashboard.on_result("codex", None)
         self.assertEqual(self.dashboard.selected["provider"], "copilot")
         self.assertEqual(len(self.dashboard.metric_values), 1)
-        self.assertEqual(self.dashboard.tray.toolTip(), "Copilot 7%")
+        self.assertEqual(self.dashboard.tray.toolTip(), "Copilot · Monthly Usage · 7%")
 
     def test_activation_file_opens_existing_app_without_qt_network(self):
         paths.atomic_json(paths.RUNTIME_DIR / "desktop-request.json", {"action": "config", "id": "new"})

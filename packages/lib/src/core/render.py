@@ -3,7 +3,7 @@ import math
 from html import escape
 from . import fetch
 from . import state
-from . import usage_credits
+from . import usage_credits, config
 from .reset_credits import display_lines as reset_credit_lines
 
 TYPE_NAMES = {
@@ -206,7 +206,48 @@ def _find_selected_provider(latest_data, selected):
     return None
 
 
-def get_selected_metric_text(latest_data, selected, spinner=None):
+def get_bar_metric_choices(latest_data, selected):
+    """Resolve pinned identities without turning missing metrics into duplicates."""
+    if "items" in (selected or {}):
+        enabled = config.enabled_connection_order()
+        latest_data = [entry for entry in latest_data if connection_key(entry) in enabled]
+    choices = []
+    for choice in state.get_selected_items(selected):
+        provider = _find_selected_provider(latest_data, choice)
+        if provider and choice["metric"] in [metric_key(metric) for metric in usable_metrics(provider)]:
+            choices.append(choice)
+    if not choices and "items" not in (selected or {}):
+        for provider in latest_data:
+            metrics = sorted(entry_metrics(provider), key=metric_sort_key)
+            if metrics:
+                choices.append({"provider": connection_key(provider), "idx": provider.get("_idx", 0),
+                                "metric": metric_key(metrics[0])})
+                break
+    return choices
+
+
+def usable_metrics(entry):
+    """Selectable observations, excluding failed placeholders and invalid values."""
+    if fetch._is_error_result(entry):
+        return []
+    return [metric for metric in entry_metrics(entry)
+            if (metric_percentage(metric) is not None if metric.get("percentage") is not None
+                else metric_is_amount(metric) or isinstance(metric.get("value"), str) and bool(metric["value"]))]
+
+
+def get_selected_metric_text(latest_data, selected, spinner=None, pending=None):
+    if "items" not in (selected or {}):
+        return _get_single_metric_text(latest_data, selected, spinner)
+    choices = get_bar_metric_choices(latest_data, selected)
+    if not choices:
+        return "AI Status " + spinner if spinner is not None else "AI Status"
+    return " · ".join(_get_single_metric_text(
+        latest_data, dict(selected, **choice),
+        spinner if pending is None or choice["provider"] in pending else None,
+    ) for choice in choices)
+
+
+def _get_single_metric_text(latest_data, selected, spinner=None):
     p = _find_selected_provider(latest_data, selected)
     show_icon = state.get_icon_mode(selected) == "bot"
     if not p:
@@ -346,7 +387,9 @@ def format_provider_block(
     if not metrics:
         return ""
 
-    is_selected = (
+    pinned_metrics = {item["metric"] for item in state.get_selected_items(selected)
+                      if item["provider"] == connection_key(provider_data) and item["idx"] == provider_data.get("_idx", 0)}
+    is_selected = bool(pinned_metrics) if "items" in (selected or {}) else (
         connection_key(provider_data) == selected_dir
         and provider_data.get("_idx") == selected_idx
     )
@@ -364,7 +407,7 @@ def format_provider_block(
     lines = [header, ""]
     for metric in sorted_metrics:
         name = escape(metric_title(metric, selected))
-        is_active = is_selected and metric_key(metric) == selected_metric
+        is_active = metric_key(metric) in pinned_metrics if "items" in (selected or {}) else is_selected and metric_key(metric) == selected_metric
         detail = metric_detail(metric)
 
         # Only the active metric of the selected provider stays bright.
@@ -402,7 +445,9 @@ def format_loading_provider_block(
     # Identical layout to format_provider_block (prefix arrow, active bullet,
     # indentation) so nothing shifts when loading resolves — only the bar (a
     # shimmer) and the value (a spinner) differ.
-    is_selected = (
+    pinned_metrics = {item["metric"] for item in state.get_selected_items(selected)
+                      if item["provider"] == connection_key(provider_data) and item["idx"] == provider_data.get("_idx", 0)}
+    is_selected = bool(pinned_metrics) if "items" in (selected or {}) else (
         connection_key(provider_data) == selected_dir
         and provider_data.get("_idx") == selected_idx
     )
@@ -421,7 +466,7 @@ def format_loading_provider_block(
     lines = [header, ""]
     for metric in sorted_metrics:
         name = escape(metric_title(metric, selected))
-        is_active = is_selected and metric_key(metric) == selected_metric
+        is_active = metric_key(metric) in pinned_metrics if "items" in (selected or {}) else is_selected and metric_key(metric) == selected_metric
         detail = metric_detail(metric)
 
         recede = None if is_active else DIM_INACTIVE
@@ -502,9 +547,9 @@ def build_loading_state(latest_data, frame, selected=None, pending=None):
         selected_pending = selected_dir in pending
     else:
         selected_pending = bool(pending)
-    text = get_selected_metric_text(
-        latest_data, selected, spinner=(spinner if selected_pending else None)
-    )
+    text = get_selected_metric_text(latest_data, selected,
+                                    spinner=spinner if "items" in (selected or {}) or selected_pending else None,
+                                    pending=pending)
 
     return {
         "text": text,

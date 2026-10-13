@@ -917,9 +917,9 @@ Item {
             keyClick(Qt.Key_Tab)
             verify(findChild(panel, "settings-nav-about").activeFocus)
             keyClick(Qt.Key_Tab)
-            verify(findChild(settings, "active-provider").activeFocus)
-            // General keeps provider, refresh and display controls together.
-            keyClick(Qt.Key_Tab)
+            verify(findChild(settings, "bar-item-claude-0-rolling").activeFocus)
+            // General keeps bar items, refresh and display controls together.
+            for (let index = 0; index < settings.choices.length; index++) keyClick(Qt.Key_Tab)
             verify(findChild(settings, "refresh-interval-slider").activeFocus)
             keyClick(Qt.Key_Tab)
             verify(findChild(settings, "usage-display").activeFocus)
@@ -1018,7 +1018,7 @@ Item {
             settings.selectSection("general")
             wait(20)
             const scroller = findChild(panel, "panel-scroller")
-            const selector = findChild(settings, "active-provider")
+            const selector = findChild(settings, "icon-mode")
             selector.forceActiveFocus(Qt.TabFocusReason)
             verifyControlInViewport(selector, scroller)
             const position = scroller.contentY
@@ -1028,9 +1028,8 @@ Item {
             compare(scroller.contentY, position)
             keyClick(Qt.Key_Tab)
             tryCompare(selector, "popupOpen", false)
-            const slider = findChild(settings, "refresh-interval-slider")
-            tryVerify(() => slider.activeFocus)
-            verifyControlInViewport(slider, scroller)
+            const cancel = findChild(panel, "settings-cancel")
+            tryVerify(() => cancel.activeFocus)
             settings.selectSection("general")
             wait(20)
             const next = findChild(settings, "usage-display")
@@ -1407,11 +1406,19 @@ Item {
                     compare(after.pixel(Math.round(position.x + x), Math.round(position.y + y)), before.pixel(Math.round(position.x + x), Math.round(position.y + y)))
             }
         }
-        function test_short_general_section_fits_without_vertical_overflow() {
+        function test_unified_general_keeps_bar_items_and_refresh_display_controls_reachable() {
             panel.configure()
             wait(20)
+            const settings = findChild(panel, "panel-settings-page")
             const scroller = findChild(panel, "panel-scroller")
-            verify(scroller.contentHeight <= scroller.height + 1)
+            const before = JSON.stringify(settings.selectedItems)
+            for (const name of ["bar-item-claude-0-rolling", "refresh-interval-slider", "usage-display", "icon-mode"]) {
+                const control = findChild(settings, name)
+                control.forceActiveFocus(Qt.TabFocusReason)
+                verifyControlInViewport(control, scroller)
+            }
+            verify(scroller.contentY > 0)
+            compare(JSON.stringify(settings.selectedItems), before)
         }
         function test_separator_reaches_sides_and_only_refresh_icon_spins() {
             const surface = findChild(panel, "panel-surface")

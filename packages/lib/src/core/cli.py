@@ -70,9 +70,7 @@ def _scroll(direction, frontend="waybar"):
     new_dir, new_idx = items[(idx + direction) % len(items)]
     new_metric = _first_metric_for(cache, new_dir, new_idx)
     
-    selected["provider"] = new_dir
-    selected["idx"] = new_idx
-    selected["metric"] = new_metric
+    state.select_primary(selected, {"provider": new_dir, "idx": new_idx, "metric": new_metric})
 
     state.save_selected(selected)
     if frontend == "waybar":
@@ -105,9 +103,7 @@ def cycle_metric(frontend="waybar"):
     
     new_metric = keys[(pos + 1) % len(keys)]
     
-    selected["provider"] = provider
-    selected["idx"] = idx
-    selected["metric"] = new_metric
+    state.select_primary(selected, {"provider": provider, "idx": idx, "metric": new_metric})
 
     state.save_selected(selected)
 
@@ -321,6 +317,12 @@ def print_logo():
     if state.get_icon_mode(selected) != "logo":
         print("")
         return
+    if "items" in selected:
+        choices = render.get_bar_metric_choices(state.load_cache(), selected)
+        if not choices:
+            print("")
+            return
+        selected = dict(selected, **choices[0])
     # current.png is kept up to date by the daemon (startup + selection change)
     # and the scroll command; only seed it here if it's missing so this hot path
     # (called once per loading frame) stays a couple of file reads.
@@ -990,9 +992,18 @@ def main(argv=None):
         except ImportError:
             pass
         if args.http_smoke:
-            from .provider_http import request
-            response = json.loads(request("https://api.github.com/", timeout=10))
-            info["native_https"] = paths.IS_WINDOWS and "current_user_url" in response
+            from .provider_http import QueryError, request
+            try:
+                request("https://api.github.com/", timeout=10)
+            except QueryError as error:
+                # A server reply also proves the native TLS round trip. The
+                # anonymous API can rate-limit a shared CI runner independently
+                # of the packaged client; certificate/transport failures have
+                # no HTTP status and must still fail this check.
+                if type(error.status) is not int or not 100 <= error.status <= 599:
+                    raise
+                info["native_https_http_status"] = error.status
+            info["native_https"] = paths.IS_WINDOWS
         print(json.dumps(info, ensure_ascii=False))
     elif command == "status":
         errors = {}

@@ -32,6 +32,21 @@ interactive testing on Windows 10/11: validate tray interaction, scaling,
 Explorer restart, suspend/resume, upgrade and authenticated usage on both OSes
 before announcing full provider compatibility.
 
+Check one and several selected tray items, including two limits from one
+account and two accounts for one provider. Each item needs a tooltip with its
+account, limit and value; clicking any icon must position the same usage panel
+beside that icon. Verify icon addition/removal after Save, Cancel, empty-selection
+validation and migration from single-item preferences. Click/Up/Down selection
+changes must retain the extra items without duplicates. Restart Explorer and
+the app with icons both beside the clock and in the hidden-icons menu. Check
+temporary provider failures: saved selections must survive and return when
+data does. Windows manages notification-area visibility and order.
+
+Windows supports multiple notification-area icons per application window,
+identified separately; see Microsoft's
+[NOTIFYICONDATAW reference](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/ns-shellapi-notifyicondataw).
+The Qt adapter manages these as separate `QSystemTrayIcon` instances.
+
 The package ships only raster widgets and the required Windows/offscreen Qt
 platform plugins. OpenGL software emulation, QML/Quick, QtNetwork/QtSvg, unused
 image/TLS plugins, translations, legacy Bash collectors and bytecode caches are
@@ -50,8 +65,12 @@ docstrings/assertions; runtime input validation uses explicit exceptions.
 
 CI renders the packaged widgets/logos, runs real ConPTY input/output checks,
 tests native HTTP against localhost (including invalid TLS certificates), and
-verifies public HTTPS from the frozen executable. It also tests the native
-launcher, silent install/upgrade/uninstall in a Unicode path (including removal
+verifies public HTTPS from the frozen executable.
+
+The public HTTPS probe records HTTP error statuses, including anonymous API
+rate limits, as successful TLS round trips in `doctor --http-smoke` output.
+Certificate, hostname and transport failures still fail the packaged smoke.
+CI also tests the native launcher, silent install/upgrade/uninstall in a Unicode path (including removal
 of obsolete runtime DLLs and preservation of user data), and enforces size budgets
 of 56 MiB installed, 23 MiB for the portable ZIP, and 18 MiB for the installer.
 These budgets include the required SQLite runtime for Cursor/Kiro credential

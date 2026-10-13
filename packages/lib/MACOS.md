@@ -70,12 +70,14 @@ Click the menu bar item to open or close the panel. The header contains
 **Refresh** and **Settings** controls. Connection cards show their provider
 logos and account or plan names, with usage bars and reset countdowns for
 quotas, and reported costs or balances for API services. Click a connection
-heading or a metric to choose what appears in the menu bar. Balances have
+heading or a metric to change the first item in the menu bar, keeping any
+additional selected items. Balances have
 no invented percentage; a cost percentage requires a reported limit or a
 configured monitoring budget.
 
-Usage refreshes at the saved interval, defaulting to five minutes. Loading feedback appears during a
-refresh, and usable cached data stays visible if a provider request fails.
+Usage refreshes at the saved interval, defaulting to five minutes. Loading
+feedback appears during a refresh, and usable cached data stays visible if a
+provider request fails.
 Providers without usable metrics remain available in Settings.
 
 When Claude or Codex reports available manual resets, **Reset credits: N
@@ -94,14 +96,18 @@ limit. See [provider eligibility](PROVIDERS.md#claude).
 
 ## Settings and About
 
-**General** combines the selected connection and metric, menu bar display fields,
-icon mode and **Automatic refresh** slider. Choose 5–60 minutes in steps of 5;
-the default is 5. Alerts remains separate, with connections managed in Providers.
+**General** includes checkboxes for the account/limit items shown in the menu bar.
+Keep one item or select as many as you want; at least one is required. Each
+selected item shows its own usage label. Existing single-item preferences
+remain selected after updating. General also includes menu bar display fields,
+icon mode and the **Automatic refresh** slider. Choose 5–60 minutes in steps
+of 5; the default is 5. Alerts remains separate, with connections enabled,
+disabled and reordered in Providers.
 Dragging changes the draft only. Saving the interval updates the daemon's
 schedule without restarting or forcing an extra collection. SwiftBar also
-follows the saved interval. Provider cooldowns and request timeouts are preserved. **Save**
-applies changes and keeps Settings open. Back or **Cancel** returns to usage
-and discards unsaved edits.
+follows the saved interval. Provider cooldowns and request timeouts are
+preserved. **Save** applies changes and keeps Settings open. Back or **Cancel**
+returns to usage and discards unsaved edits.
 
 **About AI Status** shows the installed version, project details, license,
 usage guide and links. Its back control returns to Settings. Authentication
@@ -139,8 +145,11 @@ Install SwiftBar separately (`brew install --cask swiftbar`, or download it
 from its website). The installer reads its configured plugin directory and
 falls back to `~/Library/Application Support/SwiftBar/Plugins`.
 
-The menu bar shows your selected usage. Its dropdown includes provider logos,
-progress bars, reset timers and the active limit marker. Click a provider or
-limit to select it. **Refresh**, **Settings** and **About AI Status** appear
-as menu actions. SwiftBar Settings opens the shared terminal configuration
-interface; the full native pages are available in `--mode native`.
+The menu bar shows all selected usage labels together. In logo mode, SwiftBar
+shows one provider image for the first available selected item. Its dropdown
+includes provider logos, progress bars, reset timers and markers for every
+selected limit. Click a provider or limit to change the first item while
+retaining the additional selections. **Refresh**, **Settings** and **About AI
+Status** appear as menu actions. SwiftBar Settings opens the shared terminal
+configuration interface, where you can select one or more items; the full
+native pages and per-item menu bar logos are available in `--mode native`.

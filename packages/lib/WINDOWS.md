@@ -16,23 +16,27 @@ folder and open `ai-status.exe`. Keep `ai-status-cli.exe` and `_internal` beside
 For portable upgrades, extract into a fresh folder and replace the old app folder;
 settings/cache live in your user profile.
 
-- Click the selected provider's tray logo to toggle the usage panel. Windows may initially put it in
-  the hidden-icons menu; move it beside the clock using Windows settings.
-- Click a provider or a metric to select it; the arrow/bullet marks the active
-  selection. The tray logo and short usage
-  tooltip follow that selection. Up/Down cycles metrics; Escape closes the panel.
+- Click any selected item's tray logo to toggle the usage panel. Each selected
+  account/limit gets its own native tray icon with an account, limit and value
+  tooltip. Windows may initially put icons in the hidden-icons menu; move the
+  ones you want beside the clock using Windows settings.
+- Click a provider or a metric to select it; the arrows/bullets mark selected
+  items. Clicking or using Up/Down to cycle metrics changes the first item and
+  keeps your additional selected items. Escape closes the panel.
 - The panel only lists providers with usable metrics. Failed/unconnected providers
   do not occupy rows. The header has **Refresh** and **Settings** icons. The tray
   context menu also contains **Connection details**,
   update/log actions and **Exit**. R refreshes usage and C opens settings.
 - **Settings** opens inside the panel, with the back arrow before the title.
-  Choose the active provider/limit, with provider logos in the selector and its
-  options, set display fields and the bar icon, enable/disable
+  Use the account/limit checkboxes to select one or more items for the tray,
+  with no fixed item count and at least one required. Existing single-item
+  preferences remain selected after updating. Set display fields and the bar
+  icon, enable/disable
   providers, and reorder them with drag and drop, the per-row arrows, or
   Alt+Up/Down. **Save** applies changes and keeps settings open; the back arrow,
   Escape or **Cancel** returns to usage and discards any remaining unsaved edits.
   Starting at sign-in is optional and disabled by default.
-- **General** combines the selected limit, startup and display controls formerly
+- **General** combines the selected items, startup and display controls formerly
   in Appearance. Its **Automatic refresh** slider offers 5–60 minutes in steps
   of 5, defaulting to 5. Dragging changes the draft; **Save** updates the running
   schedule and **Cancel** discards changes. Saving only the interval does not

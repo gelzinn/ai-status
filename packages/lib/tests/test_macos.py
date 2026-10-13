@@ -62,7 +62,22 @@ class MacOSFrontendTests(unittest.TestCase):
             result, errors = self.invoke(["select-metric", "--frontend", "macos",
                                           "--selection-json", json.dumps(choice)])
         self.assertIn(result, (0, None), errors)
-        save.assert_called_once_with({**SELECTED, **choice})
+        save.assert_called_once_with({**SELECTED, **choice, "items": [choice]})
+        refresh.assert_not_called()
+
+    def test_primary_selection_keeps_the_other_menu_bar_items(self):
+        pinned = [{"provider": "claude", "idx": 0, "metric": "rolling"},
+                  {"provider": "claude", "idx": 0, "metric": "weekly"}]
+        choice = {"provider": "codex", "idx": 1, "metric": "weekly"}
+        selected = dict(SELECTED, items=pinned)
+        with patch.object(state, "load_cache", return_value=DATA), \
+                patch.object(state, "load_selected", return_value=selected), \
+                patch.object(state, "save_selected") as save, \
+                patch.object(state, "trigger_refresh") as refresh:
+            result, errors = self.invoke(["select-metric", "--frontend", "macos",
+                                          "--selection-json", json.dumps(choice)])
+        self.assertIn(result, (0, None), errors)
+        save.assert_called_once_with({**SELECTED, **choice, "items": [choice, pinned[1]]})
         refresh.assert_not_called()
 
     def test_bad_selections_do_not_change_the_saved_metric(self):
@@ -213,7 +228,8 @@ class MacOSFrontendTests(unittest.TestCase):
                                           "--selection-json", json.dumps(selected)])
             snapshot = quickshell.build_snapshot(data, selected)
         self.assertIn(result, (0, None), errors)
-        save.assert_called_once_with(selected)
+        identity = {key: selected[key] for key in ("provider", "idx", "metric")}
+        save.assert_called_once_with({**selected, "items": [identity]})
         self.assertEqual(snapshot["selected"]["provider"], "account:cloud-work")
         self.assertEqual(snapshot["text"], "Claude (Max) · Work $75.25")
         self.assertEqual(len(snapshot["providers"]), 2)
@@ -287,6 +303,45 @@ class MacOSFrontendTests(unittest.TestCase):
         snapshots = self.daemon_snapshots(DATA, SELECTED)
         self.assertEqual(snapshots[-1]["selected"]["metric"], "rolling")
         self.assertTrue(snapshots[-1]["providers"][0]["logoPath"].endswith(".png"))
+
+    def test_macos_daemon_streams_all_ordered_menu_bar_items_with_local_logos(self):
+        pinned = [{"provider": "codex", "idx": 1, "metric": "weekly"},
+                  {"provider": "claude", "idx": 0, "metric": "rolling"},
+                  {"provider": "claude", "idx": 0, "metric": "weekly:<b>Fable</b>"}]
+        snapshots = self.daemon_snapshots(DATA, dict(SELECTED, **pinned[0], items=pinned))
+        for snapshot in snapshots:
+            self.assertEqual(snapshot["settings"]["items"], pinned)
+            self.assertEqual([{key: item[key] for key in ("provider", "idx", "metric")}
+                              for item in snapshot["barItems"]], pinned)
+            self.assertTrue(snapshot["barItems"][0]["logoPath"].endswith("codex.png"))
+            self.assertTrue(all(item["logoPath"].endswith("claude.png") for item in snapshot["barItems"][1:]))
+        self.assertTrue(all(item["loading"] for item in snapshots[0]["barItems"]))
+        self.assertEqual([item["text"] for item in snapshots[-1]["barItems"]],
+                         ["Codex 40%", "Claude (Pro) 0%", "Claude (Pro) 62%"])
+        self.assertFalse(any(item["loading"] for item in snapshots[-1]["barItems"]))
+
+    def test_native_settings_save_many_menu_bar_items_and_reject_empty_lists(self):
+        items = [{"provider": "claude", "idx": 0, "metric": f"weekly:model-{index}"} for index in range(24)]
+        payload = {"enabled": ["claude", "codex"], "display": {
+            "show_provider": True, "show_model": True, "show_metric": False, "show_pct": True},
+            "iconMode": "logo", "usageDisplay": "used", "items": items, "selected": items[0]}
+        with patch.object(config, "available_providers", return_value=["claude", "codex"]), \
+                patch.object(state, "load_selected", return_value=SELECTED.copy()), \
+                patch.object(state, "_save_json") as save, patch.object(state, "trigger_refresh") as refresh:
+            result, errors = self.invoke(["save-settings", "--frontend", "macos", "--settings-json", json.dumps(payload)])
+            self.assertIn(result, (0, None), errors)
+            saved = save.call_args.args[1]
+            self.assertEqual(saved["items"], items)
+            self.assertEqual({key: saved[key] for key in ("provider", "idx", "metric")}, items[0])
+            self.assertEqual(saved["icon_mode"], "logo")
+            save.reset_mock()
+            refresh.reset_mock()
+            result, errors = self.invoke(["save-settings", "--frontend", "macos", "--settings-json",
+                                          json.dumps(dict(payload, items=[]))])
+            self.assertEqual(result, 1)
+            self.assertTrue(errors.strip())
+            save.assert_not_called()
+            refresh.assert_not_called()
 
     def test_macos_daemon_keeps_account_identity_loading_selection_and_local_logo(self):
         accounts.save_document({"version": 1, "accounts": [
