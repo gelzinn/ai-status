@@ -32,6 +32,13 @@ window behavior on a running desktop can differ from the fixtures.
 Provider logos, app artwork and fonts come from the bundled assets. See
 [artwork and licenses](../../packages/lib/assets/README.md).
 
+## Multiple bar items
+
+The [three-platform comparison](multiple-bar-items/README.md) pairs General
+settings with the resulting Linux bar, native macOS status item and Windows
+tray preview. Each uses the same three selected metrics, and the gallery records
+capture provenance and reproduction commands.
+
 ## Update flow previews
 
 The [complete update progress gallery](update-progress/README.md) includes the
