@@ -1419,6 +1419,46 @@ class SettingsScrollArea(QScrollArea):
             bar.setValue(bar.value() + bottom - maximum)
 
 
+class SettingsSelect(QComboBox):
+    """Keep the popup frame on the panel theme, including on Windows."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMaxVisibleItems(8)
+        # List mode opens below the control and scrolls at maxVisibleItems.
+        self.setStyleSheet("QComboBox { combobox-popup: 0; }")
+        view = self.view()
+        popup = view.window()
+        popup.setObjectName("settingsSelectPopup")
+        popup.setWindowFlag(Qt.WindowType.FramelessWindowHint)
+        popup.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint)
+        popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        # The view's background does not cover Qt's separate popup container.
+        popup.setStyleSheet("""
+            QFrame#settingsSelectPopup {
+                background: transparent; border: 1px solid transparent; padding: 4px;
+            }
+        """)
+        popup.installEventFilter(self)
+        view.setStyleSheet("""
+            QAbstractItemView { border: none; outline: none; }
+            QAbstractItemView::item { padding: 4px 3px; border-radius: 4px; }
+            QAbstractItemView::item:selected { background: #252525; color: #eeeeee; }
+            QAbstractItemView::item:hover:!selected { background: #1c1c1c; }
+        """)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.Paint and watched is self.view().window():
+            # Qt's private container can skip stylesheet background painting.
+            painter = QPainter(watched)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(QPen(QColor(SETTINGS_CONTROL_BORDER_COLOR), 1))
+            painter.setBrush(QColor("#111111"))
+            painter.drawRoundedRect(QRectF(watched.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 8, 8)
+            painter.end()
+            return True
+        return super().eventFilter(watched, event)
+
+
 class ProviderSettings(QWidget):
     saved = Signal()
     cancelled = Signal()
@@ -1506,7 +1546,7 @@ class ProviderSettings(QWidget):
         layout.addStretch()
         general = self.sections["general"].layout()
         general.addWidget(SettingsHeading("Active provider & limit", "Choose the account and limit shown in the bar."))
-        self.active = QComboBox()
+        self.active = SettingsSelect()
         self.active.setIconSize(QSize(16, 16))
         self.active.setAccessibleName("Active provider and limit")
         general.addWidget(self.active)
@@ -1547,7 +1587,7 @@ class ProviderSettings(QWidget):
         general.addWidget(self.startup_row)
         general.addSpacing(8)
         general.addWidget(SettingsHeading("Usage display"))
-        self.usage_display = QComboBox()
+        self.usage_display = SettingsSelect()
         self.usage_display.setAccessibleName("Usage display")
         for value, label in (("used", "Used"), ("remaining", "Remaining")):
             self.usage_display.addItem(label, value)
@@ -1564,7 +1604,7 @@ class ProviderSettings(QWidget):
             checkbox.setChecked(selected.get(key, default))
             self.display[key] = checkbox
             general.addWidget(checkbox)
-        self.icon_mode = QComboBox()
+        self.icon_mode = SettingsSelect()
         self.icon_mode.setAccessibleName("Bar icon")
         for value, label in (("off", "None"), ("bot", "Bot"), ("logo", "Provider logo")):
             self.icon_mode.addItem("Icon: " + label, value)
@@ -1772,7 +1812,7 @@ class ProviderSettings(QWidget):
         layout.addLayout(work_times)
         layout.addSpacing(8)
         layout.addWidget(SettingsHeading("Account & limit override"))
-        self.notification_rule_selector = QComboBox()
+        self.notification_rule_selector = SettingsSelect()
         self.notification_rule_selector.setAccessibleName("Notification account and limit")
         self.notification_rule_selector.currentIndexChanged.connect(self.notification_rule_target_changed)
         layout.addWidget(self.notification_rule_selector)
