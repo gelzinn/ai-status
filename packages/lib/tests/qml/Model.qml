@@ -14,6 +14,25 @@ Item {
     property string updateMessage: ""
     property string updateStage: "idle"
     property int updateStarts: 0
+    property bool resetApplying: false
+    property string resetError: ""
+    property string resetMessage: ""
+    property var resetTarget: null
+    property var resetRequests: []
+    property var resetAttempts: []
+    function resetAttempted(provider, idx, fingerprint) {
+        return resetAttempts.some(attempt => attempt.provider === provider && attempt.idx === idx && attempt.fingerprint === fingerprint)
+    }
+    function applyReset(request) {
+        if (resetApplying || !request || request.confirmed !== true) return false
+        resetRequests = resetRequests.concat([JSON.parse(JSON.stringify(request))])
+        resetTarget = {provider: request.provider, idx: request.idx}
+        resetAttempts = resetAttempts.concat([{provider: request.provider, idx: request.idx, fingerprint: request.fingerprint}])
+        resetApplying = true
+        resetError = ""
+        resetMessage = ""
+        return true
+    }
     function startUpdate() {
         if (updateRunning || !snapshot.update || !snapshot.update.canUpdate) return
         updateStarts += 1
@@ -37,6 +56,12 @@ Item {
         updateMessage = ""
         updateStage = "idle"
         updateStarts = 0
+        resetApplying = false
+        resetError = ""
+        resetMessage = ""
+        resetTarget = null
+        resetRequests = []
+        resetAttempts = []
         snapshot = {
             about: {name: "AI Status", version: "0.9.0", commit: "12345678", license: "MIT", author: "gelzin.com", github: "https://github.com/gelzinn/ai-status", documentation: "https://github.com/gelzinn/ai-status#readme", issues: "https://github.com/gelzinn/ai-status/issues/new"},
             loading: false,

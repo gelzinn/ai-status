@@ -93,6 +93,11 @@ struct CreditRow: Decodable {
     let expires: String
     let remaining: String
     let timezone: String
+    let actionId: String?
+}
+
+struct ResetAction: Decodable {
+    let fingerprint: String
 }
 
 struct ResetCredits: Decodable {
@@ -152,12 +157,13 @@ struct Provider: Decodable, Identifiable {
     let error: String
     let metrics: [Metric]
     let resetCredits: ResetCredits?
+    let resetAction: ResetAction?
     let monetaryCredits: [MonetaryCredit]
     var id: String { "\(connectionID):\(idx)" }
     enum CodingKeys: String, CodingKey {
         case connectionID = "id"
         case providerID = "providerId"
-        case idx, name, logoPath, loading, cached, error, metrics, resetCredits, monetaryCredits
+        case idx, name, logoPath, loading, cached, error, metrics, resetCredits, resetAction, monetaryCredits
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -171,6 +177,7 @@ struct Provider: Decodable, Identifiable {
         error = try values.decode(String.self, forKey: .error)
         metrics = try values.decode([Metric].self, forKey: .metrics)
         resetCredits = try values.decodeIfPresent(ResetCredits.self, forKey: .resetCredits)
+        resetAction = try values.decodeIfPresent(ResetAction.self, forKey: .resetAction)
         monetaryCredits = try values.decodeIfPresent([MonetaryCredit].self, forKey: .monetaryCredits) ?? []
     }
     func selection(_ metric: Metric) -> Selection {
@@ -558,6 +565,13 @@ final class Model: ObservableObject {
     @Published var updateStarting = false
     @Published var updateError = ""
     @Published var updateMessage = ""
+    @Published var resetApplying = false
+    @Published var resetError = ""
+    @Published var resetMessage = ""
+    @Published var resetProviderID: String?
+    @Published var resetFingerprint: String?
+    var cancelResetConfirmation: (() -> Bool)?
+    private var resetAttempts = Set<String>()
     @Published var updateProgress: UpdateProgress?
     @Published var updateManualVisible = false { didSet { changed?() } }
     @Published private(set) var updateOpenedInTerminal = false
@@ -793,7 +807,7 @@ final class Model: ObservableObject {
         case .update:
             if updateReleaseNotes != nil { return updateManualVisible ? 680 : 560 }
             return updateGuide.canUpdate ? (updateManualVisible ? 550 : 360) : 470
-        case .credits: return min(680, CGFloat(310 + (creditProvider?.resetCredits?.rows.count ?? 0) * 82))
+        case .credits: return min(680, CGFloat(350 + (creditProvider?.resetCredits?.rows.count ?? 0) * 72))
         case .cloudCredits: return 660
         case .usage:
             guard let providers = snapshot?.providers, !providers.isEmpty else { return 210 }
@@ -955,6 +969,47 @@ final class Model: ObservableObject {
         page = .credits(provider.id)
         changed?()
     }
+    func canApplyReset(_ provider: Provider, row: CreditRow) -> Bool {
+        guard !resetApplying, !updateStarting, snapshot?.loading == false, !provider.loading, !provider.cached,
+              provider.error.isEmpty, (provider.resetCredits?.available ?? 0) > 0,
+              row.count > 0, let credit = row.actionId, !credit.isEmpty,
+              let fingerprint = provider.resetAction?.fingerprint, !fingerprint.isEmpty else { return false }
+        return !resetAttempts.contains(provider.id + "\u{001f}" + fingerprint)
+    }
+    func applyReset(_ provider: Provider, row: CreditRow, fingerprint: String) {
+        guard !resetApplying else { return }
+        resetProviderID = provider.id
+        resetFingerprint = fingerprint
+        resetError = ""
+        resetMessage = ""
+        guard let current = snapshot?.providers.first(where: { $0.id == provider.id }),
+              current.resetAction?.fingerprint == fingerprint,
+              let credit = row.actionId,
+              let currentRow = current.resetCredits?.rows.first(where: { $0.actionId == credit }),
+              canApplyReset(current, row: currentRow) else {
+            resetError = "Reset details changed. Refresh usage and review the reset before confirming again."
+            changed?()
+            return
+        }
+        let payload: [String: Any] = ["provider": current.connectionID, "idx": current.idx,
+                                     "fingerprint": fingerprint, "credit": credit,
+                                     "requestId": UUID().uuidString, "confirmed": true]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8) else {
+            resetError = "Could not prepare this reset request."
+            return
+        }
+        resetApplying = true
+        resetAttempts.insert(current.id + "\u{001f}" + fingerprint)
+        enqueue(["apply-reset", "--request-json", json, "--frontend", "macos"]) { [weak self] error in
+            guard let self = self else { return }
+            self.resetApplying = false
+            self.resetError = error ?? ""
+            self.resetMessage = error == nil ? "Applied \(row.title) to \(provider.name). 1 reset credit used." : ""
+            self.changed?()
+        }
+        changed?()
+    }
     func showCloudCredits(_ provider: Provider, _ credit: MonetaryCredit) {
         guard snapshot?.providers.contains(where: {
             $0.id == provider.id && $0.monetaryCredits.contains(where: { $0.id == credit.id })
@@ -980,7 +1035,7 @@ final class Model: ObservableObject {
         changed?()
     }
     func startUpdate() {
-        guard !stopping, updateGuide.canUpdate, !updateStarting else { return }
+        guard !stopping, updateGuide.canUpdate, !updateStarting, !resetApplying else { return }
         updateStarting = true
         updateError = ""
         updateMessage = ""
@@ -1116,11 +1171,15 @@ final class Model: ObservableObject {
                     guard let self = self, self.actionProcess === process, !self.stopping else { return }
                     self.actionProcess = nil
                     if process.terminationStatus == 0 { output?(message ?? "") }
-                    completion(process.terminationStatus == 0 ? nil : (message?.isEmpty == false ? message : "Could not apply this change. Try again."))
+                    let fallback = arguments.first == "apply-reset"
+                        ? "Could not confirm whether the reset was applied. Refresh usage and check the account before applying another reset."
+                        : "Could not apply this change. Try again."
+                    completion(process.terminationStatus == 0 ? nil : (message?.isEmpty == false ? message : fallback))
                     self.drain()
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            let timeout: Double = arguments.first == "apply-reset" ? 40 : 15
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
                 guard let self = self, self.actionProcess === process, process.isRunning else { return }
                 Self.stopProcess(process)
             }
@@ -1909,8 +1968,265 @@ struct NotificationSettingsView: View {
     }
 }
 
+private struct ResetHoldSession {
+    enum Input: Equatable { case pointer, key(UInt16) }
+    static let duration: TimeInterval = 3
+    private(set) var input: Input?
+    private var startedAt: TimeInterval?
+
+    mutating func begin(_ input: Input, at now: TimeInterval) {
+        guard self.input == nil else { return }
+        self.input = input
+        startedAt = now
+    }
+
+    mutating func cancel() { input = nil; startedAt = nil }
+
+    // Returns full progress only once, while a continuous input is still active.
+    mutating func advance(at now: TimeInterval) -> Double? {
+        guard input != nil, let start = startedAt else { return nil }
+        let progress = min(1, max(0, (now - start) / Self.duration))
+        if progress == 1 { cancel() }
+        return progress
+    }
+}
+
+private final class ResetHoldInputView: NSView {
+    var enabled = false
+    var eligible: () -> Bool = { false }
+    var onProgress: (Double) -> Void = { _ in }
+    var onFocus: (Bool) -> Void = { _ in }
+    var onComplete: () -> Void = {}
+    private var session = ResetHoldSession()
+    private var timer: Timer?
+    private var observers: [NSObjectProtocol] = []
+    override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { enabled }
+
+    private var now: TimeInterval { Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000 }
+    private var active: Bool {
+        enabled && eligible() && !isHiddenOrHasHiddenAncestor && window?.isVisible == true
+            && window?.isKeyWindow == true && NSApp.isActive
+    }
+    private var pointerInside: Bool {
+        guard let window = window else { return false }
+        return visibleRect.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        cancelHold()
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        observers = []
+        guard let window = window else { return }
+        for name in [NSWindow.didResignKeyNotification, NSWindow.willCloseNotification] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                self?.cancelHold()
+            })
+        }
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification,
+                                                                object: nil, queue: .main) { [weak self] _ in
+            self?.cancelHold()
+        })
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        guard enabled else { return false }
+        onFocus(true)
+        return true
+    }
+    override func resignFirstResponder() -> Bool {
+        cancelHold()
+        onFocus(false)
+        return true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard active, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        window?.makeFirstResponder(self)
+        begin(.pointer)
+    }
+    override func mouseDragged(with event: NSEvent) {
+        if !bounds.contains(convert(event.locationInWindow, from: nil)) { cancelHold() }
+    }
+    override func mouseUp(with event: NSEvent) { cancelHold() }
+
+    override func keyDown(with event: NSEvent) {
+        guard [UInt16(49), 36, 76].contains(event.keyCode),
+              event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
+            cancelHold()
+            super.keyDown(with: event)
+            return
+        }
+        // Key repeat cannot restart an interrupted hold or inherit the Apply press.
+        guard !event.isARepeat, window?.firstResponder === self, active else { return }
+        begin(.key(event.keyCode))
+    }
+    override func keyUp(with event: NSEvent) {
+        if session.input == .key(event.keyCode) { cancelHold() }
+        else { super.keyUp(with: event) }
+    }
+    override func accessibilityPerformPress() -> Bool {
+        // Assistive activation focuses this control; confirmation still requires a hold.
+        guard enabled else { return false }
+        return window?.makeFirstResponder(self) == true
+    }
+
+    private func begin(_ input: ResetHoldSession.Input) {
+        guard active, session.input == nil else { return }
+        session.begin(input, at: now)
+        onProgress(0)
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.advance() }
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+    private func advance() {
+        guard active else { cancelHold(); return }
+        if session.input == .pointer && (NSEvent.pressedMouseButtons & 1 == 0 || !pointerInside) {
+            cancelHold()
+            return
+        }
+        if case .some(.key(let code)) = session.input {
+            guard window?.firstResponder === self, CGEventSource.keyState(.combinedSessionState, key: code) else {
+                cancelHold()
+                return
+            }
+        }
+        guard let progress = session.advance(at: now) else { cancelHold(); return }
+        onProgress(progress)
+        if progress == 1 {
+            timer?.invalidate()
+            timer = nil
+            // Check current account state again at the boundary, before consuming a credit.
+            if active { onComplete() }
+            else { cancelHold() }
+        }
+    }
+    func cancelHold(notifyProgress: Bool = true) {
+        let wasHolding = timer != nil || session.input != nil
+        timer?.invalidate()
+        timer = nil
+        session.cancel()
+        if notifyProgress && wasHolding { onProgress(0) }
+    }
+    deinit {
+        timer?.invalidate()
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+    }
+}
+
+private struct ResetHoldInput: NSViewRepresentable {
+    let enabled: Bool
+    let label: String
+    let eligible: () -> Bool
+    let onProgress: (Double) -> Void
+    let onFocus: (Bool) -> Void
+    let onComplete: () -> Void
+
+    func makeNSView(context: Context) -> ResetHoldInputView {
+        let view = ResetHoldInputView()
+        view.setAccessibilityElement(true)
+        view.setAccessibilityRole(.button)
+        return view
+    }
+    func updateNSView(_ view: ResetHoldInputView, context: Context) {
+        let becomingDisabled = view.enabled && !enabled
+        view.enabled = enabled
+        view.eligible = eligible
+        view.onProgress = onProgress
+        view.onFocus = onFocus
+        view.onComplete = onComplete
+        view.setAccessibilityLabel(label)
+        view.setAccessibilityHelp("Press and hold the mouse, Space or Enter for 3 seconds to apply. Releasing cancels.")
+        view.setAccessibilityEnabled(enabled)
+        if !enabled { view.cancelHold(notifyProgress: false) }
+        if becomingDisabled {
+            // Stop immediately, then update SwiftUI state after this render pass.
+            DispatchQueue.main.async { [weak view] in
+                guard let view = view, !view.enabled else { return }
+                view.onProgress(0)
+            }
+        }
+    }
+    static func dismantleNSView(_ view: ResetHoldInputView, coordinator: ()) {
+        view.onProgress = { _ in }
+        view.onFocus = { _ in }
+        view.cancelHold()
+    }
+}
+
+private struct ResetHoldButton: View {
+    let enabled: Bool
+    let label: String
+    let eligible: () -> Bool
+    let onComplete: () -> Void
+    @State private var progress = 0.0
+    @State private var focused = false
+    @State private var focusID = UUID().uuidString
+    @Environment(\.controlKeyboardFocusVisible) private var keyboardFocusVisible
+
+    var body: some View {
+        ZStack {
+            GeometryReader { geometry in
+                RoundedRectangle(cornerRadius: 6).fill(Palette.update.opacity(0.12))
+                Rectangle().fill(Palette.update.opacity(0.42)).frame(width: geometry.size.width * progress)
+            }.clipShape(RoundedRectangle(cornerRadius: 6)).allowsHitTesting(false).accessibilityHidden(true)
+            Text("Hold to apply · 3s").foregroundColor(Palette.update)
+                .font(.custom("GeistMono-Regular", size: 11)).allowsHitTesting(false).accessibilityHidden(true)
+            ResetHoldInput(enabled: enabled, label: label, eligible: eligible,
+                           onProgress: { progress = $0 }, onFocus: { focused = $0 }, onComplete: onComplete)
+        }.frame(maxWidth: .infinity).frame(height: 32)
+            .overlay(RoundedRectangle(cornerRadius: 6)
+                .stroke(focused && keyboardFocusVisible ? Palette.update.opacity(0.7) : Palette.updateBorder))
+            .background(PanelFocusGeometry(id: focusID, focused: focused))
+            .id(focusID).opacity(enabled ? 1 : 0.4)
+    }
+}
+
 struct ResetCreditsPage: View {
+    @ObservedObject var model: Model
     let provider: Provider
+    @State private var pendingReset: CreditRow?
+    @State private var pendingFingerprint: String?
+    @State private var pendingRowIndex: Int?
+
+    private func cancelConfirmation() {
+        pendingReset = nil
+        pendingFingerprint = nil
+        pendingRowIndex = nil
+    }
+
+    private func canConfirm(_ row: CreditRow, fingerprint: String) -> Bool {
+        guard pendingReset?.actionId == row.actionId, pendingFingerprint == fingerprint,
+              model.isPresented, model.page == .credits(provider.id),
+              let current = model.creditProvider, current.id == provider.id,
+              current.resetAction?.fingerprint == fingerprint,
+              let credit = row.actionId,
+              let currentRow = current.resetCredits?.rows.first(where: { $0.actionId == credit }) else { return false }
+        return model.canApplyReset(current, row: currentRow)
+    }
+
+    private func confirmation(_ row: CreditRow, fingerprint: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Apply \(row.title)?").foregroundColor(Palette.bright)
+            Text("Account: \(provider.name)\nUses 1 reset credit and restores eligible usage limits.")
+                .font(.custom("GeistMono-Regular", size: 11)).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                HoverButton(bordered: true, action: cancelConfirmation) { Text("Cancel") }
+                    .frame(width: 72).font(.custom("GeistMono-Regular", size: 11))
+                    .accessibilityLabel("Cancel reset confirmation")
+                ResetHoldButton(enabled: canConfirm(row, fingerprint: fingerprint),
+                                label: "Hold to apply \(row.title) to \(provider.name), consuming 1 reset credit",
+                                eligible: { canConfirm(row, fingerprint: fingerprint) }) {
+                    guard pendingReset?.actionId == row.actionId, pendingFingerprint == fingerprint,
+                          canConfirm(row, fingerprint: fingerprint) else { cancelConfirmation(); return }
+                    cancelConfirmation()
+                    model.applyReset(provider, row: row, fingerprint: fingerprint)
+                }
+            }
+        }.padding(12).background(Palette.update.opacity(0.035))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 8) {
@@ -1925,21 +2241,43 @@ struct ResetCreditsPage: View {
             }
             if let credits = provider.resetCredits, credits.available > 0 {
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 12) { Text("Reset type").frame(maxWidth: .infinity, alignment: .leading); Text("Expires").frame(maxWidth: .infinity, alignment: .leading) }
+                    HStack(spacing: 12) {
+                        Text("Reset type").frame(maxWidth: .infinity, alignment: .leading)
+                        Text("Expires").frame(maxWidth: .infinity, alignment: .leading)
+                        Color.clear.frame(width: 52, height: 1).accessibilityHidden(true)
+                    }
                         .font(.custom("GeistMono-Regular", size: 11)).padding(12)
                         .background(Palette.bright.opacity(0.04))
-                    ForEach(Array(credits.rows.enumerated()), id: \.offset) { _, row in
+                    ForEach(Array(credits.rows.enumerated()), id: \.offset) { index, row in
                         Divider()
-                        HStack(alignment: .top, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(row.title).foregroundColor(Palette.bright)
-                                Text("\(row.count) \(row.count == 1 ? "credit" : "credits")").font(.custom("GeistMono-Regular", size: 11))
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(row.expires).foregroundColor(Palette.bright)
-                                Text(row.remaining).font(.custom("GeistMono-Regular", size: 11))
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                        }.padding(12)
+                        if pendingRowIndex == index, let pending = pendingReset, let fingerprint = pendingFingerprint {
+                            confirmation(pending, fingerprint: fingerprint)
+                        } else {
+                            HStack(alignment: .center, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(row.title).foregroundColor(Palette.bright)
+                                    Text("\(row.count) \(row.count == 1 ? "credit" : "credits")").font(.custom("GeistMono-Regular", size: 11))
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(row.expires).foregroundColor(Palette.bright)
+                                    Text(row.remaining).font(.custom("GeistMono-Regular", size: 11))
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                                Group {
+                                    if row.actionId != nil, provider.resetAction != nil, !provider.cached, !provider.loading {
+                                        HoverButton(bordered: true, action: {
+                                            pendingReset = row
+                                            pendingFingerprint = provider.resetAction?.fingerprint
+                                            pendingRowIndex = index
+                                        }) {
+                                            Text("Apply").font(.custom("GeistMono-Regular", size: 11)).foregroundColor(Palette.bright)
+                                        }
+                                        .disabled(!model.canApplyReset(provider, row: row) || pendingReset != nil)
+                                        .help("Review this reset. Hold for 3 seconds to apply and consume 1 reset credit.")
+                                        .accessibilityLabel("Apply \(row.title) to \(provider.name)")
+                                    } else { Color.clear.frame(height: 1).accessibilityHidden(true) }
+                                }.frame(width: 52)
+                            }.padding(12)
+                        }
                     }
                     Divider()
                     HStack(spacing: 12) {
@@ -1955,7 +2293,52 @@ struct ResetCreditsPage: View {
                 }
                 if credits.undetailed > 0 { Text("Some reset details haven't been provided yet.").font(.custom("GeistMono-Regular", size: 11)) }
             } else { Text("No reset credits available.") }
+
+            if model.resetProviderID == provider.id {
+                if model.resetApplying { Text("Applying reset…").foregroundColor(Palette.bright) }
+                if !model.resetError.isEmpty {
+                    Text(model.resetError).foregroundColor(.orange).fixedSize(horizontal: false, vertical: true)
+                    Text("Refresh usage and check the account before applying another reset.")
+                        .font(.custom("GeistMono-Regular", size: 11)).fixedSize(horizontal: false, vertical: true)
+                }
+                if !model.resetMessage.isEmpty {
+                    Text(model.resetMessage).foregroundColor(Palette.bright).fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 8) {
+                        let refreshed = !provider.loading && !provider.cached && model.snapshot?.loading == false
+                            && provider.resetAction?.fingerprint != model.resetFingerprint
+                        Text(refreshed ? "Latest usage limits" : "Refreshing usage limits…")
+                            .foregroundColor(Palette.bright)
+                        if refreshed {
+                            ForEach(provider.metrics) { metric in
+                                HStack(spacing: 12) {
+                                    Text(metric.name)
+                                    Spacer()
+                                    Text(metric.displayValue).foregroundColor(Palette.bright)
+                                }.accessibilityElement(children: .combine)
+                            }
+                        }
+                    }.font(.custom("GeistMono-Regular", size: 11))
+                }
+            }
         }
+        .onChange(of: provider.id) { _ in cancelConfirmation() }
+        .onChange(of: provider.resetAction?.fingerprint) { _ in cancelConfirmation() }
+        .onChange(of: provider.loading) { loading in if loading { cancelConfirmation() } }
+        .onChange(of: provider.cached) { cached in if cached { cancelConfirmation() } }
+        .onChange(of: provider.error) { error in if !error.isEmpty { cancelConfirmation() } }
+        .onChange(of: model.snapshot?.loading) { loading in if loading == true { cancelConfirmation() } }
+        .onChange(of: model.updateStarting) { starting in if starting { cancelConfirmation() } }
+        .onChange(of: model.resetApplying) { applying in if applying { cancelConfirmation() } }
+        .onChange(of: model.page) { _ in cancelConfirmation() }
+        .onChange(of: model.isPresented) { presented in if !presented { cancelConfirmation() } }
+        .onAppear {
+            model.cancelResetConfirmation = {
+                guard pendingReset != nil else { return false }
+                cancelConfirmation()
+                return true
+            }
+        }
+        .onDisappear { cancelConfirmation(); model.cancelResetConfirmation = nil }
     }
 }
 
@@ -2441,7 +2824,7 @@ struct PanelScrollContent: View {
                         case .usage: UsagePage(model: model)
                         case .settings: SettingsPage(model: model)
                         case .update: UpdatePage(model: model)
-                        case .credits: if let provider = model.creditProvider { ResetCreditsPage(provider: provider) }
+                        case .credits: if let provider = model.creditProvider { ResetCreditsPage(model: model, provider: provider) }
                         case .cloudCredits:
                             if let provider = model.cloudCreditProvider, let credit = model.cloudCredit {
                                 CloudCreditsPage(provider: provider, credit: credit)
@@ -2800,6 +3183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         // before the panel's Back/close shortcuts see the same event.
         guard popover.isShown, !menuTracking.isTracking else { return event }
         if event.keyCode == 53 {
+            if model.cancelResetConfirmation?() == true { return nil }
             if model.page == .usage { popover.performClose(nil) } else { model.back() }
             return nil
         }
@@ -2934,6 +3318,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
          "version":{"current":"0.10.0","latest":null,"has_update":false}}
         """#
         try checkResources()
+        try smokeResetHold()
         try smokeFocusInput()
         try smokeMenuTracking()
         try smokeSettingsSelects(sample: sample)
@@ -3853,6 +4238,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         guard model.draft.order.first == "account:work", model.draft.enabled == Set(["account:work"]),
               model.settingsValid, model.draft.selected.provider == "account:work" else {
             throw AppError.message("Reordering or disabling one account changed another account.")
+        }
+    }
+
+    private static func smokeResetHold() throws {
+        var hold = ResetHoldSession()
+        hold.begin(.pointer, at: 10)
+        guard hold.advance(at: 11.5) == 0.5 else {
+            throw AppError.message("Reset hold did not report half progress at 1.5 seconds.")
+        }
+        hold.cancel()
+        guard hold.advance(at: 13) == nil else {
+            throw AppError.message("Releasing a reset hold allowed it to complete.")
+        }
+        hold.begin(.key(49), at: 20)
+        hold.begin(.key(49), at: 21)
+        guard hold.advance(at: 22.999).map({ $0 < 1 }) == true,
+              hold.advance(at: 23) == 1, hold.advance(at: 24) == nil else {
+            throw AppError.message("Reset hold must complete once after 3 continuous seconds.")
+        }
+        hold.begin(.pointer, at: 30)
+        _ = hold.advance(at: 32)
+        hold.cancel()
+        hold.begin(.pointer, at: 40)
+        guard hold.advance(at: 40) == 0, hold.advance(at: 42).map({ $0 < 1 }) == true else {
+            throw AppError.message("An interrupted reset hold carried progress into the next press.")
+        }
+        hold.cancel()
+        guard hold.advance(at: 50) == nil else {
+            throw AppError.message("Canceling confirmation left a reset hold armed.")
         }
     }
 

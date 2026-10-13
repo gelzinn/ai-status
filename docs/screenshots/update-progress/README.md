@@ -121,4 +121,3 @@ On macOS, build the app as described in
 `update-*.png` files here with the `macos-` prefix. The local CLI fixtures validate
 live progress, split lines, large stdout/stderr output, final output without a
 newline, error and retry; they never execute an installer.
-

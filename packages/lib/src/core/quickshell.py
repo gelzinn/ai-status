@@ -9,7 +9,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import about, config, fetch, logos, paths, render, state, reset_credits, updates, notifications, usage_credits
+from . import about, config, fetch, logos, paths, render, state, reset_credits, reset_actions, updates, notifications, usage_credits
 
 
 class _PlainText(HTMLParser):
@@ -210,6 +210,7 @@ def build_snapshot(data, selected=None, pending=None, logo_path="", logo_paths=N
                 "error": plain_text(entry.get("_error") or ("No usage data available" if not metrics and name not in pending else "")),
                 "metrics": metrics,
                 "resetCredits": reset_credits.presentation(entry.get("reset_credits")),
+                "resetAction": reset_actions.presentation(entry) if name not in pending else None,
                 "monetaryCredits": usage_credits.presentation(entry),
             })
     current = next((p for p in providers if p["id"] == selected.get("provider") and p["idx"] == selected.get("idx", 0)), None)

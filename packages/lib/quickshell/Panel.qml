@@ -74,6 +74,7 @@ Ui.Panel {
     }
 
     function goBack() {
+        if (resetProvider && credits.cancelConfirmation()) return
         showUsage()
     }
 
@@ -178,7 +179,12 @@ Ui.Panel {
     onCreditEntryChanged: if (creditSelection && !creditEntry) Qt.callLater(() => {
         if (creditSelection && !creditEntry) showUsage()
     })
-    onOpenedChanged: if (!opened && !Plugin.Model.settingsSaving) { configurationPage = false; updatePage = false; resetProvider = null; creditSelection = null }
+    onOpenedChanged: {
+        if (!opened) {
+            credits.confirmation = null
+            if (!Plugin.Model.settingsSaving) { configurationPage = false; updatePage = false; resetProvider = null; creditSelection = null }
+        }
+    }
 
     Connections {
         target: keyCatcher.Window.window
@@ -211,7 +217,10 @@ Ui.Panel {
             }
             onTabRequested: direction => {
                 if (root.configurationPage) settingsNavigation.focusCurrentControl()
-                else if (root.resetProvider || root.creditSelection) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
+                else if (root.resetProvider) {
+                    if (!credits.focusFirstControl(direction)) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
+                }
+                else if (root.creditSelection) backButton.focusFromKeyboard(direction > 0 ? Qt.TabFocusReason : Qt.BacktabFocusReason)
                 else if (root.updatePage) updates.focusFirstControl()
                 else root.switchPanel(direction)
             }
@@ -463,6 +472,7 @@ Ui.Panel {
                         provider: root.resetEntry
                         foreground: root.barForeground
                         fontFamily: root.panelFont
+                        onBackFocusRequested: backButton.focusProgrammatically()
                     }
                     Plugin.UsageCreditsPage {
                         objectName: "panel-usage-credits-page"

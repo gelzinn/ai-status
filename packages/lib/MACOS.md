@@ -80,9 +80,17 @@ Providers without usable metrics remain available in Settings.
 
 When Claude or Codex reports available manual resets, **Reset credits: N
 available** opens a separate details page. It shows the credit type, count,
-expiry, remaining time and time zone when available. Redeem credits through
-the provider's own app; AI Status displays the inventory. Back returns to
-the usage panel without changing the selected limit.
+expiry, remaining time and time zone when available. **Apply** in the small
+third column replaces that row with confirmation of the account, reset type
+and consumption of **one reset credit**. Hold the confirmation button for
+**3 seconds** while its background fills. Releasing early, leaving the button
+or losing focus resets the progress; Cancel, Back or Escape dismisses
+confirmation without sending a reset.
+Details without a usable credit ID or verifiable account remain read-only.
+Usage and credit inventory refresh after the response. An uncertain result is
+never retried automatically; refresh and check the account before confirming
+another reset. Back returns to the usage panel without changing the selected
+limit. See [provider eligibility](PROVIDERS.md#claude).
 
 ## Settings and About
 

@@ -11,7 +11,7 @@ from core import config, paths, state
 
 try:
     from PySide6.QtCore import QModelIndex
-    from PySide6.QtGui import QColor, QPixmap, QWheelEvent
+    from PySide6.QtGui import QColor, QFocusEvent, QKeyEvent, QMouseEvent, QPixmap, QWheelEvent
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QLabel
     from core import tray
@@ -1574,14 +1574,22 @@ class DesktopTests(IsolatedState):
             {"type": "rolling", "percentage": 80}, {"type": "weekly", "percentage": 20}]}])
         self.dashboard.on_result("copilot", [{"provider": "Copilot", "metrics": [
             {"type": "monthly", "percentage": 7}]}])
+        bars = [row.bar for row in self.dashboard.metric_buttons]
+        # Keep the real scheduling, but advance animation explicitly below.
+        # A slow runner may expire these timers while processing the first show.
+        for bar in bars:
+            bar.start_delay.timeout.disconnect(bar.start_fill)
         self.dashboard.show()
         self.app.processEvents()
-        bar = self.dashboard.metric_buttons[0].bar
+        for bar in bars:
+            bar.start_delay.stop()
+            bar.start_delay.timeout.connect(bar.start_fill)
+        bar = bars[0]
         self.assertEqual(bar.displayed, 0)
-        self.assertLess(bar.start_delay.remainingTime(), self.dashboard.metric_buttons[2].bar.start_delay.remainingTime())
+        self.assertLess(bar.start_delay.interval(), bars[2].start_delay.interval())
         initial = bar.grab().toImage()
-        bar.start_delay.stop()
         bar.start_fill()
+        bar.fill.pause()
         bar.fill.setCurrentTime(500)
         self.assertGreater(bar.displayed, 0)
         self.assertLess(bar.displayed, 80)
@@ -1740,6 +1748,415 @@ class DesktopTests(IsolatedState):
         self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
         self.dashboard.show_reset_credits(("codex", 0))
         self.assertIsNone(self.dashboard.reset_provider)
+
+    def prepare_reset_action(self):
+        cache_directory = patch.object(paths, "CACHE_DIR", self.root / "reset-cache")
+        cache_directory.start()
+        self.addCleanup(cache_directory.stop)
+        mutation = patch.object(tray.reset_actions, "apply", return_value="Reset applied. Refreshing account usage…")
+        apply_reset = mutation.start()
+        self.addCleanup(mutation.stop)
+        entry = {
+            "provider": "Codex (Pro)", "_dir": "codex", "_idx": 0,
+            "_fingerprint": "a" * 64, "_observed_at": time.time(),
+            "metrics": [{"type": "weekly", "percentage": 23}],
+            "reset_credits": {"available": 2, "credits": [
+                {"title": "Full reset", "count": 2, "expires_at": "2099-10-22T16:00:00Z", "action_id": "b" * 64}
+            ]},
+        }
+        self.dashboard.on_result("codex", [entry])
+        self.dashboard.show_reset_credits(("codex", 0))
+        view = self.dashboard.credits_view
+        # Capture the UI contract without starting a thread, CLI or real mutation.
+        view.reset_requested.disconnect(self.dashboard.apply_reset)
+        requested = MagicMock()
+        view.reset_requested.connect(requested)
+        return entry, view, requested, apply_reset
+
+    def finish_reset_hold(self, view):
+        self.dashboard.show()
+        self.app.processEvents()
+        with patch.object(tray.time, "monotonic", return_value=100.0) as clock:
+            QTest.mousePress(view.confirm_button, tray.Qt.MouseButton.LeftButton,
+                             pos=view.confirm_button.rect().center())
+            clock.return_value = 103.0
+            view.confirm_button.advance_hold()
+            QTest.mouseRelease(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+
+    def test_update_and_reset_never_start_workers_while_the_other_is_running(self):
+        _, view, requested, apply_reset = self.prepare_reset_action()
+        payload = dict(view.action, credit="b" * 64, confirmed=True)
+        self.dashboard.updating = True
+        with patch.object(tray, "ResetWorker") as worker:
+            self.dashboard.apply_reset(payload)
+        worker.assert_not_called()
+        self.assertFalse(self.dashboard.reset_applying)
+        self.dashboard.draw()
+        self.assertTrue(all(button.isHidden() for button in view.action_buttons))
+        self.dashboard.updating = False
+        self.dashboard.reset_applying = True
+        with patch.object(tray, "UpdateWorker") as worker:
+            self.dashboard.start_update()
+        worker.assert_not_called()
+        self.assertFalse(self.dashboard.updating)
+        self.dashboard.reset_applying = False
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_apply_reset_only_opens_confirmation_and_cancel_never_emits(self):
+        _, view, requested, apply_reset = self.prepare_reset_action()
+        button = view.action_buttons[0]
+        self.assertFalse(button.isHidden())
+        self.assertTrue(button.isEnabled())
+        self.assertTrue(view.confirmation.isHidden())
+        button.click()
+        self.assertFalse(view.confirmation.isHidden())
+        self.assertIn("Full reset", view.confirmation_text.text())
+        self.assertIn("Codex (Pro)", view.confirmation_text.text())
+        self.assertIn("1 reset credit", view.confirmation_text.text())
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+        view.cancel_button.click()
+        self.assertIsNone(view.target)
+        self.assertTrue(view.confirmation.isHidden())
+        view.confirm_button.click()
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_reset_apply_column_replaces_only_its_row_and_cancel_restores_focus(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        entry["reset_credits"]["credits"].append({
+            "title": "Weekly reset", "count": 1, "expires_at": "2099-10-29T16:00:00Z", "action_id": "c" * 64,
+        })
+        entry["reset_credits"]["available"] = 3
+        view.update_provider("codex", entry, "Codex (Pro)")
+        self.dashboard.show()
+        self.app.processEvents()
+        header = view.table.findChild(tray.QWidget, "creditTableHeader")
+        self.assertEqual(header.layout().count(), 3)
+        self.assertEqual(header.layout().itemAt(2).widget().width(), 64)
+        first, second = view.row_widgets
+        self.assertEqual(first.contents.layout().count(), 3)
+        self.assertEqual(first.action_button.text(), "Apply")
+        self.assertEqual(first.action_button.width(), 64)
+        QTest.mouseClick(first.action_button, tray.Qt.MouseButton.LeftButton)
+        self.assertIs(first.pages.currentWidget(), view.confirmation)
+        self.assertTrue(first.contents.isHidden())
+        self.assertIs(second.pages.currentWidget(), second.contents)
+        self.assertFalse(second.contents.isHidden())
+        self.assertIsNone(view.confirm_button.started_at)
+        self.assertTrue(view.cancel_button.hasFocus())
+        view.cancel_button.click()
+        self.assertIs(first.pages.currentWidget(), first.contents)
+        self.assertTrue(first.action_button.hasFocus())
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_instant_reset_confirmation_activation_never_emits(self):
+        _, view, requested, apply_reset = self.prepare_reset_action()
+        self.dashboard.show()
+        self.app.processEvents()
+        view.action_buttons[0].click()
+        view.confirm_button.click()
+        view.confirm_button.clicked.emit()
+        view.confirm_button.hold_completed.emit()
+        view.confirm_reset()
+        with patch.object(tray.time, "monotonic", return_value=100.0):
+            QTest.mouseClick(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+            for key in (tray.Qt.Key.Key_Space, tray.Qt.Key.Key_Return, tray.Qt.Key.Key_Enter):
+                QTest.keyClick(view.confirm_button, key)
+        self.assertIsNotNone(view.target)
+        self.assertEqual(view.confirm_button.progress, 0.0)
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_short_reset_holds_discard_progress_and_never_emit(self):
+        _, view, requested, apply_reset = self.prepare_reset_action()
+        self.dashboard.show()
+        self.app.processEvents()
+        view.action_buttons[0].click()
+        with patch.object(tray.time, "monotonic", return_value=100.0) as clock:
+            QTest.mousePress(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+            clock.return_value = 102.999
+            view.confirm_button.advance_hold()
+            self.assertGreater(view.confirm_button.progress, 0.99)
+            self.assertLess(view.confirm_button.progress, 1.0)
+            requested.assert_not_called()
+            QTest.mouseRelease(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+            self.assertEqual(view.confirm_button.progress, 0.0)
+            clock.return_value = 110.0
+            view.confirm_button.advance_hold()
+            QTest.mousePress(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+            clock.return_value = 112.9
+            view.confirm_button.advance_hold()
+            QTest.mouseRelease(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+        self.assertIsNotNone(view.target)
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_three_second_reset_hold_emits_once_and_worker_calls_mocked_mutation_once(self):
+        _, view, requested, apply_reset = self.prepare_reset_action()
+        token = view.action["fingerprint"]
+        view.action_buttons[0].click()
+        self.finish_reset_hold(view)
+        requested.assert_called_once_with({
+            "provider": "codex", "idx": 0, "fingerprint": token,
+            "credit": "b" * 64, "confirmed": True,
+        })
+        self.assertTrue(view.confirmation.isHidden())
+        self.assertIsNone(view.target)
+        view.confirm_button.click()
+        view.confirm_reset()
+        view.confirm_button.advance_hold()
+        view.action_buttons[0].click()
+        self.assertEqual(requested.call_count, 1)
+        apply_reset.assert_not_called()
+        worker = tray.ResetWorker(requested.call_args.args[0])
+        self.addCleanup(worker.deleteLater)
+        finished = MagicMock()
+        worker.finished.connect(finished)
+        worker.work()
+        apply_reset.assert_called_once_with(requested.call_args.args[0])
+        finished.assert_called_once_with("Reset applied. Refreshing account usage…", True)
+
+    def test_reset_keyboard_holds_require_three_seconds_and_ignore_auto_repeat(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        self.dashboard.show()
+        self.app.processEvents()
+        for index, key in enumerate((tray.Qt.Key.Key_Space, tray.Qt.Key.Key_Return, tray.Qt.Key.Key_Enter)):
+            with self.subTest(key=key):
+                fresh = dict(entry, _fingerprint=f"{index + 1:064x}", _observed_at=time.time())
+                view.update_provider("codex", fresh, "Codex (Pro)")
+                view.action_buttons[0].click()
+                view.confirm_button.setFocus()
+                requested.reset_mock()
+                with patch.object(tray.time, "monotonic", return_value=100.0) as clock:
+                    repeat = QKeyEvent(tray.QEvent.Type.KeyPress, key, tray.Qt.KeyboardModifier.NoModifier, "", True)
+                    self.app.sendEvent(view.confirm_button, repeat)
+                    self.assertIsNone(view.confirm_button.started_at)
+                    QTest.keyPress(view.confirm_button, key)
+                    clock.return_value = 102.999
+                    view.confirm_button.advance_hold()
+                    requested.assert_not_called()
+                    self.app.sendEvent(view.confirm_button, repeat)
+                    repeated_release = QKeyEvent(tray.QEvent.Type.KeyRelease, key, tray.Qt.KeyboardModifier.NoModifier, "", True)
+                    self.app.sendEvent(view.confirm_button, repeated_release)
+                    self.assertEqual(view.confirm_button.started_at, 100.0)
+                    clock.return_value = 103.0
+                    view.confirm_button.advance_hold()
+                    requested.assert_called_once()
+                    self.app.sendEvent(view.confirm_button, repeat)
+                    view.confirm_button.advance_hold()
+                    QTest.keyRelease(view.confirm_button, key)
+                    self.assertEqual(requested.call_count, 1)
+        apply_reset.assert_not_called()
+
+    def test_reset_holds_cancel_on_leave_focus_loss_window_deactivation_and_cancel(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        for reason in ("cancel", "leave", "move", "focus", "window"):
+            with self.subTest(reason=reason):
+                view.update_provider("codex", entry, "Codex (Pro)")
+                self.dashboard.show()
+                self.app.processEvents()
+                view.action_buttons[0].click()
+                with patch.object(tray.time, "monotonic", return_value=100.0) as clock:
+                    QTest.mousePress(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+                    clock.return_value = 101.0
+                    view.confirm_button.advance_hold()
+                    if reason == "cancel":
+                        view.cancel_button.click()
+                    elif reason == "leave":
+                        self.app.sendEvent(view.confirm_button, tray.QEvent(tray.QEvent.Type.Leave))
+                    elif reason == "move":
+                        self.app.sendEvent(view.confirm_button, QMouseEvent(
+                            tray.QEvent.Type.MouseMove, tray.QPointF(-5, -5),
+                            tray.Qt.MouseButton.NoButton, tray.Qt.MouseButton.LeftButton,
+                            tray.Qt.KeyboardModifier.NoModifier))
+                    elif reason == "focus":
+                        self.app.sendEvent(view.confirm_button, QFocusEvent(tray.QEvent.Type.FocusOut))
+                    else:
+                        view.confirm_button.eventFilter(self.dashboard, tray.QEvent(tray.QEvent.Type.WindowDeactivate))
+                    self.assertEqual(view.confirm_button.progress, 0.0)
+                    self.assertFalse(view.confirm_button.timer.isActive())
+                    clock.return_value = 105.0
+                    view.confirm_button.advance_hold()
+                    QTest.mouseRelease(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+                view.cancel_confirmation()
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_reset_holds_cancel_when_snapshot_account_or_loading_changes(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        changes = [
+            ("codex", {"_fingerprint": "c" * 64}),
+            ("account:other", {"_connection_id": "account:other"}),
+            ("codex", {"_idx": 1}),
+            ("codex", {"_loading": True}),
+            ("codex", {"_cached": True}),
+            ("codex", {"_observed_at": time.time() - tray.reset_actions.MAX_SNAPSHOT_AGE - 1}),
+        ]
+        for name, changed in changes:
+            with self.subTest(name=name, changed=changed):
+                view.update_provider("codex", entry, "Codex (Pro)")
+                self.dashboard.show()
+                self.app.processEvents()
+                view.action_buttons[0].click()
+                with patch.object(tray.time, "monotonic", return_value=100.0) as clock:
+                    QTest.mousePress(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+                    clock.return_value = 101.0
+                    view.confirm_button.advance_hold()
+                    view.update_provider(name, dict(entry, **changed), "Codex (Pro)")
+                    self.assertIsNone(view.target)
+                    self.assertTrue(view.confirmation.isHidden())
+                    clock.return_value = 105.0
+                    view.confirm_button.advance_hold()
+                    QTest.mouseRelease(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_reset_hold_rechecks_snapshot_freshness_before_emitting(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        self.dashboard.show()
+        self.app.processEvents()
+        view.action_buttons[0].click()
+        with patch.object(tray.time, "monotonic", return_value=100.0) as clock:
+            QTest.mousePress(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+            clock.return_value = 103.0
+            with patch.object(tray.time, "time", return_value=entry["_observed_at"] + tray.reset_actions.MAX_SNAPSHOT_AGE + 1):
+                view.confirm_button.advance_hold()
+            QTest.mouseRelease(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+        self.assertEqual(view.confirm_button.progress, 0.0)
+        self.assertFalse(view.confirm_button.timer.isActive())
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_reset_actions_are_hidden_for_cached_pending_or_unidentified_credits(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        entry["_cached"] = True
+        self.dashboard.draw()
+        self.assertTrue(all(button.isHidden() for button in view.action_buttons))
+        view.action_buttons[0].click()
+        self.assertIsNone(view.target)
+        entry.pop("_cached")
+        self.dashboard.pending = {"copilot"}
+        self.dashboard.busy = True
+        self.dashboard.draw()
+        self.assertTrue(all(button.isHidden() for button in view.action_buttons))
+        self.assertIsNone(view.action)
+        self.dashboard.pending.clear()
+        self.dashboard.busy = False
+        entry["reset_credits"]["credits"][0].pop("action_id")
+        self.dashboard.draw()
+        self.assertEqual(view.action_buttons, [])
+        self.assertIsNone(view.action)
+        self.assertFalse(view.table.isHidden())
+        self.assertEqual(view.available.text(), "2")
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_reset_request_keeps_custom_connection_identity(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        entry = dict(entry, _connection_id="account:work", _account_label="Work")
+        view.update_provider("account:work", entry, "Codex (Pro) · Work")
+        token = view.action["fingerprint"]
+        view.action_buttons[0].click()
+        self.assertIn("Codex (Pro) · Work", view.confirmation_text.text())
+        self.finish_reset_hold(view)
+        requested.assert_called_once_with({
+            "provider": "account:work", "idx": 0, "fingerprint": token,
+            "credit": "b" * 64, "confirmed": True,
+        })
+        apply_reset.assert_not_called()
+
+    def test_reset_actions_require_recent_identified_observation(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        entry.pop("_fingerprint")
+        self.dashboard.draw()
+        self.assertTrue(all(button.isHidden() for button in view.action_buttons))
+        entry["_fingerprint"] = "a" * 64
+        entry["_observed_at"] = time.time() - tray.reset_actions.MAX_SNAPSHOT_AGE - 1
+        self.dashboard.draw()
+        self.assertTrue(all(button.isHidden() for button in view.action_buttons))
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_reset_token_already_requested_stays_blocked_until_fresh_observation(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        token = view.action["fingerprint"]
+        view.attempts.add(token)
+        self.dashboard.draw()
+        self.assertFalse(view.action_buttons[0].isEnabled())
+        view.action_buttons[0].click()
+        view.begin_reset(tray.reset_credits.available_credits(entry["reset_credits"])["credits"][0])
+        self.assertIsNone(view.target)
+        entry["_fingerprint"] = "c" * 64
+        entry["_observed_at"] = time.time()
+        self.dashboard.draw()
+        self.assertNotEqual(view.action["fingerprint"], token)
+        self.assertTrue(view.action_buttons[0].isEnabled())
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_escape_cancels_reset_confirmation_before_leaving_submenu(self):
+        _, view, requested, apply_reset = self.prepare_reset_action()
+        self.dashboard.show()
+        self.app.processEvents()
+        view.action_buttons[0].click()
+        self.app.processEvents()
+        self.assertTrue(view.cancel_button.hasFocus())
+        with patch.object(tray.time, "monotonic", return_value=100.0) as clock:
+            QTest.mousePress(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+            clock.return_value = 101.0
+            view.confirm_button.advance_hold()
+            QTest.keyClick(view.confirm_button, tray.Qt.Key.Key_Escape)
+            clock.return_value = 105.0
+            view.confirm_button.advance_hold()
+            QTest.mouseRelease(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+        self.assertTrue(view.confirmation.isHidden())
+        self.assertIsNone(view.target)
+        self.assertEqual(self.dashboard.reset_provider, ("codex", 0))
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.credits_scroll)
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+        QTest.keyClick(self.dashboard.back_button, tray.Qt.Key.Key_Escape)
+        self.assertIsNone(self.dashboard.reset_provider)
+        self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_hiding_dashboard_discards_unconfirmed_reset(self):
+        _, view, requested, apply_reset = self.prepare_reset_action()
+        self.dashboard.show()
+        self.app.processEvents()
+        view.action_buttons[0].click()
+        self.assertFalse(view.confirmation.isHidden())
+        with patch.object(tray.time, "monotonic", return_value=100.0) as clock:
+            QTest.mousePress(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+            clock.return_value = 101.0
+            view.confirm_button.advance_hold()
+            self.dashboard.hide()
+            clock.return_value = 105.0
+            view.confirm_button.advance_hold()
+            QTest.mouseRelease(view.confirm_button, tray.Qt.MouseButton.LeftButton)
+        self.assertTrue(view.confirmation.isHidden())
+        self.assertIsNone(view.target)
+        view.confirm_reset()
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
+
+    def test_reset_result_status_is_visible_only_for_its_account(self):
+        entry, view, requested, apply_reset = self.prepare_reset_action()
+        message = "Reset applied. Refreshing account usage…"
+        view.show_action_status(message, provider=("codex", 0))
+        self.assertFalse(view.action_status.isHidden())
+        work = dict(entry, _connection_id="account:work", _account_label="Work")
+        view.update_provider("account:work", work, "Codex (Pro) · Work")
+        self.assertTrue(view.action_status.isHidden())
+        view.update_provider("codex", entry, "Codex (Pro)")
+        self.assertFalse(view.action_status.isHidden())
+        self.assertEqual(view.action_status.text(), message)
+        requested.assert_not_called()
+        apply_reset.assert_not_called()
 
     def test_many_reset_rows_scroll_without_changing_tray_selection(self):
         self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "metrics": [

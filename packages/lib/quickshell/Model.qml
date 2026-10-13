@@ -17,6 +17,11 @@ Item {
     property string updateError: ""
     property string updateMessage: ""
     property string updateStage: "idle"
+    property bool resetApplying: false
+    property string resetError: ""
+    property string resetMessage: ""
+    property var resetTarget: null
+    property var resetAttempts: []
     signal settingsSaved()
     signal notificationActivated()
     property var consumerWidgets: []
@@ -42,6 +47,7 @@ Item {
             actions = []
             actionProcess.running = false
             settingsProcess.running = false
+            // An explicitly confirmed reset must finish even if its widget closes.
         }
     }
 
@@ -86,7 +92,7 @@ Item {
     }
 
     function startUpdate() {
-        if (updateRunning || consumers === 0 || !snapshot.update || !snapshot.update.canUpdate) return
+        if (updateRunning || resetApplying || consumers === 0 || !snapshot.update || !snapshot.update.canUpdate) return
         updateError = ""
         updateMessage = ""
         updateStage = "checking"
@@ -109,6 +115,31 @@ Item {
         } catch (error) {
             // A malformed line cannot claim that the terminal opened.
         }
+    }
+
+    function resetAttempted(provider, idx, fingerprint) {
+        return resetAttempts.some(attempt => attempt.provider === provider && attempt.idx === idx && attempt.fingerprint === fingerprint)
+    }
+
+    function applyReset(request) {
+        if (resetApplying || updateRunning || consumers === 0 || !request || request.confirmed !== true) return false
+        const provider = snapshot.providers.find(entry => entry.id === request.provider && entry.idx === request.idx)
+        const eligible = provider && !provider.cached && !provider.loading && provider.resetAction
+            && provider.resetAction.fingerprint === request.fingerprint
+            && !resetAttempted(request.provider, request.idx, request.fingerprint)
+            && provider.resetCredits && (provider.resetCredits.rows || []).some(row => row.actionId === request.credit)
+        resetTarget = {provider: request.provider, idx: request.idx}
+        resetMessage = ""
+        resetError = ""
+        if (!eligible) {
+            resetError = "Reset details changed. Refresh and review them before applying a reset."
+            return false
+        }
+        // An uncertain result must be reviewed with fresh data, never resent automatically.
+        resetAttempts = resetAttempts.concat([{provider: request.provider, idx: request.idx, fingerprint: request.fingerprint}])
+        resetApplying = true
+        resetProcess.exec(["python3", cliPath, "apply-reset", "--request-json", JSON.stringify(request), "--frontend", "quickshell"])
+        return true
     }
 
     function drain() {
@@ -180,6 +211,29 @@ Item {
                 root.updateRunning = false
                 root.updateStage = "error"
                 root.updateError = root.updateError || "Could not start the updater. Use the terminal command."
+            }
+        })
+    }
+
+    Process {
+        id: resetProcess
+        stdout: SplitParser { onRead: data => root.resetMessage = data }
+        stderr: SplitParser { onRead: data => root.resetError = data }
+        onExited: (exitCode, exitStatus) => {
+            root.resetApplying = false
+            if (exitCode === 0 && exitStatus === 0) {
+                root.resetError = ""
+                root.resetMessage = root.resetMessage || "Reset applied. Usage is refreshing."
+            } else {
+                root.resetMessage = ""
+                root.resetError = root.resetError || "Could not confirm the reset result. Refresh and check your account before applying another reset."
+            }
+        }
+        onRunningChanged: if (!running) Qt.callLater(() => {
+            if (root.resetApplying) {
+                root.resetApplying = false
+                root.resetMessage = ""
+                root.resetError = root.resetError || "Could not start the reset action. Refresh and review your account before applying a reset."
             }
         })
     }

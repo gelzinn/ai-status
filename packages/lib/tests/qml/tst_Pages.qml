@@ -749,6 +749,9 @@ Item {
             verify(findChild(header, "reset-available") === null)
             compare(findChild(header, "reset-type-header").text, "Reset type")
             compare(findChild(header, "reset-expires-header").text, "Expires")
+            const actionHeader = findChild(header, "reset-action-header")
+            verify(actionHeader.width < findChild(header, "reset-expires-header").width)
+            verify(actionHeader.x > findChild(header, "reset-expires-header").x)
             compare(header.color, Qt.rgba(credits.foreground.r, credits.foreground.g, credits.foreground.b, 0.04))
             compare(header.radius, Math.max(0, table.radius - 1))
             compare(footer.color, header.color)
@@ -773,6 +776,267 @@ Item {
             verify(!available.visible)
             verify(!timezone.visible)
             compare(Plugin.Model.snapshot.selected.provider, "claude")
+        }
+        function prepareActionableReset(overrides) {
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.providers[1] = Object.assign({}, snapshot.providers[1], {
+                id: "account:work", providerId: "codex", idx: 2, name: "Codex (Plus) · Work",
+                logoPath: decodeURIComponent(Qt.resolvedUrl("assets/providers/codex.png").toString().replace(/^file:\/\//, "")),
+                resetAction: {fingerprint: "observed-account-token"},
+                resetCredits: {available: 2, undetailed: 0, rows: [
+                    {title: "Full reset", count: 2, expires: "Oct 22, 18:05", remaining: "12d left", actionId: "opaque-credit-handle"}
+                ]}
+            }, overrides || {})
+            Plugin.Model.snapshot = snapshot
+            settings.visible = false
+            credits.visible = true
+            wait(20)
+            return snapshot
+        }
+        function test_reset_apply_opens_confirmation_and_cancel_never_submits() {
+            prepareActionableReset()
+            const apply = findChild(credits, "reset-apply")
+            verify(apply.visible && apply.enabled)
+            compare(findChild(credits, "reset-confirmation"), null)
+            mouseClick(apply)
+            const confirmation = findChild(credits, "reset-confirmation")
+            const cancel = findChild(credits, "reset-cancel")
+            verify(confirmation.visible)
+            compare(confirmation.parent.objectName, "reset-row")
+            compare(confirmation.width, confirmation.parent.width)
+            verify(!apply.visible)
+            compare(Plugin.Model.resetRequests.length, 0)
+            const details = findChild(credits, "reset-confirmation-details")
+            verify(details.text.indexOf("Codex (Plus) · Work") !== -1)
+            verify(details.text.indexOf("Full reset") !== -1)
+            verify(details.text.indexOf("1 reset credit") !== -1)
+            tryVerify(() => cancel.activeFocus)
+            keyClick(Qt.Key_Return)
+            verify(!confirmation.visible)
+            compare(Plugin.Model.resetRequests.length, 0)
+            tryVerify(() => apply.activeFocus)
+            mouseClick(apply)
+            mouseClick(cancel)
+            verify(!confirmation.visible)
+            compare(Plugin.Model.resetRequests.length, 0)
+        }
+        function holdMouseUntilApplied(confirm) {
+            mousePress(confirm, confirm.width / 2, confirm.height / 2, Qt.LeftButton)
+            tryVerify(() => Plugin.Model.resetRequests.length === 1, 3500)
+            mouseRelease(confirm, confirm.width / 2, confirm.height / 2, Qt.LeftButton)
+        }
+        function openResetConfirmation() {
+            mouseClick(findChild(credits, "reset-apply"))
+            const cancel = findChild(credits, "reset-cancel")
+            tryVerify(() => cancel.activeFocus)
+            return findChild(credits, "reset-confirm")
+        }
+        function test_reset_confirm_submits_once_with_connection_identity() {
+            const snapshot = prepareActionableReset()
+            const apply = findChild(credits, "reset-apply")
+            mouseClick(apply)
+            compare(Plugin.Model.resetRequests.length, 0)
+            tryVerify(() => findChild(credits, "reset-cancel").activeFocus)
+            const confirm = findChild(credits, "reset-confirm")
+            confirm.forceActiveFocus(Qt.TabFocusReason)
+            keyClick(Qt.Key_Return)
+            compare(Plugin.Model.resetRequests.length, 0)
+            keyPress(Qt.Key_Return)
+            tryVerify(() => Plugin.Model.resetRequests.length === 1, 3500)
+            keyRelease(Qt.Key_Return)
+            compare(Plugin.Model.resetRequests.length, 1)
+            const request = Plugin.Model.resetRequests[0]
+            compare(request.provider, "account:work")
+            compare(request.idx, 2)
+            compare(request.fingerprint, "observed-account-token")
+            compare(request.credit, "opaque-credit-handle")
+            compare(request.confirmed, true)
+            verify(Plugin.Model.resetApplying)
+            compare(findChild(credits, "reset-confirmation"), null)
+            verify(!apply.visible)
+            credits.confirmReset()
+            credits.requestReset(snapshot.providers[1].resetCredits.rows[0])
+            compare(Plugin.Model.resetRequests.length, 1)
+            compare(findChild(credits, "reset-status").text, "Applying reset…")
+            Plugin.Model.resetApplying = false
+            Plugin.Model.resetMessage = "Reset applied. Usage is refreshing."
+            compare(findChild(credits, "reset-status").text, Plugin.Model.resetMessage)
+            verify(!apply.visible)
+            snapshot.providers[1].resetAction.fingerprint = "fresh-observation-token"
+            Plugin.Model.snapshot = JSON.parse(JSON.stringify(snapshot))
+            verify(findChild(credits, "reset-apply").visible)
+            compare(Plugin.Model.resetRequests.length, 1)
+        }
+        function test_reset_hold_released_early_and_pointer_leave_do_not_submit() {
+            prepareActionableReset()
+            const confirm = openResetConfirmation()
+            compare(confirm.holdDuration, 3000)
+            mousePress(confirm, confirm.width / 2, confirm.height / 2, Qt.LeftButton)
+            wait(200)
+            verify(confirm.progress > 0 && confirm.progress < 1)
+            mouseRelease(confirm, confirm.width / 2, confirm.height / 2, Qt.LeftButton)
+            compare(confirm.progress, 0)
+            compare(Plugin.Model.resetRequests.length, 0)
+            mousePress(confirm, confirm.width / 2, confirm.height / 2, Qt.LeftButton)
+            wait(100)
+            mouseMove(confirm, -10, confirm.height / 2)
+            tryCompare(confirm, "holding", false)
+            compare(confirm.progress, 0)
+            mouseMove(confirm, confirm.width / 2, confirm.height / 2)
+            wait(3100)
+            compare(Plugin.Model.resetRequests.length, 0)
+            mouseRelease(confirm, confirm.width / 2, confirm.height / 2, Qt.LeftButton)
+            mouseClick(findChild(credits, "reset-cancel"))
+            compare(credits.confirmation, null)
+        }
+        function test_reset_mouse_hold_fills_and_applies_once_after_three_seconds() {
+            prepareActionableReset()
+            const confirm = openResetConfirmation()
+            compare(confirm.holdDuration, 3000)
+            compare(confirm.progress, 0)
+            verify(confirm.color.a > 0 && confirm.color.a < 0.2)
+            mousePress(confirm, confirm.width / 2, confirm.height / 2, Qt.LeftButton)
+            wait(2500)
+            verify(confirm.progress > 0.7 && confirm.progress < 1)
+            compare(Plugin.Model.resetRequests.length, 0)
+            tryVerify(() => Plugin.Model.resetRequests.length === 1, 1000)
+            wait(200)
+            compare(Plugin.Model.resetRequests.length, 1)
+            mouseRelease(confirm, confirm.width / 2, confirm.height / 2, Qt.LeftButton)
+            compare(Plugin.Model.resetRequests.length, 1)
+        }
+        function test_reset_initial_apply_press_never_starts_confirmation_hold() {
+            prepareActionableReset()
+            const apply = findChild(credits, "reset-apply")
+            mousePress(apply, apply.width / 2, apply.height / 2, Qt.LeftButton)
+            wait(3100)
+            compare(credits.confirmation, null)
+            compare(Plugin.Model.resetRequests.length, 0)
+            mouseRelease(apply, apply.width / 2, apply.height / 2, Qt.LeftButton)
+            const confirm = findChild(credits, "reset-confirm")
+            verify(confirm !== null)
+            verify(!confirm.holding)
+            compare(confirm.progress, 0)
+            compare(Plugin.Model.resetRequests.length, 0)
+        }
+        function test_reset_keyboard_hold_release_focus_loss_and_escape_cancel() {
+            prepareActionableReset()
+            const confirm = openResetConfirmation()
+            const cancel = findChild(credits, "reset-cancel")
+            confirm.forceActiveFocus(Qt.TabFocusReason)
+            keyPress(Qt.Key_Space)
+            wait(100)
+            verify(confirm.progress > 0)
+            keyRelease(Qt.Key_Space)
+            compare(confirm.progress, 0)
+            compare(Plugin.Model.resetRequests.length, 0)
+            keyPress(Qt.Key_Space)
+            wait(100)
+            cancel.forceActiveFocus(Qt.TabFocusReason)
+            compare(confirm.progress, 0)
+            verify(!confirm.holding)
+            keyRelease(Qt.Key_Space)
+            confirm.forceActiveFocus(Qt.TabFocusReason)
+            keyPress(Qt.Key_Space)
+            wait(100)
+            keyClick(Qt.Key_Escape)
+            compare(credits.confirmation, null)
+            compare(confirm.progress, 0)
+            keyRelease(Qt.Key_Space)
+            compare(Plugin.Model.resetRequests.length, 0)
+        }
+        function test_reset_apply_is_hidden_for_ineligible_inventory_data() {
+            return [
+                {tag: "cached", overrides: {cached: true}},
+                {tag: "loading", overrides: {loading: true}},
+                {tag: "no action context", overrides: {resetAction: null}},
+                {tag: "no credit handle", overrides: {resetCredits: {available: 1, undetailed: 0, rows: [
+                    {title: "Full reset", count: 1, expires: "Not provided", remaining: ""}
+                ]}}}
+            ]
+        }
+        function test_reset_apply_is_hidden_for_ineligible_inventory(data) {
+            const snapshot = prepareActionableReset(data.overrides)
+            verify(!findChild(credits, "reset-apply").visible)
+            credits.requestReset(snapshot.providers[1].resetCredits.rows[0])
+            compare(credits.confirmation, null)
+            credits.confirmReset()
+            compare(Plugin.Model.resetRequests.length, 0)
+        }
+        function test_reset_buttons_are_disabled_while_another_account_is_applying() {
+            const snapshot = prepareActionableReset()
+            Plugin.Model.resetTarget = {provider: "account:personal", idx: 0}
+            Plugin.Model.resetApplying = true
+            const apply = findChild(credits, "reset-apply")
+            verify(apply.visible)
+            verify(!apply.enabled)
+            credits.requestReset(snapshot.providers[1].resetCredits.rows[0])
+            compare(credits.confirmation, null)
+            compare(Plugin.Model.resetRequests.length, 0)
+        }
+        function test_reset_confirm_is_invalidated_when_account_details_change_data() {
+            return [
+                {tag: "account switched", field: "id", value: "account:personal"},
+                {tag: "new observation", field: "resetAction", value: {fingerprint: "new-token"}},
+                {tag: "cached", field: "cached", value: true},
+                {tag: "loading", field: "loading", value: true},
+                {tag: "credit disappeared", field: "resetCredits", value: {available: 1, undetailed: 1, rows: []}}
+            ]
+        }
+        function test_reset_confirm_is_invalidated_when_account_details_change(data) {
+            const snapshot = prepareActionableReset()
+            const confirm = openResetConfirmation()
+            verify(credits.confirmation !== null)
+            confirm.forceActiveFocus(Qt.TabFocusReason)
+            keyPress(Qt.Key_Space)
+            wait(100)
+            verify(confirm.progress > 0)
+            snapshot.providers[1][data.field] = data.value
+            Plugin.Model.snapshot = JSON.parse(JSON.stringify(snapshot))
+            compare(credits.confirmation, null)
+            if (data.field !== "resetCredits") {
+                verify(!confirm.holding)
+                compare(confirm.progress, 0)
+            }
+            keyRelease(Qt.Key_Space)
+            credits.confirmReset()
+            compare(Plugin.Model.resetRequests.length, 0)
+        }
+        function test_reset_update_start_discards_active_hold() {
+            prepareActionableReset()
+            const confirm = openResetConfirmation()
+            mousePress(confirm, confirm.width / 2, confirm.height / 2, Qt.LeftButton)
+            wait(100)
+            verify(confirm.holding)
+            Plugin.Model.updateRunning = true
+            compare(credits.confirmation, null)
+            verify(!confirm.holding)
+            compare(confirm.progress, 0)
+            mouseRelease(confirm, confirm.width / 2, confirm.height / 2, Qt.LeftButton)
+            compare(Plugin.Model.resetRequests.length, 0)
+        }
+        function test_reset_hidden_page_discards_confirmation_and_error_does_not_retry() {
+            prepareActionableReset()
+            const hold = openResetConfirmation()
+            hold.forceActiveFocus(Qt.TabFocusReason)
+            keyPress(Qt.Key_Space)
+            wait(100)
+            credits.visible = false
+            compare(credits.confirmation, null)
+            verify(!hold.holding)
+            compare(hold.progress, 0)
+            keyRelease(Qt.Key_Space)
+            credits.confirmReset()
+            compare(Plugin.Model.resetRequests.length, 0)
+            credits.visible = true
+            holdMouseUntilApplied(openResetConfirmation())
+            compare(Plugin.Model.resetRequests.length, 1)
+            Plugin.Model.resetApplying = false
+            Plugin.Model.resetError = "Result unknown. Refresh and check the account before applying another reset."
+            compare(findChild(credits, "reset-status").text, Plugin.Model.resetError)
+            verify(!findChild(credits, "reset-apply").visible)
+            credits.confirmReset()
+            compare(Plugin.Model.resetRequests.length, 1)
         }
     }
 }

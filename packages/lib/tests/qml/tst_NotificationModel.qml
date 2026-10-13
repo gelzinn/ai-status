@@ -18,6 +18,9 @@ Item {
             Backend.Model.updateRunning = false
             Backend.Model.updateError = ""
             Backend.Model.updateMessage = ""
+            Backend.Model.resetApplying = false
+            Backend.Model.resetTarget = null
+            Backend.Model.resetAttempts = []
             activation.clear()
         }
         function snapshot(identity) {
@@ -47,6 +50,27 @@ Item {
             Backend.Model.release(secondWidget)
             compare(Backend.Model.notificationOwner, null)
             compare(Backend.Model.consumers, 0)
+        }
+        function test_update_and_reset_do_not_dispatch_while_the_other_is_running() {
+            Backend.Model.consumers = 1
+            Backend.Model.snapshot = {update: {canUpdate: true}, providers: [
+                {id: "codex", idx: 0, loading: false, cached: false,
+                 resetAction: {fingerprint: "current-observation"},
+                 resetCredits: {rows: [{actionId: "selected-credit"}]}}
+            ]}
+            const process = findChild(Backend.Model, "update-process")
+            const command = JSON.stringify(process.command)
+            Backend.Model.resetApplying = true
+            Backend.Model.startUpdate()
+            verify(!Backend.Model.updateRunning)
+            compare(JSON.stringify(process.command), command)
+            Backend.Model.resetApplying = false
+            Backend.Model.updateRunning = true
+            verify(!Backend.Model.applyReset({provider: "codex", idx: 0,
+                fingerprint: "current-observation", credit: "selected-credit", confirmed: true}))
+            verify(!Backend.Model.resetApplying)
+            compare(Backend.Model.resetAttempts.length, 0)
+            compare(Backend.Model.resetTarget, null)
         }
         function test_update_progress_accepts_confirmed_terminal_handoff_and_ignores_invalid_events() {
             Backend.Model.acceptUpdateProgress("  " + JSON.stringify({stage: "checking", message: "Checking release"}) + "\n")

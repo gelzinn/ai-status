@@ -40,6 +40,7 @@ _AUTH_ENVIRONMENT = {
 _CONTEXT_ENVIRONMENT = {"HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_DATA_HOME", "XDG_CONFIG_HOME",
                         "XDG_CACHE_HOME", "PATH", "PYTHONPATH", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
                         "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy", "LANG", "LC_ALL"}
+_RESET_AUTH_SNAPSHOTS = "AI_STATUS_RESET_AUTH_SNAPSHOTS"
 
 
 def _validate_options(value):
@@ -171,14 +172,14 @@ def _path(value, environ):
 
 def _credential_files(environ, provider, auth_file=None):
     home = Path(environ.get("HOME") or environ.get("USERPROFILE") or str(Path.home()))
-    data = Path(environ.get("XDG_DATA_HOME", home / ".local/share"))
+    data = Path(environ.get("XDG_DATA_HOME") or home / ".local/share")
     config = Path(environ.get("XDG_CONFIG_HOME", home / ".config"))
     native_config = (Path(environ.get("APPDATA", home / "AppData/Roaming")) if paths.IS_WINDOWS
                      else home / "Library/Application Support" if sys.platform == "darwin" else config)
     gcloud = Path(environ.get("CLOUDSDK_CONFIG", config / "gcloud"))
     candidates = {
-        "codex": [Path(environ.get("CODEX_HOME", home / ".codex")) / "auth.json"],
-        "claude": [Path(environ.get("CLAUDE_CONFIG_DIR", home / ".claude")) / ".credentials.json", data / "opencode/auth.json"],
+        "codex": [Path(environ.get("CODEX_HOME") or home / ".codex") / "auth.json"],
+        "claude": [Path(environ.get("CLAUDE_CONFIG_DIR") or home / ".claude") / ".credentials.json", data / "opencode/auth.json"],
         "commandcode": [home / ".commandcode/auth.json"],
         "copilot": [data / "opencode/auth.json", Path(environ.get("GH_CONFIG_DIR", config / "gh")) / "hosts.yml"],
         "opencode": [data / "opencode/auth.json", config / "opencode-bar/opencode-go.json"],
@@ -290,12 +291,28 @@ def _file_secrets(path, raw):
         return secrets
 
 
-def prepare(connection, environ=None):
+def auth_document(path, environ):
+    """Read only the credential bytes captured with a reset's fingerprint."""
+    if _RESET_AUTH_SNAPSHOTS not in environ:
+        return paths.read_json(path)
+    snapshot = environ[_RESET_AUTH_SNAPSHOTS]
+    try:
+        documents = json.loads(snapshot)
+        key = str(Path(path).absolute())
+        document = documents.get(key) if isinstance(documents, dict) else None
+        if not isinstance(document, dict):
+            raise ValueError
+        return document
+    except (ValueError, TypeError):
+        raise AccountError("This reset's credential snapshot is unavailable. Refresh the account and confirm again.") from None
+
+
+def prepare(connection, environ=None, *, capture_auth=False):
     """Return subprocess env, context digest, and values to redact from results."""
     env = dict(os.environ if environ is None else environ)
     # A parent collector context must never leak into another/default connection.
     for key in list(env):
-        if key.startswith("AI_STATUS_ACCOUNT_") or key in ("AI_STATUS_AUTH_FILE", "AI_STATUS_CLAUDE_CREDENTIALS"):
+        if key.startswith("AI_STATUS_ACCOUNT_") or key in ("AI_STATUS_AUTH_FILE", "AI_STATUS_CLAUDE_CREDENTIALS", _RESET_AUTH_SNAPSHOTS):
             del env[key]
     source_env = dict(env)
     for key, source in connection.get("options", {}).items():
@@ -361,6 +378,7 @@ def prepare(connection, environ=None):
         if connection["provider"] == "google-cloud" and (connection.get("options", {}).get("gcloud_account") or "CLOUDSDK_CONFIG" in explicit_keys):
             credential_files.extend(_credential_files(env, "google-cloud"))
     credential_secrets = []
+    auth_documents = {}
     for candidate in credential_files:
         files = sorted(path for path in candidate.iterdir() if path.is_file()) if candidate.is_dir() else [candidate]
         for path in files:
@@ -375,6 +393,12 @@ def prepare(connection, environ=None):
                 else:
                     raw = path.read_bytes()
                     digest.update(hashlib.sha256(raw).digest())
+                    if capture_auth and connection["provider"] in {"codex", "claude"}:
+                        try:
+                            document = json.loads(raw.decode("utf-8-sig"))
+                        except (ValueError, UnicodeError):
+                            document = {}
+                        auth_documents[str(path.absolute())] = document if isinstance(document, dict) else {}
                     values = _file_secrets(path, raw)
                 credential_secrets.extend(values)
                 if not values and str(path) == auth_file and not raw.startswith(b"SQLite format 3\0"):
@@ -383,6 +407,8 @@ def prepare(connection, environ=None):
                         credential_secrets.append(value)
             except OSError:
                 digest.update(b"missing-or-unreadable")
+                if capture_auth and connection["provider"] in {"codex", "claude"}:
+                    auth_documents[str(path.absolute())] = {}
     if (connection["provider"] == "claude" and sys.platform == "darwin"
             and not auth_file and not env.get("CLAUDE_ACCESS_TOKEN")
             and (not connection.get("account_id") or env.get("CLAUDE_CONFIG_DIR"))):
@@ -414,6 +440,8 @@ def prepare(connection, environ=None):
         if token:
             credential_secrets.append(token.decode("utf-8", errors="replace"))
     secrets.extend(credential_secrets)
+    if capture_auth and connection["provider"] in {"codex", "claude"}:
+        env[_RESET_AUTH_SNAPSHOTS] = json.dumps(auth_documents, ensure_ascii=False, separators=(",", ":"))
     return env, digest.hexdigest(), sorted(set(secrets), key=len, reverse=True)
 
 
