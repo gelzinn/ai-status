@@ -59,7 +59,7 @@ export function MacosConfiguration() {
       />
 
       <p className="text-sm leading-relaxed text-muted-foreground">
-        Usage refreshes every five minutes. Settings changes apply when you save.
+        General settings combines display preferences and a 5–60 minute refresh slider. Changes apply when you save.
         SwiftBar is available separately with <code>--mode stream</code> or
         {" "}<code>--mode periodic</code>.
       </p>

@@ -48,7 +48,7 @@ An exhausted window's reported reset schedules a fresh check shortly afterward,
 while collection still respects the provider's cooldown. A reset countdown
 reaching zero, a failed request, a cached fallback or an omitted window never
 confirms capacity. A fresh response retaining an elapsed reset returns to the
-normal five-minute cadence. Delayed resets and manually used reset credits are
+normal saved refresh cadence (five minutes by default). Delayed resets and manually used reset credits are
 handled by observed consumption changes rather than assuming timers are correct.
 
 Only valid subscription percentages from successful observations less than ten

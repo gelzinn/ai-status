@@ -99,8 +99,155 @@ class DesktopTests(IsolatedState):
         with patch.object(tray.notifications, "next_check_delay", return_value=42) as delay, \
              patch.object(tray.fetch, "get_version_info", return_value={"has_update": False}):
             self.dashboard.on_finished(providers)
-        delay.assert_called_once_with(providers)
+        delay.assert_called_once_with(providers, default=300)
         self.assertEqual(self.dashboard.auto_refresh.interval(), 42_000)
+
+    def test_refresh_interval_slider_has_only_safe_steps_and_drafts_until_save(self):
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        self.assertNotIn("appearance", settings.sections)
+        self.assertIs(settings.refresh_interval.parentWidget(), settings.sections["general"])
+        self.assertEqual(settings.refresh_interval.accessibleName(), "Usage refresh interval in minutes")
+        self.assertEqual((settings.refresh_interval.minimum(), settings.refresh_interval.maximum()), (0, 11))
+        self.assertEqual(settings.refresh_interval_minutes(), 5)
+        with patch.object(self.dashboard, "refresh") as refresh:
+            for index, minutes in enumerate(range(5, 61, 5)):
+                settings.refresh_interval.setValue(index)
+                self.assertEqual(settings.refresh_interval_minutes(), minutes)
+                self.assertEqual(settings.refresh_interval_label.text(), f"{minutes} min")
+            settings.select_section("alerts")
+            settings.select_section("general")
+            self.assertEqual(settings.refresh_interval_minutes(), 60)
+            self.assertEqual(state.get_refresh_interval_minutes(state.load_selected()), 5)
+            settings.cancel_button.click()
+            self.dashboard.configure()
+            self.assertEqual(self.dashboard.settings_view.refresh_interval_minutes(), 5)
+        refresh.assert_not_called()
+
+    def test_refresh_interval_slider_keyboard_moves_between_five_minute_steps(self):
+        with patch.object(self.dashboard, "isActiveWindow", return_value=True), \
+             patch.object(self.dashboard, "refresh") as refresh:
+            self.dashboard.configure()
+            self.app.processEvents()
+            settings = self.dashboard.settings_view
+            slider = settings.refresh_interval
+            slider.setFocus()
+            QTest.keyClick(slider, tray.Qt.Key.Key_End)
+            self.assertEqual(settings.refresh_interval_minutes(), 60)
+            QTest.keyClick(slider, tray.Qt.Key.Key_Left)
+            self.assertEqual(settings.refresh_interval_minutes(), 55)
+            QTest.keyClick(slider, tray.Qt.Key.Key_Home)
+            self.assertEqual(settings.refresh_interval_minutes(), 5)
+            QTest.keyClick(slider, tray.Qt.Key.Key_Left)
+            self.assertEqual(settings.refresh_interval_minutes(), 5)
+        refresh.assert_not_called()
+
+    def test_saving_only_refresh_interval_updates_timer_without_query_or_config_rewrites(self):
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        settings.refresh_interval.setValue(2)
+        self.dashboard.refresh_completed_at = 100
+        with patch.object(tray.time, "monotonic", return_value=100), \
+             patch.object(self.dashboard, "refresh") as refresh, \
+             patch.object(config, "save_connection_order") as save_order, \
+             patch.object(tray.notifications, "save_settings") as save_notifications:
+            settings.save_button.click()
+            settings.save_button.click()
+        refresh.assert_not_called()
+        save_order.assert_not_called()
+        save_notifications.assert_not_called()
+        self.assertEqual(state.load_selected()["refresh_interval_minutes"], 15)
+        self.assertEqual(self.dashboard.auto_refresh.interval(), 900_000)
+        self.assertTrue(self.dashboard.auto_refresh.isSingleShot())
+        self.assertEqual(self.dashboard.status.text(), "Updates every 15 minutes")
+        self.assertEqual(settings.message.text(), "Saved")
+        settings.refresh_interval.setValue(3)
+        self.assertTrue(settings.message.isHidden())
+        settings.cancel_button.click()
+        self.dashboard.configure()
+        self.assertEqual(self.dashboard.settings_view.refresh_interval_minutes(), 15)
+
+    def test_refresh_interval_invalid_saved_preference_uses_default(self):
+        state.save_selected({"refresh_interval_minutes": 1})
+        self.dashboard.configure()
+        self.assertEqual(self.dashboard.settings_view.refresh_interval_minutes(), 5)
+
+    def test_external_refresh_interval_reschedules_remaining_cadence_without_query(self):
+        self.dashboard.refresh_completed_at = 100
+        selected = dict(self.dashboard.selected, refresh_interval_minutes=15)
+        state.save_selected(selected)
+        with patch.object(tray.time, "monotonic", return_value=160), \
+             patch.object(self.dashboard, "refresh") as refresh:
+            self.dashboard.poll_state()
+        refresh.assert_not_called()
+        self.assertEqual(self.dashboard.auto_refresh.interval(), 840_000)
+        self.assertEqual(self.dashboard.status.text(), "Updates every 15 minutes")
+        state.save_selected(dict(selected, refresh_interval_minutes=5))
+        with patch.object(tray.time, "monotonic", return_value=500), \
+             patch.object(self.dashboard, "refresh") as refresh:
+            self.dashboard.poll_state()
+        refresh.assert_not_called()
+        self.assertEqual(self.dashboard.auto_refresh.interval(), 1_000)
+
+    def test_changed_interval_during_query_waits_for_completion_and_uses_latest_value(self):
+        self.dashboard.busy = True
+        self.dashboard.status.setText("Updating…")
+        state.save_selected(dict(self.dashboard.selected, refresh_interval_minutes=30))
+        with patch.object(self.dashboard, "refresh") as refresh:
+            self.dashboard.poll_state()
+        refresh.assert_not_called()
+        self.assertFalse(self.dashboard.auto_refresh.isActive())
+        self.assertFalse(self.dashboard.queued)
+        self.assertEqual(self.dashboard.status.text(), "Updating…")
+        self.dashboard.worker = MagicMock()
+        with patch.object(tray.fetch, "get_version_info", return_value={"has_update": False}):
+            self.dashboard.on_finished([])
+        self.assertEqual(self.dashboard.auto_refresh.interval(), 1_800_000)
+        self.assertTrue(self.dashboard.auto_refresh.isActive())
+        self.assertIn("updates every 30 minutes", self.dashboard.status.text())
+
+    def test_automatic_ticks_do_not_queue_queries_during_active_operations(self):
+        for key in ("busy", "reset_applying", "updating", "quitting"):
+            with self.subTest(operation=key), patch.object(self.dashboard, "refresh") as refresh:
+                setattr(self.dashboard, key, True)
+                self.dashboard.refresh_automatically()
+                refresh.assert_not_called()
+                self.assertFalse(self.dashboard.queued)
+                setattr(self.dashboard, key, False)
+        with patch.object(self.dashboard, "refresh") as refresh:
+            self.dashboard.refresh_automatically()
+        refresh.assert_called_once()
+
+    def test_lock_retry_waits_for_updater_and_resumes_once_it_finishes(self):
+        with patch.object(state, "acquire_lock", return_value=False), \
+             patch.object(tray.QTimer, "singleShot") as retry:
+            self.dashboard.refresh()
+        retry.assert_called_once_with(5000, self.dashboard.refresh)
+        callback = retry.call_args.args[1]
+        self.dashboard.updating = True
+        with patch.object(state, "acquire_lock", return_value=True) as lock, \
+             patch.object(tray.threading, "Thread") as thread:
+            callback()
+        lock.assert_not_called()
+        thread.assert_not_called()
+        self.assertFalse(self.dashboard.busy)
+        self.assertTrue(self.dashboard.queued)
+        with patch.object(self.dashboard, "refresh") as refresh:
+            self.dashboard.update_thread_finished()
+        refresh.assert_called_once()
+        self.assertFalse(self.dashboard.updating)
+        self.assertFalse(self.dashboard.queued)
+
+    def test_updater_finish_without_queued_query_rearms_saved_interval(self):
+        self.dashboard.updating = True
+        self.dashboard.selected["refresh_interval_minutes"] = 20
+        self.dashboard.refresh_completed_at = 100
+        with patch.object(tray.time, "monotonic", return_value=160), \
+             patch.object(self.dashboard, "refresh") as refresh:
+            self.dashboard.update_thread_finished()
+        refresh.assert_not_called()
+        self.assertTrue(self.dashboard.auto_refresh.isActive())
+        self.assertEqual(self.dashboard.auto_refresh.interval(), 1_140_000)
 
     def test_incremental_dashboard_selection_and_cache_warning(self):
         self.dashboard.on_result("codex", [{"provider": "Codex", "_dir": "codex", "_idx": 0,
@@ -265,7 +412,7 @@ class DesktopTests(IsolatedState):
             scroll = self.dashboard.settings_scroll.verticalScrollBar()
             scroll.setValue(scroll.maximum())
             position = scroll.value()
-            self.assertEqual(list(settings.section_buttons), ["general", "appearance", "alerts", "providers", "guide", "about"])
+            self.assertEqual(list(settings.section_buttons), ["general", "alerts", "providers", "guide", "about"])
             settings.section_buttons["about"].click()
             self.assertTrue(self.dashboard.configuring())
             self.assertEqual(self.dashboard.brand.text(), "Settings")
@@ -300,7 +447,7 @@ class DesktopTests(IsolatedState):
             self.dashboard.configure()
             self.app.processEvents()
             settings = self.dashboard.settings_view
-            settings.select_section("appearance")
+            settings.select_section("general")
             settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
             settings.select_section("alerts")
             settings.notification_levels.set_values([75, 90])
@@ -338,7 +485,7 @@ class DesktopTests(IsolatedState):
             self.assertIs(self.dashboard.focusWidget(), settings.cancel_button)
             QTest.keyClick(settings.cancel_button, tray.Qt.Key.Key_Backtab)
             self.assertIs(self.dashboard.focusWidget(), settings.section_buttons["guide"])
-            settings.section_buttons["appearance"].click()
+            settings.section_buttons["general"].click()
             self.assertEqual(settings.usage_display.currentData(), "remaining")
             settings.section_buttons["alerts"].click()
             self.assertEqual(settings.notification_levels.values(), [75, 90])
@@ -438,7 +585,7 @@ class DesktopTests(IsolatedState):
         settings = self.dashboard.settings_view
         self.assertEqual(settings.current_section, "general")
         settings.active.setCurrentIndex(settings.active.findData(["codex", 0, "weekly"]))
-        settings.section_buttons["appearance"].click()
+        settings.section_buttons["general"].click()
         settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
         settings.icon_mode.setCurrentIndex(settings.icon_mode.findData("logo"))
         settings.display["show_metric"].setChecked(True)
@@ -470,7 +617,7 @@ class DesktopTests(IsolatedState):
     def test_settings_cancel_discards_cross_section_draft_and_reopens_general(self):
         self.dashboard.configure()
         settings = self.dashboard.settings_view
-        settings.select_section("appearance")
+        settings.select_section("general")
         settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
         settings.select_section("providers")
         settings.providers.item(0).setCheckState(tray.Qt.CheckState.Unchecked)
@@ -495,10 +642,14 @@ class DesktopTests(IsolatedState):
             settings = self.dashboard.settings_view
             self.assertIs(self.dashboard.focusWidget(), settings.section_buttons["general"])
             QTest.keyClick(settings.section_buttons["general"], tray.Qt.Key.Key_Right)
-            self.assertEqual(settings.current_section, "appearance")
-            self.assertIs(self.dashboard.focusWidget(), settings.section_buttons["appearance"])
-            QTest.keyClick(settings.section_buttons["appearance"], tray.Qt.Key.Key_Tab)
-            self.assertIs(self.dashboard.focusWidget(), settings.usage_display)
+            self.assertEqual(settings.current_section, "alerts")
+            self.assertIs(self.dashboard.focusWidget(), settings.section_buttons["alerts"])
+            QTest.keyClick(settings.section_buttons["alerts"], tray.Qt.Key.Key_Left)
+            self.assertEqual(settings.current_section, "general")
+            QTest.keyClick(settings.section_buttons["general"], tray.Qt.Key.Key_Tab)
+            self.assertIs(self.dashboard.focusWidget(), settings.active)
+            QTest.keyClick(settings.active, tray.Qt.Key.Key_Tab)
+            self.assertIs(self.dashboard.focusWidget(), settings.refresh_interval)
             settings.section_buttons["alerts"].setFocus()
             QTest.keyClick(settings.section_buttons["alerts"], tray.Qt.Key.Key_Space)
             self.app.processEvents()
@@ -547,7 +698,7 @@ class DesktopTests(IsolatedState):
             checkbox.setChecked(False)
         with patch.object(config, "save_connection_order") as save_order:
             settings.save_button.click()
-        self.assertEqual(settings.current_section, "appearance")
+        self.assertEqual(settings.current_section, "general")
         self.assertIn("text field", settings.message.text())
         save_order.assert_not_called()
 
@@ -565,10 +716,10 @@ class DesktopTests(IsolatedState):
             self.assertFalse(bar.isVisible())
             buttons = list(settings.section_buttons.values())
             self.assertEqual(len({button.y() for button in buttons}), 1)
-            self.assertGreater(buttons[1].width(), buttons[2].width())
+            self.assertGreater(buttons[2].width(), buttons[1].width())
             self.assertLess(buttons[0].width(), navigation.viewport().width())
             settings.section_buttons["general"].setFocus()
-            for _ in range(3):
+            for _ in range(2):
                 QTest.keyClick(self.dashboard.focusWidget(), tray.Qt.Key.Key_Right)
                 self.app.processEvents()
             self.assertEqual(settings.current_section, "providers")
@@ -828,7 +979,7 @@ class DesktopTests(IsolatedState):
         settings.notification_rule_thresholds.setText("85, 99")
         QTest.keyClick(settings.notification_advanced_button, tray.Qt.Key.Key_Space)
         self.assertTrue(settings.notification_advanced.isHidden())
-        settings.select_section("appearance")
+        settings.select_section("general")
         settings.select_section("alerts")
         settings.notification_advanced_button.click()
         self.assertEqual(settings.notification_quiet_start.text(), "22:00")

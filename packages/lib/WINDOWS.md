@@ -32,10 +32,16 @@ settings/cache live in your user profile.
   Alt+Up/Down. **Save** applies changes and keeps settings open; the back arrow,
   Escape or **Cancel** returns to usage and discards any remaining unsaved edits.
   Starting at sign-in is optional and disabled by default.
+- **General** combines the selected limit, startup and display controls formerly
+  in Appearance. Its **Automatic refresh** slider offers 5–60 minutes in steps
+  of 5, defaulting to 5. Dragging changes the draft; **Save** updates the running
+  schedule and **Cancel** discards changes. Saving only the interval does not
+  force an extra collection. Alerts stays separate. Request timeouts and
+  provider cooldowns remain enforced, and automatic refreshes never overlap.
 - **About AI Status** in Settings shows the project logo, description, author,
   version, build commit, MIT license, quick guide and links to GitHub,
   documentation and bug reports. Back returns to your settings draft.
-- **Refresh** updates immediately; background updates run every five minutes.
+- **Refresh** requests an update; background updates follow the saved interval.
   Only its icon rotates while the update is running.
   A failed provider shows a diagnostic. If recent usage is cached, it is
   explicitly labeled as cached. Its reason is available on hover and in

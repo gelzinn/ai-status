@@ -74,7 +74,7 @@ heading or a metric to choose what appears in the menu bar. Balances have
 no invented percentage; a cost percentage requires a reported limit or a
 configured monitoring budget.
 
-Usage refreshes every five minutes. Loading feedback appears during a
+Usage refreshes at the saved interval, defaulting to five minutes. Loading feedback appears during a
 refresh, and usable cached data stays visible if a provider request fails.
 Providers without usable metrics remain available in Settings.
 
@@ -94,8 +94,12 @@ limit. See [provider eligibility](PROVIDERS.md#claude).
 
 ## Settings and About
 
-Settings includes the selected connection and metric, menu bar display fields,
-icon mode, and connections to enable, disable or reorder. **Save**
+**General** combines the selected connection and metric, menu bar display fields,
+icon mode and **Automatic refresh** slider. Choose 5–60 minutes in steps of 5;
+the default is 5. Alerts remains separate, with connections managed in Providers.
+Dragging changes the draft only. Saving the interval updates the daemon's
+schedule without restarting or forcing an extra collection. SwiftBar also
+follows the saved interval. Provider cooldowns and request timeouts are preserved. **Save**
 applies changes and keeps Settings open. Back or **Cancel** returns to usage
 and discards unsaved edits.
 

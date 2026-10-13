@@ -118,7 +118,8 @@ def cycle_metric(frontend="waybar"):
 # The plugin reads the shared cache and renders; a refresh is a detached child
 # so the short-lived plugin invocation never blocks on the network.
 
-SWIFTBAR_STALE_SECS = 300  # background-refresh cadence, matching the daemon
+def _swiftbar_refresh_seconds():
+    return state.get_refresh_interval_seconds(state.load_selected())
 
 
 def _cache_age():
@@ -206,7 +207,7 @@ def swiftbar_render():
     from . import swiftbar as sb
 
     age = _cache_age()
-    if age is None or age >= SWIFTBAR_STALE_SECS:
+    if age is None or age >= _swiftbar_refresh_seconds():
         _spawn_background_refresh()
     print(sb.render_from_state())
 
@@ -263,16 +264,17 @@ def swiftbar_stream():
     frame_idx = 0
 
     age = _cache_age()
-    if age is None or age >= SWIFTBAR_STALE_SECS:
+    if age is None or age >= _swiftbar_refresh_seconds():
         kick()
 
     while True:
         try:
             now = time.time()
             age = _cache_age()
+            refresh_interval = _swiftbar_refresh_seconds()
             if (not refreshing.is_set()
-                    and (age is None or age >= SWIFTBAR_STALE_SECS)
-                    and now - last_auto >= SWIFTBAR_STALE_SECS):
+                    and (age is None or age >= refresh_interval)
+                    and now - last_auto >= refresh_interval):
                 last_auto = now
                 kick()
 
@@ -489,7 +491,7 @@ def _listed_connections(records):
             continue
         cached.setdefault(identity, []).append(entry)
     age = _cache_age()
-    stale = age is not None and age >= SWIFTBAR_STALE_SECS
+    stale = age is not None and age >= _swiftbar_refresh_seconds()
     enabled = cfgmod.enabled_order()
     defaults = []
     for provider in cfgmod.available_providers():

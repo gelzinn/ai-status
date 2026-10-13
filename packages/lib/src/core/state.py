@@ -18,6 +18,8 @@ REFRESH_FILE = str(paths.RUNTIME_DIR / "ai-status-refresh.json")
 
 ICON_MODES = ["off", "bot", "logo"]
 USAGE_DISPLAY_MODES = ["used", "remaining"]
+REFRESH_INTERVAL_MINUTES = tuple(range(5, 61, 5))
+DEFAULT_REFRESH_INTERVAL_MINUTES = 5
 _lock_heartbeat = None
 
 
@@ -46,6 +48,23 @@ def get_icon_mode(selected):
 def get_usage_display(selected):
     mode = (selected or {}).get("usage_display")
     return mode if mode in USAGE_DISPLAY_MODES else "used"
+
+
+def validate_refresh_interval_minutes(value):
+    if type(value) is not int or value not in REFRESH_INTERVAL_MINUTES:
+        raise ValueError("Choose a refresh interval from 5 to 60 minutes in steps of 5.")
+    return value
+
+
+def get_refresh_interval_minutes(selected=None):
+    try:
+        return validate_refresh_interval_minutes((selected or {}).get("refresh_interval_minutes"))
+    except (ValueError, AttributeError):
+        return DEFAULT_REFRESH_INTERVAL_MINUTES
+
+
+def get_refresh_interval_seconds(selected=None):
+    return get_refresh_interval_minutes(selected) * 60
 
 def load_cache():
     if os.path.exists(CACHE_FILE):
