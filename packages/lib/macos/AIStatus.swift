@@ -1846,7 +1846,7 @@ struct SettingsPage: View {
                     Toggle(isOn: Binding(get: { model.draft.items.contains(choice.selection) }, set: {
                         model.setBarItem(choice.selection, enabled: $0)
                     })) {
-                        HStack(spacing: 8) {
+                        HStack(alignment: .top, spacing: 8) {
                             ProviderLogo(provider: choice.provider, path: choice.logoPath)
                             Text(choice.label).fixedSize(horizontal: false, vertical: true)
                         }
@@ -1911,7 +1911,7 @@ struct SettingsPage: View {
             ForEach(model.draft.order, id: \.self) { provider in
                 HStack(spacing: 4) {
                     Toggle(isOn: Binding(get: { model.draft.enabled.contains(provider) }, set: { _ in model.toggleProvider(provider) })) {
-                        HStack(spacing: 6) {
+                        HStack(alignment: .top, spacing: 6) {
                             ProviderLogo(provider: model.logoProviderID(provider))
                             Text(model.providerName(provider))
                         }
