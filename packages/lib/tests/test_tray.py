@@ -1850,7 +1850,7 @@ class DesktopTests(IsolatedState):
         self.app.processEvents()
         view.action_buttons[0].click()
         view.confirm_button.click()
-        view.confirm_button.clicked.emit(False)
+        view.confirm_button.clicked.emit()
         view.confirm_button.hold_completed.emit()
         view.confirm_reset()
         with patch.object(tray.time, "monotonic", return_value=100.0):
