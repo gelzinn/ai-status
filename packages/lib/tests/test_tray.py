@@ -807,6 +807,161 @@ class DesktopTests(IsolatedState):
             self.assertEqual(content_viewport.mapTo(self.dashboard, tray.QPoint()).y(), viewport_top)
             self.assertEqual(viewport_top + content_viewport.height(), self.dashboard.settings_footer.y())
 
+    def test_settings_select_popup_frames_are_dark_rounded_and_match_control_width(self):
+        with patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.configure()
+            settings = self.dashboard.settings_view
+            selectors = (("general", settings.active), ("general", settings.usage_display),
+                         ("general", settings.icon_mode), ("alerts", settings.notification_rule_selector))
+            for section, combo in selectors:
+                with self.subTest(selector=combo.accessibleName()):
+                    settings.select_section(section)
+                    if section == "alerts":
+                        settings.notification_advanced_button.setChecked(True)
+                    self.app.processEvents()
+                    self.dashboard.settings_scroll.ensureWidgetVisible(combo)
+                    self.app.processEvents()
+                    previous = combo.currentData()
+                    combo.showPopup()
+                    self.app.processEvents()
+                    popup = combo.view().window()
+                    try:
+                        self.assertTrue(popup.isVisible())
+                        self.assertEqual(popup.width(), combo.width())
+                        control_top = combo.mapToGlobal(tray.QPoint()).y()
+                        self.assertTrue(popup.y() >= control_top + combo.height() - 1
+                                        or popup.geometry().bottom() <= control_top)
+                        self.assertTrue(combo.screen().availableGeometry().contains(popup.geometry()))
+                        image = popup.grab().toImage()
+                        self.assertEqual(image.pixelColor(0, 0).alpha(), 0)
+                        self.assertEqual(image.pixelColor(image.width() - 1, image.height() - 1).alpha(), 0)
+                        self.assertEqual(image.pixelColor(image.width() // 2, 0), QColor(tray.SETTINGS_CONTROL_BORDER_COLOR))
+                        self.assertEqual(image.pixelColor(image.width() // 2, 2), QColor("#111111"))
+                        self.assertEqual(image.pixelColor(2, image.height() // 2), QColor("#111111"))
+                        view = combo.view()
+                        for row in range(combo.count()):
+                            self.assertTrue(view.viewport().rect().contains(view.visualRect(combo.model().index(row, 0))))
+                        QTest.keyClick(view, tray.Qt.Key.Key_Escape)
+                        self.assertFalse(popup.isVisible())
+                        self.assertEqual(combo.currentData(), previous)
+                        self.assertTrue(self.dashboard.configuring())
+                    finally:
+                        combo.hidePopup()
+
+    def test_settings_select_first_and_last_highlights_have_rounded_corners(self):
+        with patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.configure()
+            settings = self.dashboard.settings_view
+            selectors = (("general", settings.active), ("general", settings.usage_display),
+                         ("general", settings.icon_mode), ("alerts", settings.notification_rule_selector))
+            for section, combo in selectors:
+                settings.select_section(section)
+                if section == "alerts":
+                    settings.notification_advanced_button.setChecked(True)
+                self.app.processEvents()
+                self.dashboard.settings_scroll.ensureWidgetVisible(combo)
+                self.app.processEvents()
+                combo.showPopup()
+                self.app.processEvents()
+                view = combo.view()
+                try:
+                    for row in (0, combo.count() - 1):
+                        with self.subTest(selector=combo.accessibleName(), row=row):
+                            index = combo.model().index(row, 0)
+                            view.setCurrentIndex(index)
+                            self.app.processEvents()
+                            rect = view.visualRect(index)
+                            image = view.viewport().grab().toImage()
+                            ratio = image.devicePixelRatio()
+                            def color(x, y):
+                                return image.pixelColor(int((x + 0.5) * ratio), int((y + 0.5) * ratio))
+                            self.assertEqual(color(rect.right() - 8, rect.center().y()), QColor("#252525"))
+                            for corner in (rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight()):
+                                self.assertEqual(color(corner.x(), corner.y()), QColor("#111111"))
+                            other = combo.count() - 1 if row == 0 else 0
+                            view.setCurrentIndex(combo.model().index(other, 0))
+                            QTest.mouseMove(view.viewport(), rect.center())
+                            self.app.processEvents()
+                            image = view.viewport().grab().toImage()
+                            self.assertIn(color(rect.right() - 8, rect.center().y()),
+                                          (QColor("#252525"), QColor("#1c1c1c")))
+                            for corner in (rect.topLeft(), rect.topRight(), rect.bottomLeft(), rect.bottomRight()):
+                                self.assertEqual(color(corner.x(), corner.y()), QColor("#111111"))
+                finally:
+                    combo.hidePopup()
+
+    def test_settings_select_popup_keeps_keyboard_mouse_and_draft_selection(self):
+        with patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.configure()
+            settings = self.dashboard.settings_view
+            settings.select_section("general")
+            self.app.processEvents()
+            combo = settings.usage_display
+            saved = state.load_selected()
+            activated = MagicMock()
+            combo.activated.connect(activated)
+            combo.setFocus()
+            QTest.keyClick(combo, tray.Qt.Key.Key_Down, tray.Qt.KeyboardModifier.AltModifier)
+            self.app.processEvents()
+            self.assertTrue(combo.view().window().isVisible())
+            QTest.keyClick(combo.view(), tray.Qt.Key.Key_Down)
+            QTest.keyClick(combo.view(), tray.Qt.Key.Key_Return)
+            self.assertEqual(combo.currentData(), "remaining")
+            self.assertFalse(combo.view().window().isVisible())
+            activated.assert_called_once_with(1)
+            self.assertEqual(state.load_selected(), saved)
+            combo.showPopup()
+            self.app.processEvents()
+            rect = combo.view().visualRect(combo.model().index(0, 0))
+            # Qt ignores the opening mouse release briefly to avoid accidental selection.
+            QTest.qWait(100)
+            QTest.mouseClick(combo.view().viewport(), tray.Qt.MouseButton.LeftButton, pos=rect.center())
+            self.assertEqual(combo.currentData(), "used")
+            self.assertFalse(combo.view().window().isVisible())
+            self.assertEqual(state.load_selected(), saved)
+            combo.showPopup()
+            self.app.processEvents()
+            popup = combo.view().window()
+            QTest.mouseClick(popup, tray.Qt.MouseButton.LeftButton, pos=tray.QPoint(-8, popup.height() // 2))
+            self.assertFalse(popup.isVisible())
+            self.assertEqual(combo.currentData(), "used")
+            self.assertTrue(self.dashboard.configuring())
+
+    def test_settings_select_long_popup_scrolls_within_screen_and_reopens(self):
+        with patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.configure()
+            combo = self.dashboard.settings_view.active
+            for index in range(40):
+                combo.addItem(f"Account {index} · Weekly", [f"account:{index}", 0, "weekly"])
+            self.app.processEvents()
+            combo.showPopup()
+            self.app.processEvents()
+            popup = combo.view().window()
+            try:
+                view = combo.view()
+                self.assertGreater(view.verticalScrollBar().maximum(), 0)
+                self.assertTrue(view.verticalScrollBar().isVisible())
+                self.assertTrue(combo.screen().availableGeometry().contains(popup.geometry()))
+                row_height = view.visualRect(combo.model().index(0, 0)).height()
+                self.assertLessEqual(view.viewport().height(), combo.maxVisibleItems() * row_height)
+                QTest.keyClick(view, tray.Qt.Key.Key_End)
+                self.app.processEvents()
+                last = combo.model().index(combo.count() - 1, 0)
+                self.assertTrue(view.viewport().rect().contains(view.visualRect(last)))
+                QTest.keyClick(view, tray.Qt.Key.Key_Return)
+                self.assertEqual(combo.currentData(), ["account:39", 0, "weekly"])
+                self.assertFalse(popup.isVisible())
+                combo.showPopup()
+                self.app.processEvents()
+                self.assertTrue(view.viewport().rect().contains(view.visualRect(last)))
+                image = popup.grab().toImage()
+                self.assertEqual(image.pixelColor(0, 0).alpha(), 0)
+                self.assertEqual(image.pixelColor(image.width() // 2, 2), QColor("#111111"))
+                QTest.keyClick(view, tray.Qt.Key.Key_Escape)
+                self.assertEqual(combo.currentData(), ["account:39", 0, "weekly"])
+            finally:
+                combo.hidePopup()
+
     def test_settings_escape_and_cancel_discard_only_unsaved_changes(self):
         self.dashboard.configure()
         settings = self.dashboard.settings_view
