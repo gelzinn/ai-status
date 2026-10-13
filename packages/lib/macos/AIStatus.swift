@@ -3459,6 +3459,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         try smokeMenuTracking()
         try smokeSettingsSelects(sample: sample)
         try smokeBarItems(sample: sample, directory: previewDirectory)
+        try smokeBarExample(sample: sample, directory: previewDirectory)
         try smokeRefreshInterval(sample: sample)
         let model = Model()
         model.accept(Data(sample.utf8))
@@ -3725,6 +3726,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
               Double(redX) / Double(redCount) < Double(greenX) / Double(greenCount) else {
             throw AppError.message("Native menu bar did not draw both logos in order: red pixels=\(redCount), green pixels=\(greenCount), bounds=\(button.bounds), bitmap=\(bitmap.pixelsWide)x\(bitmap.pixelsHigh), title=\(String(reflecting: button.attributedTitle.string)).")
         }
+    }
+
+    private static func smokeBarExample(sample: String, directory: URL?) throws {
+        guard let directory = directory else { return }
+        guard var document = try JSONSerialization.jsonObject(with: Data(sample.utf8)) as? [String: Any],
+              var settings = document["settings"] as? [String: Any],
+              var providers = document["providers"] as? [[String: Any]],
+              var codexMetrics = providers[0]["metrics"] as? [[String: Any]],
+              var claudeMetrics = providers[1]["metrics"] as? [[String: Any]] else {
+            throw AppError.message("Multiple menu bar item example setup failed.")
+        }
+        providers[0]["name"] = "Codex (Plus)"
+        codexMetrics.insert(["key": "rolling", "name": "Rolling Usage", "percentage": 13,
+                             "detail": "Resets in 3h"], at: 0)
+        providers[0]["metrics"] = codexMetrics
+        claudeMetrics[0]["percentage"] = 45
+        claudeMetrics[1]["percentage"] = 62
+        claudeMetrics[2]["percentage"] = 38
+        providers[1]["metrics"] = claudeMetrics
+        document["providers"] = providers
+        let selections = [Selection(provider: "codex", metric: "weekly"),
+                          Selection(provider: "claude", metric: "rolling"),
+                          Selection(provider: "claude", metric: "weekly")]
+        let texts = ["Codex (Plus) Weekly Usage 27%", "Claude (Max) Rolling Usage 45%", "Claude (Max) Weekly Usage 62%"]
+        settings["items"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(selections))
+        settings["display"] = ["show_provider": true, "show_model": true, "show_metric": true, "show_pct": true]
+        settings["refreshIntervalMinutes"] = 5
+        settings["usageDisplay"] = "used"
+        settings["iconMode"] = "logo"
+        document["settings"] = settings
+        document["selected"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(selections[0]))
+        document["text"] = texts.joined(separator: " · ")
+        document["barItems"] = selections.enumerated().map { index, selection in
+            ["provider": selection.provider, "idx": selection.idx, "metric": selection.metric,
+             "text": texts[index], "logoPath": "", "loading": false] as [String: Any]
+        }
+        let model = Model()
+        model.accept(try JSONSerialization.data(withJSONObject: document))
+        model.showSettings()
+        guard let snapshot = model.snapshot, model.settingsValid, model.draft.items == selections,
+              model.settingsChoices.count == 5, snapshot.visibleBarItems.map(\.text) == texts else {
+            throw AppError.message("Multiple menu bar item example did not preserve its three selected metrics and two alternatives.")
+        }
+        try renderSmokePage(model, name: "settings-multiple-items-example", directory: directory)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        defer { NSStatusBar.system.removeStatusItem(item) }
+        guard let button = item.button, let appearance = NSAppearance(named: .darkAqua) else {
+            throw AppError.message("Native menu bar example host is unavailable.")
+        }
+        button.appearance = appearance
+        button.image = nil
+        button.imagePosition = .noImage
+        button.attributedTitle = MenuBarRenderer.title(snapshot.visibleBarItems, iconMode: snapshot.iconMode,
+                                                       providers: snapshot.providers, spinnerFrame: 0)
+        button.frame = NSRect(x: 0, y: 0, width: ceil(button.cell?.cellSize.width ?? 0) + 12,
+                              height: max(22, NSStatusBar.system.thickness))
+        guard let capture = button.bitmapImageRepForCachingDisplay(in: button.bounds) else {
+            throw AppError.message("Native menu bar example could not capture its button.")
+        }
+        capture.bitmapData?.initialize(repeating: 0, count: capture.bytesPerRow * capture.pixelsHigh)
+        appearance.performAsCurrentDrawingAppearance { button.cacheDisplay(in: button.bounds, to: capture) }
+        // Keep the real native button pixels; give the isolated item an opaque
+        // AppKit backdrop so the menu bar text is legible in documentation.
+        let scale = CGFloat(capture.pixelsWide) / button.bounds.width
+        let size = NSSize(width: button.bounds.width + 24, height: button.bounds.height + 12)
+        guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int((size.width * scale).rounded()),
+                                             pixelsHigh: Int((size.height * scale).rounded()), bitsPerSample: 8,
+                                             samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                             colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            throw AppError.message("Native menu bar example could not create its opaque backdrop.")
+        }
+        bitmap.size = size
+        let image = NSImage(size: button.bounds.size)
+        image.addRepresentation(capture)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.cgContext.scaleBy(x: scale, y: scale)
+        appearance.performAsCurrentDrawingAppearance {
+            NSColor.windowBackgroundColor.setFill()
+            NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
+            image.draw(in: NSRect(x: 12, y: 6, width: button.bounds.width, height: button.bounds.height),
+                       from: .zero, operation: .sourceOver, fraction: 1)
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        guard bitmap.colorAt(x: 0, y: 0)?.alphaComponent == 1,
+              let png = bitmap.representation(using: .png, properties: [:]) else {
+            throw AppError.message("Native menu bar example did not produce an opaque PNG.")
+        }
+        try png.write(to: directory.appendingPathComponent("menu-bar-multiple-items-example.png"), options: .atomic)
+        print("AI Status macOS multi-item example: native SwiftUI settings and native NSStatusBarButton pixels on an opaque AppKit backdrop; fixture values 27%, 45%, 62%.")
     }
 
     private static func smokeRefreshInterval(sample: String) throws {
