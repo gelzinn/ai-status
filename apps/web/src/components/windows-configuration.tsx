@@ -50,7 +50,7 @@ export function WindowsConfiguration() {
 
       <p className="text-sm leading-relaxed text-muted-foreground">
         If the icon is hidden, open the arrow beside the clock and move it into
-        the visible tray. Usage refreshes every five minutes. The app keeps your
+        the visible tray. General settings includes a 5–60 minute refresh slider. The app keeps your
         settings when you upgrade.
       </p>
 

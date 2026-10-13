@@ -5,10 +5,12 @@ and Claude usage, four enabled providers and the product version from the root
 manifest. They contain no live account data or credentials.
 There are 32 PNGs: ten Quickshell captures, eleven Windows adapter captures and
 eleven native macOS captures.
-Each interface has six sections in this order: General, Appearance, Alerts,
+At capture time, each interface had six sections in this order: General, Appearance, Alerts,
 Providers, Guide and About. Guide presents controls and keyboard bindings in a
 table; About contains project details and links to Guide, Report a bug,
 Documentation and GitHub.
+The current UI combines General and Appearance into General and adds a 5–60 minute
+refresh slider there; the screenshots below preserve the earlier layout.
 The tabs form one horizontal strip with widths determined by their labels.
 The strip scrolls horizontally when the tabs exceed the available width and
 reveals the selected tab. It remains above the scrolling section content;

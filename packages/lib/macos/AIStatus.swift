@@ -197,8 +197,19 @@ struct Settings: Decodable {
     let display: [String: Bool]
     let iconMode: String
     let usageDisplay: String?
+    let refreshIntervalMinutes: Int?
     let notifications: NotificationPreferences?
     let items: [Selection]?
+}
+
+enum RefreshInterval {
+    static let minimum = 5
+    static let maximum = 60
+    static let step = 5
+    static let defaultMinutes = 5
+    static func valid(_ minutes: Int) -> Bool {
+        (minimum...maximum).contains(minutes) && minutes % step == 0
+    }
 }
 
 struct NotificationHours: Codable {
@@ -417,13 +428,12 @@ enum Page: Equatable {
 }
 
 enum SettingsSection: String, CaseIterable, Identifiable {
-    case general, appearance, alerts, providers, guide, about
+    case general, alerts, providers, guide, about
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
     var icon: String {
         switch self {
         case .general: return "settings"
-        case .appearance: return "paintbrush"
         case .alerts: return "bell"
         case .providers: return "server"
         case .guide: return "book-open"
@@ -432,8 +442,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     }
     var detail: String {
         switch self {
-        case .general: return "Choose as many accounts and limits as you want in your menu bar."
-        case .appearance: return "Customize the menu bar icon and usage text."
+        case .general: return "Choose your menu bar items, refresh interval and appearance."
         case .alerts: return "Set quota notifications and account-specific rules."
         case .providers: return "Enable providers and arrange their order in Usage."
         case .guide: return "macOS actions and keyboard shortcuts."
@@ -480,6 +489,7 @@ struct SettingsDraft {
     var display: [String: Bool] = [:]
     var iconMode = "bot"
     var usageDisplay = "used"
+    var refreshIntervalMinutes = RefreshInterval.defaultMinutes
     var items: [Selection] = []
     var selected: Selection {
         get { items.first ?? Selection() }
@@ -514,7 +524,6 @@ enum MenuBarRenderer {
                     image.isTemplate = false
                     let attachment = NSTextAttachment(data: nil, ofType: nil)
                     attachment.image = image
-                    attachment.attachmentCell = NSTextAttachmentCell(imageCell: image)
                     attachment.bounds = NSRect(x: 0, y: -3, width: 16, height: 16)
                     result.append(NSAttributedString(attachment: attachment))
                     result.append(NSAttributedString(string: " ", attributes: attributes))
@@ -711,8 +720,11 @@ final class Model: ObservableObject {
             }) {
             return (.general, "Choose at least one enabled provider and limit, without duplicates.")
         }
-        if !draft.display.values.contains(true) { return (.appearance, "Choose at least one bar text field.") }
-        if !["used", "remaining"].contains(draft.usageDisplay) { return (.appearance, "Choose a usage display mode.") }
+        if !RefreshInterval.valid(draft.refreshIntervalMinutes) {
+            return (.general, "Choose a refresh interval from 5 to 60 minutes in 5-minute steps.")
+        }
+        if !draft.display.values.contains(true) { return (.general, "Choose at least one bar text field.") }
+        if !["used", "remaining"].contains(draft.usageDisplay) { return (.general, "Choose a usage display mode.") }
         if Self.parseThresholds(draft.notificationThresholds) == nil ||
             !draft.notificationRuleThresholds.values.allSatisfy({ Self.parseThresholds($0) != nil }) {
             return (.alerts, "Alert thresholds must be whole percentages from 1 to 100, separated by commas.")
@@ -764,6 +776,11 @@ final class Model: ObservableObject {
         guard !settingsSaving, levels.indices.contains(index), (1...100).contains(value) else { return }
         levels[index] = value
         draft.notificationThresholds = levels.map(String.init).joined(separator: ", ")
+        draft.saved = false
+    }
+    func setRefreshIntervalMinutes(_ minutes: Int) {
+        guard !settingsSaving, RefreshInterval.valid(minutes) else { return }
+        draft.refreshIntervalMinutes = minutes
         draft.saved = false
     }
     func addNotificationLevel() {
@@ -881,8 +898,7 @@ final class Model: ObservableObject {
         switch page {
         case .settings:
             switch settingsSection {
-            case .general: return min(680, max(320, CGFloat(230 + settingsChoices.count * 38)))
-            case .appearance: return 480
+            case .general: return 680
             case .about: return 600
             case .alerts, .providers, .guide: return 680
             }
@@ -983,6 +999,7 @@ final class Model: ObservableObject {
         draft = SettingsDraft(order: snapshot.settings.order, enabled: Set(snapshot.settings.enabled),
                               display: snapshot.settings.display, iconMode: snapshot.settings.iconMode,
                               usageDisplay: snapshot.settings.usageDisplay == "remaining" ? "remaining" : "used",
+                              refreshIntervalMinutes: snapshot.settings.refreshIntervalMinutes ?? RefreshInterval.defaultMinutes,
                               items: snapshot.pinnedItems)
         draft.notifications = snapshot.settings.notifications ?? NotificationPreferences()
         draft.notificationThresholds = draft.notifications.thresholds.map(String.init).joined(separator: ", ")
@@ -1042,7 +1059,7 @@ final class Model: ObservableObject {
         return ["enabled": draft.order.filter { draft.enabled.contains($0) },
                 "display": draft.display, "iconMode": draft.iconMode,
                 "usageDisplay": draft.usageDisplay, "selected": selection, "items": items,
-                "notifications": alertsObject]
+                "refreshIntervalMinutes": draft.refreshIntervalMinutes, "notifications": alertsObject]
     }
     func saveSettings() {
         guard !settingsSaving, let payload = settingsPayload() else { return }
@@ -1806,8 +1823,6 @@ struct SettingsPage: View {
             switch model.settingsSection {
             case .general:
                 general
-            case .appearance:
-                appearance
             case .alerts:
                 NotificationSettingsView(model: model)
             case .providers:
@@ -1823,7 +1838,7 @@ struct SettingsPage: View {
     private var general: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                SettingsHeading(title: "Menu bar items", detail: SettingsSection.general.detail)
+                SettingsHeading(title: "Menu bar items", detail: "Choose as many accounts and limits as you want in your menu bar.")
                 Text("Select at least one. Items appear in the order you add them.")
                     .font(.custom("GeistMono-Regular", size: 11)).fixedSize(horizontal: false, vertical: true)
                 ForEach(model.settingsChoices) { choice in
@@ -1840,10 +1855,31 @@ struct SettingsPage: View {
                         .accessibilityLabel(choice.label)
                 }
             }
+            VStack(alignment: .leading, spacing: 8) {
+                SettingsHeading(title: "Automatic refresh", detail: "Provider cooldowns may delay a refresh when requests are limited.")
+                HStack(spacing: 8) {
+                    Slider(value: Binding(get: {
+                        Double(model.draft.refreshIntervalMinutes)
+                    }, set: { model.setRefreshIntervalMinutes(Int($0.rounded())) }),
+                           in: Double(RefreshInterval.minimum)...Double(RefreshInterval.maximum),
+                           step: Double(RefreshInterval.step)) {
+                        Text("Automatic refresh interval")
+                    }.labelsHidden().modifier(PanelFocusTarget())
+                        .accessibilityValue("\(model.draft.refreshIntervalMinutes) minutes")
+                    Text("\(model.draft.refreshIntervalMinutes) min")
+                        .frame(width: 56, alignment: .trailing).foregroundColor(Palette.bright)
+                }
+                HStack {
+                    Text("5 min")
+                    Spacer()
+                    Text("60 min")
+                }.font(.custom("GeistMono-Regular", size: 11)).accessibilityHidden(true)
+            }
+            appearanceControls
         }
     }
 
-    private var appearance: some View {
+    private var appearanceControls: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
                 SettingsHeading(title: "Usage display")
@@ -3423,6 +3459,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         try smokeMenuTracking()
         try smokeSettingsSelects(sample: sample)
         try smokeBarItems(sample: sample, directory: previewDirectory)
+        try smokeRefreshInterval(sample: sample)
         let model = Model()
         model.accept(Data(sample.utf8))
         guard let snapshot = model.snapshot, snapshot.providers.count == 2,
@@ -3467,7 +3504,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
         model.showAbout()
         try renderSmokePage(model, name: "about", directory: previewDirectory)
-        print("AI Status macOS smoke OK: usage, multiple menu bar items, settings subnavigation and shared draft, quota notifications, reset credits, Cloud credits, live update progress, settings guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+        print("AI Status macOS smoke OK: usage, multiple menu bar items, settings subnavigation and shared draft, refresh interval, quota notifications, reset credits, Cloud credits, live update progress, settings guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
     }
 
     private static func smokeBarItems(sample: String, directory: URL?) throws {
@@ -3505,12 +3542,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             throw AppError.message("Menu bar logo attachment count: expected 2, got \(attachments.count); title=\(String(reflecting: logo.string)).")
         }
         for (index, attachment) in attachments.enumerated() {
-            // AppKit draws the cell's image; the attachment's independent
-            // image property need not mirror the explicitly configured cell.
+            // AppKit's attachment layout uses image and bounds. Its adapter
+            // cell does not have to expose that image through NSCell.image.
             let cell = attachment.attachmentCell as? NSTextAttachmentCell
-            guard cell?.image?.size == NSSize(width: 16, height: 16),
+            guard attachment.image?.size == NSSize(width: 16, height: 16),
                   attachment.bounds == NSRect(x: 0, y: -3, width: 16, height: 16) else {
-                throw AppError.message("Menu bar logo \(index): cell image=\(String(describing: cell?.image?.size)), attachment image=\(String(describing: attachment.image?.size)), bounds=\(attachment.bounds). Expected a 16px cell image and 16px bounds.")
+                throw AppError.message("Menu bar logo \(index): cell image=\(String(describing: cell?.image?.size)), attachment image=\(String(describing: attachment.image?.size)), bounds=\(attachment.bounds). Expected a 16px attachment image and 16px bounds.")
             }
         }
         let expectedLogoText = "\u{fffc} Codex 27%   \u{fffc} Claude ⠙"
@@ -3531,6 +3568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         guard (button.cell?.cellSize.width ?? 0) > 120 else {
             throw AppError.message("Native menu bar button width: expected more than 120px, got \(String(describing: button.cell?.cellSize.width)).")
         }
+        try smokeMenuBarPixels(snapshot: snapshot, button: button, directory: directory)
         var missingDocument = document
         let missingItems = [Selection(provider: "codex", metric: "weekly:missing"), Selection(provider: "claude", metric: "rolling:missing")]
         let missingItemsData = try JSONEncoder().encode(missingItems)
@@ -3548,12 +3586,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
         let fallback = MenuBarRenderer.title(missing.visibleBarItems, iconMode: "logo", providers: missing.providers, spinnerFrame: 0)
         let fallbackAttachment = fallback.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment
-        let fallbackImage = (fallbackAttachment?.attachmentCell as? NSTextAttachmentCell)?.image
+        let fallbackImage = fallbackAttachment?.image
         let appImage = Assets.image()?.copy() as? NSImage
         appImage?.size = NSSize(width: 16, height: 16)
         guard fallbackImage != nil, appImage != nil,
               fallbackImage?.tiffRepresentation == appImage?.tiffRepresentation else {
-            throw AppError.message("Missing menu bar metrics did not use the app icon: cell image=\(String(describing: fallbackImage?.size)), app image=\(String(describing: appImage?.size)).")
+            throw AppError.message("Missing menu bar metrics did not use the app icon: attachment image=\(String(describing: fallbackImage?.size)), app image=\(String(describing: appImage?.size)).")
         }
         model.accept(multiData)
         model.showSettings()
@@ -3636,12 +3674,160 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         try renderSmokePage(model, name: "settings-multiple-items", directory: directory)
     }
 
+    private static func smokeMenuBarPixels(snapshot: Snapshot, button: NSStatusBarButton, directory: URL?) throws {
+        let paths = ["ai-status-smoke-red-logo", "ai-status-smoke-green-logo"]
+        let colors = [NSColor(calibratedRed: 1, green: 0, blue: 0, alpha: 1),
+                      NSColor(calibratedRed: 0, green: 1, blue: 0, alpha: 1)]
+        let originalTitle = button.attributedTitle
+        defer {
+            button.attributedTitle = originalTitle
+            paths.forEach { Assets.cache.removeObject(forKey: $0 as NSString) }
+        }
+        for (index, path) in paths.enumerated() {
+            let icon = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { rectangle in
+                colors[index].setFill()
+                NSBezierPath(rect: rectangle).fill()
+                return true
+            }
+            Assets.cache.setObject(icon, forKey: path as NSString)
+        }
+        let items = snapshot.visibleBarItems.enumerated().map { index, item in
+            BarItem(provider: item.provider, idx: item.idx, metric: item.metric, text: item.text,
+                    logoPath: paths[index], loading: item.loading)
+        }
+        button.image = nil
+        button.imagePosition = .noImage
+        button.attributedTitle = MenuBarRenderer.title(items, iconMode: "logo", providers: snapshot.providers, spinnerFrame: 1)
+        // A status item without an app run loop may not be laid out yet on CI.
+        let width = ceil(button.cell?.cellSize.width ?? 0) + 12
+        button.frame = NSRect(x: 0, y: 0, width: width, height: max(22, NSStatusBar.system.thickness))
+        guard let bitmap = button.bitmapImageRepForCachingDisplay(in: button.bounds) else {
+            throw AppError.message("Native menu bar pixel capture failed for bounds \(button.bounds).")
+        }
+        bitmap.bitmapData?.initialize(repeating: 0, count: bitmap.bytesPerRow * bitmap.pixelsHigh)
+        button.cacheDisplay(in: button.bounds, to: bitmap)
+        if let directory = directory, let png = bitmap.representation(using: .png, properties: [:]) {
+            try png.write(to: directory.appendingPathComponent("menu-bar-multiple-items.png"), options: .atomic)
+        }
+        var redCount = 0, greenCount = 0, redX = 0, greenX = 0
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                guard let pixel = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), pixel.alphaComponent > 0.5 else { continue }
+                if pixel.redComponent > 0.5 && pixel.redComponent > pixel.greenComponent + 0.3 && pixel.redComponent > pixel.blueComponent + 0.3 {
+                    redCount += 1; redX += x
+                }
+                if pixel.greenComponent > 0.5 && pixel.greenComponent > pixel.redComponent + 0.3 && pixel.greenComponent > pixel.blueComponent + 0.3 {
+                    greenCount += 1; greenX += x
+                }
+            }
+        }
+        guard redCount >= 64, greenCount >= 64,
+              Double(redX) / Double(redCount) < Double(greenX) / Double(greenCount) else {
+            throw AppError.message("Native menu bar did not draw both logos in order: red pixels=\(redCount), green pixels=\(greenCount), bounds=\(button.bounds), bitmap=\(bitmap.pixelsWide)x\(bitmap.pixelsHigh), title=\(String(reflecting: button.attributedTitle.string)).")
+        }
+    }
+
+    private static func smokeRefreshInterval(sample: String) throws {
+        guard var document = try JSONSerialization.jsonObject(with: Data(sample.utf8)) as? [String: Any],
+              var settings = document["settings"] as? [String: Any] else {
+            throw AppError.message("Refresh interval fixture setup failed.")
+        }
+        settings.removeValue(forKey: "refreshIntervalMinutes")
+        document["settings"] = settings
+        let model = Model()
+        model.accept(try JSONSerialization.data(withJSONObject: document))
+        model.showSettings()
+        guard model.snapshot?.settings.refreshIntervalMinutes == nil,
+              model.draft.refreshIntervalMinutes == 5, model.settingsValid else {
+            throw AppError.message("Legacy settings did not default to a five-minute refresh interval.")
+        }
+        let pins = [Selection(provider: "codex", metric: "weekly"), Selection(provider: "claude", metric: "rolling")]
+        settings["items"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(pins))
+        func payloadItems(_ payload: [String: Any]) -> [Selection]? {
+            guard let items = payload["items"], let data = try? JSONSerialization.data(withJSONObject: items) else { return nil }
+            return try? JSONDecoder().decode([Selection].self, from: data)
+        }
+        for minutes in [5, 15, 60] {
+            settings["refreshIntervalMinutes"] = minutes
+            document["settings"] = settings
+            model.accept(try JSONSerialization.data(withJSONObject: document))
+            model.showSettings()
+            guard model.draft.refreshIntervalMinutes == minutes,
+                  let payload = model.settingsPayload(),
+                  let encoded = try JSONSerialization.jsonObject(with: JSONSerialization.data(withJSONObject: payload)) as? [String: Any],
+                  encoded["refreshIntervalMinutes"] as? Int == minutes,
+                  encoded["usageDisplay"] as? String == "used",
+                  payloadItems(encoded) == pins, model.draft.items == pins,
+                  (encoded["selected"] as? [String: Any])?["provider"] as? String == "codex" else {
+                throw AppError.message("Refresh interval decoding or save payload lost existing settings.")
+            }
+        }
+        settings["refreshIntervalMinutes"] = 15
+        document["settings"] = settings
+        let saved = try JSONSerialization.data(withJSONObject: document)
+        model.accept(saved)
+        model.showSettings()
+        model.draft.saved = true
+        model.setRefreshIntervalMinutes(25)
+        guard model.draft.refreshIntervalMinutes == 25, !model.draft.saved,
+              model.snapshot?.settings.refreshIntervalMinutes == 15 else {
+            throw AppError.message("Changing the slider modified saved settings or failed to mark the draft pending.")
+        }
+        model.accept(saved)
+        model.showSettingsSection(.alerts)
+        model.showSettingsSection(.general)
+        guard model.draft.refreshIntervalMinutes == 25, model.draft.items == pins else {
+            throw AppError.message("A snapshot or tab change replaced the pending refresh interval.")
+        }
+        model.settingsSaving = true
+        model.setRefreshIntervalMinutes(30)
+        model.settingsSaving = false
+        guard model.draft.refreshIntervalMinutes == 25 else {
+            throw AppError.message("An in-progress save allowed refresh interval edits.")
+        }
+        for minutes in [0, 4, 6, 59, 61] {
+            model.setRefreshIntervalMinutes(minutes)
+            guard model.draft.refreshIntervalMinutes == 25 else {
+                throw AppError.message("The refresh slider accepted an unsafe or off-step value.")
+            }
+            model.draft.refreshIntervalMinutes = minutes
+            guard !model.settingsValid, model.settingsValidation?.section == .general,
+                  model.settingsPayload() == nil else {
+                throw AppError.message("An invalid refresh interval could be saved.")
+            }
+            model.draft.refreshIntervalMinutes = 25
+        }
+        model.back()
+        model.showSettings()
+        guard model.draft.refreshIntervalMinutes == 15 else {
+            throw AppError.message("Cancel did not restore the saved refresh interval.")
+        }
+        model.setRefreshIntervalMinutes(25)
+        guard let payload = model.settingsPayload() else { throw AppError.message("A valid refresh interval could not be saved.") }
+        settings["refreshIntervalMinutes"] = payload["refreshIntervalMinutes"]
+        document["settings"] = settings
+        model.accept(try JSONSerialization.data(withJSONObject: document))
+        model.back()
+        model.showSettings()
+        guard model.snapshot?.settings.refreshIntervalMinutes == 25, model.draft.refreshIntervalMinutes == 25 else {
+            throw AppError.message("Saved refresh interval did not survive a new settings session.")
+        }
+        let replacement = Selection(provider: "claude", metric: "weekly:Fable")
+        model.setBarItem(replacement, enabled: true)
+        model.setBarItem(pins[1], enabled: false)
+        guard model.draft.selected == pins[0], let changedPayload = model.settingsPayload(),
+              payloadItems(changedPayload) == [pins[0], replacement], payloadItems(changedPayload) != pins,
+              changedPayload["refreshIntervalMinutes"] as? Int == 25 else {
+            throw AppError.message("Changing an extra menu bar item did not publish a distinct full settings payload.")
+        }
+    }
+
     private static func smokeSettingsSections(sample: String, directory: URL?) throws {
         let model = Model()
         model.accept(Data(sample.utf8))
         model.showSettings()
         guard model.page == .settings, model.settingsSection == .general,
-              SettingsSection.allCases.map(\.rawValue) == ["general", "appearance", "alerts", "providers", "guide", "about"] else {
+              SettingsSection.allCases.map(\.rawValue) == ["general", "alerts", "providers", "guide", "about"] else {
             throw AppError.message("Settings did not open in General with the expected sections.")
         }
         guard let info = model.snapshot?.about,
@@ -3666,9 +3852,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             throw AppError.message("Guide keyboard tokens or mouse instructions are invalid.")
         }
         model.draft.selected = model.choices[2].selection
+        model.setBarItem(model.choices[0].selection, enabled: true)
         model.draft.display["show_provider"] = false
         model.draft.iconMode = "bot"
         model.draft.usageDisplay = "remaining"
+        model.setRefreshIntervalMinutes(20)
         model.toggleProvider("antigravity")
         model.moveProvider("codex", 1)
         model.draft.notifications.recovery = false
@@ -3690,7 +3878,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             guard model.settingsSection == section, model.page == .settings,
                   model.draft.order == pending.order, model.draft.enabled == pending.enabled,
                   model.draft.display == pending.display, model.draft.iconMode == pending.iconMode,
-                  model.draft.usageDisplay == pending.usageDisplay, model.draft.selected == pending.selected,
+                  model.draft.usageDisplay == pending.usageDisplay, model.draft.items == pending.items,
+                  model.draft.refreshIntervalMinutes == pending.refreshIntervalMinutes,
                   model.draft.notificationThresholds == pending.notificationThresholds,
                   model.draft.notificationRuleThresholds == pending.notificationRuleThresholds,
                   model.draft.saved == pending.saved,
@@ -3704,18 +3893,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         model.showSettingsSection(.general)
         model.showAbout()
         guard model.page == .settings, model.settingsSection == .about,
-              model.draft.selected == pending.selected, model.draft.usageDisplay == pending.usageDisplay,
+              model.draft.items == pending.items, model.draft.usageDisplay == pending.usageDisplay,
               try encoder.encode(model.draft.notifications) == pendingNotifications else {
             throw AppError.message("About did not open as a tab in the current settings session.")
         }
         model.openAboutLink(.guide)
         guard model.page == .settings, model.settingsSection == .guide,
-              model.draft.selected == pending.selected, model.draft.usageDisplay == pending.usageDisplay,
+              model.draft.items == pending.items, model.draft.usageDisplay == pending.usageDisplay,
               try encoder.encode(model.draft.notifications) == pendingNotifications else {
             throw AppError.message("The internal Guide link replaced pending settings edits.")
         }
         model.showSettingsSection(.general)
-        guard model.draft.selected == pending.selected, model.draft.usageDisplay == pending.usageDisplay else {
+        guard model.draft.items == pending.items, model.draft.usageDisplay == pending.usageDisplay else {
             throw AppError.message("Leaving the About tab replaced pending settings edits.")
         }
         model.showSettingsSection(.alerts)
@@ -3735,8 +3924,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
         model.draft.notificationThresholds = pending.notificationThresholds
         model.draft.display = model.draft.display.mapValues { _ in false }
-        guard !model.settingsValid, model.settingsValidation?.section == .appearance else {
-            throw AppError.message("A hidden appearance validation error was lost.")
+        guard !model.settingsValid, model.settingsValidation?.section == .general else {
+            throw AppError.message("An appearance validation error was lost from General.")
         }
         model.draft.display = pending.display
         model.draft.enabled = []
@@ -3756,6 +3945,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         guard model.page == .settings, model.settingsSection == .general,
               model.draft.selected == model.snapshot?.selected,
               model.draft.usageDisplay == "used", model.draft.iconMode == "logo",
+              model.draft.refreshIntervalMinutes == 5,
               model.draft.enabled == Set(["codex", "claude"]), model.settingsError.isEmpty, model.settingsValid,
               !model.notificationAdvancedExpanded, model.notificationEditingSelection == nil else {
             throw AppError.message("Cancel and reopen did not restore saved settings in General.")
@@ -3865,7 +4055,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         guard model.invalidNotificationRules.isEmpty, model.settingsValid,
               model.draft.selected == menuBarSelection else { throw AppError.message("Resolving rule errors changed another setting.") }
         model.notificationEditingSelection = nil
-        model.showSettingsSection(.appearance)
+        model.showSettingsSection(.general)
         model.showSettingsSection(.alerts)
         guard model.notificationAdvancedExpanded else { throw AppError.message("Settings navigation discarded Advanced disclosure state.") }
         model.draft.notificationThresholds = "80, invalid"
@@ -4052,7 +4242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
         try renderSmokePage(model, name: "update-downloading", directory: directory)
         model.showSettings()
-        model.showSettingsSection(.appearance)
+        model.showSettingsSection(.general)
         model.showSettingsSection(.alerts)
         model.showUpdate()
         guard model.page == .update, model.updateStarting, model.updateProgress?.downloadPercent == 37.5 else {

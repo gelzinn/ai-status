@@ -12,6 +12,7 @@ Column {
     property var display: ({})
     property string iconMode: "bot"
     property string usageDisplay: "used"
+    property int refreshIntervalMinutes: 5
     property var selected: ({})
     property var selectedItems: []
     property var alertSettings: ({enabled: true, thresholds: [80,95,100], recovery: true, muted_until: 0, rules: [], quiet_hours: {start: "", end: ""}, work_hours: {start: "", end: ""}, recent_only: false})
@@ -37,19 +38,19 @@ Column {
     property string section: "general"
     readonly property var sections: [
         {key: "general", label: "General", icon: "settings"},
-        {key: "appearance", label: "Appearance", icon: "paintbrush"},
         {key: "alerts", label: "Alerts", icon: "bell"},
         {key: "providers", label: "Providers", icon: "server"},
         {key: "guide", label: "Guide", icon: "book-open"},
         {key: "about", label: "About", icon: "info"}
     ]
     readonly property string validationSection: enabledProviders.length === 0 ? "providers"
-        : !Object.keys(display).some(key => display[key]) || ["used", "remaining"].indexOf(usageDisplay) === -1 ? "appearance"
+        : !Object.keys(display).some(key => display[key]) || ["used", "remaining"].indexOf(usageDisplay) === -1 || !validRefreshInterval(refreshIntervalMinutes) ? "general"
         : !validItems ? "general"
         : !valid ? "alerts" : ""
     readonly property string validationMessage: validationSection === "providers" ? "Enable at least one provider in Providers."
-        : validationSection === "appearance" ? "Choose a usage display and at least one bar text field in Appearance."
-        : validationSection === "general" ? "Choose at least one bar item in General."
+        : validationSection === "general" ? !validRefreshInterval(refreshIntervalMinutes) ? "Choose a refresh interval from 5 to 60 minutes in General."
+            : !Object.keys(display).some(key => display[key]) || ["used", "remaining"].indexOf(usageDisplay) === -1 ? "Choose a usage display and at least one bar text field in General."
+            : "Choose at least one bar item from an enabled provider in General."
         : validationSection === "alerts" ? "Review alert levels and schedules in Alerts."
         : ""
     readonly property var choices: {
@@ -110,7 +111,7 @@ Column {
     readonly property var selectedChoice: choices.find(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) || null
     readonly property string selectedLabel: selectedChoice ? selectedChoice.groupLabel + " · " + selectedChoice.label : "Choose a provider and limit"
     readonly property bool validItems: selectedItems.length > 0 && selectedItems.every(item => enabledProviders.indexOf(item.provider) !== -1 && choices.some(choice => sameItem(choice, item)))
-    readonly property bool valid: enabledProviders.length > 0 && Object.keys(display).some(key => display[key]) && ["used", "remaining"].indexOf(usageDisplay) !== -1 && validItems && validThresholds(alertThresholds) && validHours(alertQuietHours) && validHours(alertWorkHours) && (alertSettings.rules || []).every(rule => validThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] : rule.thresholds.join(",")))
+    readonly property bool valid: enabledProviders.length > 0 && Object.keys(display).some(key => display[key]) && ["used", "remaining"].indexOf(usageDisplay) !== -1 && validRefreshInterval(refreshIntervalMinutes) && validItems && validThresholds(alertThresholds) && validHours(alertQuietHours) && validHours(alertWorkHours) && (alertSettings.rules || []).every(rule => validThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] : rule.thresholds.join(",")))
     spacing: Style.space(16)
     enabled: !Plugin.Model.settingsSaving
     onOrderChanged: saved = false
@@ -118,6 +119,7 @@ Column {
     onDisplayChanged: saved = false
     onIconModeChanged: saved = false
     onUsageDisplayChanged: saved = false
+    onRefreshIntervalMinutesChanged: saved = false
     onSelectedChanged: {
         saved = false; alertRuleTarget = null
         if (selected.provider && selected.metric)
@@ -180,6 +182,7 @@ Column {
         display = Object.assign({}, settings.display || {})
         iconMode = settings.iconMode || "bot"
         usageDisplay = settings.usageDisplay === "remaining" ? "remaining" : "used"
+        refreshIntervalMinutes = validRefreshInterval(settings.refreshIntervalMinutes) ? settings.refreshIntervalMinutes : 5
         selectedItems = (settings.items || []).map(itemIdentity)
         selected = selectedItems.length ? Object.assign({}, selectedItems[0]) : Object.assign({}, Plugin.Model.snapshot.selected)
         alertSettings = JSON.parse(JSON.stringify(settings.notifications || {enabled: true, thresholds: [80,95,100], recovery: true, muted_until: 0, rules: [], quiet_hours: {start: "", end: ""}, work_hours: {start: "", end: ""}, recent_only: false}))
@@ -197,14 +200,15 @@ Column {
 
     function focusFirstControl() {
         if (section === "about") { aboutContent.focusFirstControl(); return }
-        const first = section === "appearance" ? usageDisplaySelector
-            : section === "alerts" ? !validThresholds(alertThresholds) ? globalThresholdField.inputItem
+        const first = section === "alerts" ? !validThresholds(alertThresholds) ? globalThresholdField.inputItem
                 : !validHours(alertQuietHours) ? quietHoursField.inputItem
                 : !validHours(alertWorkHours) ? workHoursField.inputItem
                 : invalidAlertRules.length ? ruleThresholdField.inputItem : alertEnabled
             : section === "guide" ? null
             : section === "providers" && providerRows.count > 0 ? providerRows.itemAt(0).firstControl
-            : barItemRows.count > 0 ? barItemRows.itemAt(0) : null
+            : !validRefreshInterval(refreshIntervalMinutes) ? refreshIntervalSlider
+            : !Object.keys(display).some(key => display[key]) || ["used", "remaining"].indexOf(usageDisplay) === -1 ? usageDisplaySelector
+            : barItemRows.count > 0 ? barItemRows.itemAt(0) : refreshIntervalSlider
         if (first) first.forceActiveFocus(Qt.TabFocusReason)
     }
 
@@ -272,6 +276,7 @@ Column {
             display: display,
             iconMode: iconMode,
             usageDisplay: usageDisplay,
+            refreshIntervalMinutes: refreshIntervalMinutes,
             notifications: Object.assign({}, alertSettings, {
                 thresholds: parseThresholds(alertThresholds),
                 rules: (alertSettings.rules || []).map(rule => Object.assign({}, rule, {
@@ -344,6 +349,9 @@ Column {
         if (!value.trim()) return true
         const values = value.split(",")
         return values.length > 0 && values.every(item => /^\d+$/.test(item.trim()) && Number(item) > 0 && Number(item) <= 100) && new Set(values.map(Number)).size === values.length
+    }
+    function validRefreshInterval(value) {
+        return typeof value === "number" && value >= 5 && value <= 60 && value % 5 === 0
     }
     function parseThresholds(value) {
         return value.trim() ? value.split(",").map(Number).sort((a, b) => a - b) : []
@@ -440,8 +448,36 @@ Column {
         }
     }
     Column {
-        objectName: "settings-section-appearance"
-        visible: root.section === "appearance"
+        objectName: "settings-refresh-interval"
+        visible: root.section === "general"
+        width: parent.width
+        spacing: Style.space(8)
+        SectionHeading {
+            title: "Automatic refresh · " + root.refreshIntervalMinutes + " min"
+            description: "Automatic usage refresh. Provider cooldowns still apply."
+        }
+        Plugin.PanelSlider {
+            id: refreshIntervalSlider
+            objectName: "refresh-interval-slider"
+            width: parent.width
+            foreground: root.foreground
+            from: 5
+            to: 60
+            stepSize: 5
+            value: root.refreshIntervalMinutes
+            Accessible.name: "Automatic usage refresh interval"
+            Accessible.description: root.refreshIntervalMinutes + " minutes. From 5 to 60 minutes in 5-minute steps."
+            onMoved: root.refreshIntervalMinutes = Math.round(value)
+        }
+        Row {
+            width: parent.width
+            Label { width: parent.width / 2; text: "5 min"; opacity: 0.5; font.pixelSize: Style.font.caption }
+            Label { width: parent.width / 2; text: "60 min"; horizontalAlignment: Text.AlignRight; opacity: 0.5; font.pixelSize: Style.font.caption }
+        }
+    }
+    Column {
+        objectName: "settings-usage-display"
+        visible: root.section === "general"
         width: parent.width
         spacing: Style.space(8)
         SectionHeading { title: "Usage display" }
@@ -460,7 +496,7 @@ Column {
         }
     }
     Column {
-        visible: root.section === "appearance"
+        visible: root.section === "general"
         width: parent.width
         spacing: Style.space(4)
         SectionHeading { title: "Bar display" }

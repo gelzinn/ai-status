@@ -75,8 +75,9 @@ additional selected items. Balances have
 no invented percentage; a cost percentage requires a reported limit or a
 configured monitoring budget.
 
-Usage refreshes every five minutes. Loading feedback appears during a
-refresh, and usable cached data stays visible if a provider request fails.
+Usage refreshes at the saved interval, defaulting to five minutes. Loading
+feedback appears during a refresh, and usable cached data stays visible if a
+provider request fails.
 Providers without usable metrics remain available in Settings.
 
 When Claude or Codex reports available manual resets, **Reset credits: N
@@ -95,13 +96,18 @@ limit. See [provider eligibility](PROVIDERS.md#claude).
 
 ## Settings and About
 
-Settings includes checkboxes for the account/limit items shown in the menu bar.
+**General** includes checkboxes for the account/limit items shown in the menu bar.
 Keep one item or select as many as you want; at least one is required. Each
 selected item shows its own usage label. Existing single-item preferences
-remain selected after updating. Settings also includes menu bar display fields,
-icon mode, and connections to enable, disable or reorder. **Save**
-applies changes and keeps Settings open. Back or **Cancel** returns to usage
-and discards unsaved edits.
+remain selected after updating. General also includes menu bar display fields,
+icon mode and the **Automatic refresh** slider. Choose 5–60 minutes in steps
+of 5; the default is 5. Alerts remains separate, with connections enabled,
+disabled and reordered in Providers.
+Dragging changes the draft only. Saving the interval updates the daemon's
+schedule without restarting or forcing an extra collection. SwiftBar also
+follows the saved interval. Provider cooldowns and request timeouts are
+preserved. **Save** applies changes and keeps Settings open. Back or **Cancel**
+returns to usage and discards unsaved edits.
 
 **About AI Status** shows the installed version, project details, license,
 usage guide and links. Its back control returns to Settings. Authentication

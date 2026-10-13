@@ -884,7 +884,8 @@ Item {
             const scroller = findChild(panel, "panel-scroller")
             const navigation = findChild(panel, "settings-navigation")
             const providers = findChild(panel, "settings-nav-providers")
-            const appearance = findChild(panel, "settings-nav-appearance")
+            const general = findChild(panel, "settings-nav-general")
+            compare(findChild(panel, "settings-nav-appearance"), null)
             const navY = navigation.y
             scroller.contentY = scroller.contentHeight - scroller.height
             providers.forceActiveFocus(Qt.TabFocusReason)
@@ -898,20 +899,15 @@ Item {
             keyClick(Qt.Key_Left)
             compare(settings.section, "alerts")
             keyClick(Qt.Key_Left)
-            verify(appearance.activeFocus)
+            verify(general.activeFocus)
             keyClick(Qt.Key_Return)
-            compare(settings.section, "appearance")
+            compare(settings.section, "general")
             tryCompare(scroller, "contentY", 0)
             compare(settings.usageDisplay, "remaining")
             verify(settings.enabledProviders.indexOf("kiro") !== -1)
-            const general = findChild(panel, "settings-nav-general")
-            keyClick(Qt.Key_Left)
-            compare(settings.section, "general")
             wait(20)
             compare(navigation.contentX, 0)
             general.forceActiveFocus(Qt.TabFocusReason)
-            keyClick(Qt.Key_Tab)
-            verify(appearance.activeFocus)
             keyClick(Qt.Key_Tab)
             verify(findChild(panel, "settings-nav-alerts").activeFocus)
             keyClick(Qt.Key_Tab)
@@ -922,8 +918,18 @@ Item {
             verify(findChild(panel, "settings-nav-about").activeFocus)
             keyClick(Qt.Key_Tab)
             verify(findChild(settings, "bar-item-claude-0-rolling").activeFocus)
-            // Controls in the other sections are skipped by the focus chain.
+            // General keeps bar items, refresh and display controls together.
             for (let index = 0; index < settings.choices.length; index++) keyClick(Qt.Key_Tab)
+            verify(findChild(settings, "refresh-interval-slider").activeFocus)
+            keyClick(Qt.Key_Tab)
+            verify(findChild(settings, "usage-display").activeFocus)
+            for (const key of ["show_provider", "show_model", "show_metric", "show_pct"]) {
+                keyClick(Qt.Key_Tab)
+                verify(findChild(settings, "display-" + key).activeFocus)
+            }
+            keyClick(Qt.Key_Tab)
+            verify(findChild(settings, "icon-mode").activeFocus)
+            keyClick(Qt.Key_Tab)
             verify(findChild(panel, "settings-cancel").activeFocus)
             Plugin.Model.settingsSaving = true
             verify(!navigation.enabled)
@@ -1009,7 +1015,7 @@ Item {
         }
         function test_tab_dismisses_selector_without_scrolling_to_popup_overlay() {
             const settings = configureManyProviders()
-            settings.selectSection("appearance")
+            settings.selectSection("general")
             wait(20)
             const scroller = findChild(panel, "panel-scroller")
             const selector = findChild(settings, "icon-mode")
@@ -1024,7 +1030,7 @@ Item {
             tryCompare(selector, "popupOpen", false)
             const cancel = findChild(panel, "settings-cancel")
             tryVerify(() => cancel.activeFocus)
-            settings.selectSection("appearance")
+            settings.selectSection("general")
             wait(20)
             const next = findChild(settings, "usage-display")
             next.forceActiveFocus(Qt.TabFocusReason)
@@ -1332,7 +1338,7 @@ Item {
         function test_guide_link_order_keycaps_and_tab_icons() {
             panel.configure()
             const settings = findChild(panel, "panel-settings-page")
-            compare(settings.sections.map(item => item.key).join(","), "general,appearance,alerts,providers,guide,about")
+            compare(settings.sections.map(item => item.key).join(","), "general,alerts,providers,guide,about")
             settings.selectSection("about")
             wait(20)
             const links = ["guide", "issues", "documentation", "github"].map(key => findChild(settings, "about-link-" + key))
@@ -1400,11 +1406,19 @@ Item {
                     compare(after.pixel(Math.round(position.x + x), Math.round(position.y + y)), before.pixel(Math.round(position.x + x), Math.round(position.y + y)))
             }
         }
-        function test_short_general_section_fits_without_vertical_overflow() {
+        function test_unified_general_keeps_bar_items_and_refresh_display_controls_reachable() {
             panel.configure()
             wait(20)
+            const settings = findChild(panel, "panel-settings-page")
             const scroller = findChild(panel, "panel-scroller")
-            verify(scroller.contentHeight <= scroller.height + 1)
+            const before = JSON.stringify(settings.selectedItems)
+            for (const name of ["bar-item-claude-0-rolling", "refresh-interval-slider", "usage-display", "icon-mode"]) {
+                const control = findChild(settings, name)
+                control.forceActiveFocus(Qt.TabFocusReason)
+                verifyControlInViewport(control, scroller)
+            }
+            verify(scroller.contentY > 0)
+            compare(JSON.stringify(settings.selectedItems), before)
         }
         function test_separator_reaches_sides_and_only_refresh_icon_spins() {
             const surface = findChild(panel, "panel-surface")

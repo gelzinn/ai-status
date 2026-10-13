@@ -61,6 +61,8 @@ The widget runs inside the existing shell process, using a single Python daemon 
 
 Each selected item has its own usage label in Quickshell and Waybar. In logo mode, Quickshell shows a logo beside each item; Waybar shows one provider image for the first available selected item beside the combined text labels. Existing single-item preferences remain selected after updating. Click a provider heading or usage metric to change the first item immediately, keeping the additional selections. Scroll the bar to switch the first item's provider among those with valid data; middle-click changes its metric. Escape on the usage page closes the panel; `r` refreshes, `c` opens settings, and Up/Down scroll. In settings, Tab focuses the form controls; Space or Enter activates the focused control. Preferences are saved only when you press **Save**.
 
+**General** contains the selected account/limit items and the display controls previously in Appearance. Its **Automatic refresh** slider chooses 5–60 minutes in steps of 5, defaulting to 5. Dragging changes the draft; **Save** updates the schedule without restarting the daemon, and **Cancel** discards it. Changing only the interval does not force an extra collection. Alerts remains a separate section. Waybar also follows the saved interval through the shared daemon. Manual refresh, request timeouts and provider cooldowns retain their existing protections.
+
 The usage-display and icon selectors open floating lists without expanding the form and use the same right-aligned chevron. Provider logos appear beside account/limit items and provider checkboxes. The header divider reaches the panel borders, and only the Refresh icon rotates during updates.
 
 The bar has no hover tutorial. Open **About AI Status** in Settings for the project logo, description, author, version, commit, MIT license, quick guide and links to GitHub, documentation and bug reports. Back returns to your settings draft. Reset details also use the header's back arrow; their provider logo/name is a plain heading above a rounded table.
@@ -243,7 +245,7 @@ Rows show the source (`default` or `saved`), collection state (`enabled` or
 | Usage status | Meaning |
 | --- | --- |
 | `available` | Usable usage data is recorded |
-| `cached` | Usable data is marked as cached or the snapshot is older than five minutes |
+| `cached` | Usable data is marked as cached or the snapshot is older than the saved refresh interval |
 | `unavailable` | A result exists without usable metrics |
 | `not_checked` | No result is recorded for the saved connection |
 

@@ -169,6 +169,7 @@ Item {
 
     Process {
         id: settingsProcess
+        objectName: "settings-process"
         stderr: SplitParser { onRead: data => root.settingsError = data }
         onExited: (exitCode, exitStatus) => {
             root.settingsSaving = false

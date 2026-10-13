@@ -17,7 +17,7 @@ export function Features({ latestVersion }: { latestVersion: string }) {
     },
     {
       title: "Usage Refresh",
-      description: "Usage refreshes every five minutes. Refresh manually whenever you need an update.",
+      description: "Choose automatic refresh from 5 to 60 minutes in native Settings. Refresh manually whenever you need an update.",
       visual: <FeatureVisuals.LiveUpdates windows={nativePanel} />,
     },
     {

@@ -39,7 +39,7 @@ version numbers are excluded. There are no forced updates or support-expiration
 notices.
 
 The desktop checks for a new release whenever it refreshes usage: automatically
-every five minutes and on manual refresh. The release query runs alongside the
+at the saved refresh interval (five minutes by default) and on manual refresh. The release query runs alongside the
 provider queries, so usage results can appear while GitHub is still responding.
 If GitHub is unavailable, usage still refreshes and the last known update notice
 is preserved. Checking for a release does not install it.

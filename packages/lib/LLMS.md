@@ -38,6 +38,10 @@ hidden-icons menu. Clicking a usage metric or cycling changes the first item
 while retaining the additional selections. Updating preserves existing
 single-item preferences.
 
+General combines the selected items, display fields, icon and automatic refresh
+interval. Choose 5–60 minutes in steps of 5, defaulting to 5; changes apply on
+Save. Alerts remains separate.
+
 ## Shared references
 
 - [Supported providers and authentication](https://ai-status.gelzin.com/providers)
