@@ -3501,17 +3501,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         logo.enumerateAttribute(.attachment, in: NSRange(location: 0, length: logo.length)) { value, _, _ in
             if let attachment = value as? NSTextAttachment { attachments.append(attachment) }
         }
-        guard attachments.count == 2, attachments.allSatisfy({ $0.image?.size == NSSize(width: 16, height: 16) && $0.attachmentCell != nil }),
-              logo.string.contains("Codex 27%"), logo.string.contains("Claude ⠙"), !hidden.string.contains("\u{fffc}"),
-              hidden.string == "Codex 27%   Claude ⠙" else {
-            throw AppError.message("Multiple menu bar logos, text, ordering or per-item loading were not rendered.")
+        guard attachments.count == 2 else {
+            throw AppError.message("Menu bar logo attachment count: expected 2, got \(attachments.count); title=\(String(reflecting: logo.string)).")
+        }
+        for (index, attachment) in attachments.enumerated() {
+            // AppKit draws the cell's image; the attachment's independent
+            // image property need not mirror the explicitly configured cell.
+            let cell = attachment.attachmentCell as? NSTextAttachmentCell
+            guard cell?.image?.size == NSSize(width: 16, height: 16),
+                  attachment.bounds == NSRect(x: 0, y: -3, width: 16, height: 16) else {
+                throw AppError.message("Menu bar logo \(index): cell image=\(String(describing: cell?.image?.size)), attachment image=\(String(describing: attachment.image?.size)), bounds=\(attachment.bounds). Expected a 16px cell image and 16px bounds.")
+            }
+        }
+        let expectedLogoText = "\u{fffc} Codex 27%   \u{fffc} Claude ⠙"
+        guard logo.string == expectedLogoText else {
+            throw AppError.message("Menu bar logo title: expected \(String(reflecting: expectedLogoText)), got \(String(reflecting: logo.string)).")
+        }
+        let expectedHiddenText = "Codex 27%   Claude ⠙"
+        guard hidden.string == expectedHiddenText else {
+            throw AppError.message("Menu bar text without icons: expected \(String(reflecting: expectedHiddenText)), got \(String(reflecting: hidden.string)).")
         }
         let nativeItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         defer { NSStatusBar.system.removeStatusItem(nativeItem) }
         guard let button = nativeItem.button else { throw AppError.message("Native menu bar button is unavailable.") }
         button.attributedTitle = logo
-        guard button.attributedTitle.isEqual(to: logo), (button.cell?.cellSize.width ?? 0) > 120 else {
-            throw AppError.message("Native menu bar button dropped or clipped the combined title.")
+        guard button.attributedTitle.isEqual(to: logo) else {
+            throw AppError.message("Native menu bar button changed the combined title: expected \(String(reflecting: logo.string)), got \(String(reflecting: button.attributedTitle.string)).")
+        }
+        guard (button.cell?.cellSize.width ?? 0) > 120 else {
+            throw AppError.message("Native menu bar button width: expected more than 120px, got \(String(describing: button.cell?.cellSize.width)).")
         }
         var missingDocument = document
         let missingItems = [Selection(provider: "codex", metric: "weekly:missing"), Selection(provider: "claude", metric: "rolling:missing")]
@@ -3530,11 +3548,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
         let fallback = MenuBarRenderer.title(missing.visibleBarItems, iconMode: "logo", providers: missing.providers, spinnerFrame: 0)
         let fallbackAttachment = fallback.attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment
+        let fallbackImage = (fallbackAttachment?.attachmentCell as? NSTextAttachmentCell)?.image
         let appImage = Assets.image()?.copy() as? NSImage
         appImage?.size = NSSize(width: 16, height: 16)
-        guard fallbackAttachment?.image != nil, appImage != nil,
-              fallbackAttachment?.image?.tiffRepresentation == appImage?.tiffRepresentation else {
-            throw AppError.message("Missing menu bar metrics retained provider artwork instead of the app icon.")
+        guard fallbackImage != nil, appImage != nil,
+              fallbackImage?.tiffRepresentation == appImage?.tiffRepresentation else {
+            throw AppError.message("Missing menu bar metrics did not use the app icon: cell image=\(String(describing: fallbackImage?.size)), app image=\(String(describing: appImage?.size)).")
         }
         model.accept(multiData)
         model.showSettings()
