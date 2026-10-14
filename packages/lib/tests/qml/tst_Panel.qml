@@ -836,7 +836,7 @@ Item {
             const settings = configureManyProviders()
             const scroller = findChild(panel, "panel-scroller")
             const first = findChild(settings, "provider-claude")
-            const last = findChild(settings, "bar-item-" + settings.order[settings.order.length - 1] + "-0-weekly:Fable")
+            const last = findChild(settings, "provider-move-up-" + settings.order[settings.order.length - 1])
             first.forceActiveFocus(Qt.TabFocusReason)
             verifyControlInViewport(first, scroller)
             let focused = first
@@ -857,7 +857,7 @@ Item {
         function test_fixed_footer_and_header_focus_preserve_settings_scroll() {
             const settings = configureManyProviders()
             const scroller = findChild(panel, "panel-scroller")
-            const about = findChild(settings, "bar-item-" + settings.order[settings.order.length - 1] + "-0-weekly:Fable")
+            const about = findChild(settings, "provider-move-up-" + settings.order[settings.order.length - 1])
             scroller.contentY = Math.max(0, scroller.contentHeight - scroller.height)
             about.forceActiveFocus(Qt.TabFocusReason)
             verifyControlInViewport(about, scroller)
@@ -1417,12 +1417,12 @@ Item {
             settings.selectSection("providers")
             settings.toggleProvider("kiro")
             wait(20)
-            for (const name of ["bar-order-remove-claude-0-rolling", "provider-claude", "bar-item-claude-0-rolling", "provider-codex", "bar-item-codex-0-weekly", "provider-kiro", "bar-item-kiro-0-rolling"]) {
+            for (const name of ["provider-claude", "provider-limits-claude", "provider-bar-claude", "provider-codex", "provider-bar-codex", "provider-kiro", "provider-bar-kiro"]) {
                 const control = findChild(settings, name)
                 control.forceActiveFocus(Qt.TabFocusReason)
                 verifyControlInViewport(control, scroller)
             }
-            verify(scroller.contentY > 0)
+            compare(findChild(settings, "bar-order-claude-0-rolling"), null)
             compare(JSON.stringify(settings.selectedItems), before)
         }
         function test_separator_reaches_sides_and_only_refresh_icon_spins() {

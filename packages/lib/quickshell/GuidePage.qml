@@ -17,9 +17,9 @@ Column {
         {id: "activate", feature: "Activate", action: "Space / Enter when focused."},
         {id: "selector", feature: "Choose an option", action: "Up / Down in an open select, then Enter. Esc closes it."},
         {id: "thresholds", feature: "Adjust alert levels", action: "Drag a slider or use Left / Right when focused."},
-        {id: "bar-items", feature: "Choose bar items", action: "Active and Show in bar checkboxes in Providers."},
-        {id: "bar-order", feature: "Reorder bar items", action: "Bar order arrows in Providers."},
-        {id: "order", feature: "Reorder Usage providers", action: "Provider row arrows in Providers."},
+        {id: "bar-items", feature: "Choose bar items", action: "Active and Bar checkboxes in the provider row."},
+        {id: "bar-order", feature: "Reorder bar items", action: "Provider arrows set the order in Usage and the bar."},
+        {id: "order", feature: "Choose displayed limits", action: "Open the provider name menu in Providers."},
         {id: "save", feature: "Save settings", action: "Save applies all tabs and keeps Settings open."},
         {id: "cancel", feature: "Cancel settings", action: "Cancel, Back or Esc returns to Usage without saving."},
         {id: "credits", feature: "Credit details", action: "Click a reset-credit or cloud-credit row."}

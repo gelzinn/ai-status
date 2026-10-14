@@ -65,7 +65,7 @@ class MacOSFrontendTests(unittest.TestCase):
         save.assert_called_once_with({**SELECTED, **choice, "items": [choice]})
         refresh.assert_not_called()
 
-    def test_primary_selection_keeps_the_other_menu_bar_items(self):
+    def test_metric_selection_keeps_other_menu_bar_items_in_provider_order(self):
         pinned = [{"provider": "claude", "idx": 0, "metric": "rolling"},
                   {"provider": "claude", "idx": 0, "metric": "weekly"}]
         choice = {"provider": "codex", "idx": 1, "metric": "weekly"}
@@ -77,7 +77,7 @@ class MacOSFrontendTests(unittest.TestCase):
             result, errors = self.invoke(["select-metric", "--frontend", "macos",
                                           "--selection-json", json.dumps(choice)])
         self.assertIn(result, (0, None), errors)
-        save.assert_called_once_with({**SELECTED, **choice, "items": [choice, pinned[1]]})
+        save.assert_called_once_with({**SELECTED, **pinned[1], "items": [pinned[1], choice]})
         refresh.assert_not_called()
 
     def test_bad_selections_do_not_change_the_saved_metric(self):

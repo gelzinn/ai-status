@@ -8,6 +8,8 @@ Column {
     property color foreground: "white"
     property string fontFamily: Style.font.family
     property var order: []
+    property var availableProviders: []
+    property var rememberedBarItems: ({})
     property var enabledProviders: []
     property var display: ({})
     property string iconMode: "bot"
@@ -32,7 +34,8 @@ Column {
     readonly property var invalidAlertRules: (alertSettings.rules || []).filter(rule => !validThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] : rule.thresholds.join(",")))
     readonly property string ruleSelectionLabel: ruleLabel(ruleSelection.provider, ruleSelection.metric)
     property Item popupParent: parent
-    readonly property bool selectionOpen: iconSelector.popupOpen || usageDisplaySelector.popupOpen
+    property Item providerSelector: null
+    readonly property bool selectionOpen: iconSelector.popupOpen || usageDisplaySelector.popupOpen || (!!providerSelector && providerSelector.popupOpen)
     property bool saved: false
     property bool inlineValidation: true
     property string section: "general"
@@ -112,7 +115,7 @@ Column {
     }
     readonly property var selectedChoice: choices.find(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) || null
     readonly property string selectedLabel: selectedChoice ? selectedChoice.groupLabel + " · " + selectedChoice.label : "Choose a provider and limit"
-    readonly property bool validItems: selectedItems.length > 0 && selectedItems.every(item => enabledProviders.indexOf(item.provider) !== -1 && choices.some(choice => sameItem(choice, item)))
+    readonly property bool validItems: selectedItems.length > 0 && selectedItems.every(item => enabledProviders.indexOf(item.provider) !== -1 && availableProviders.indexOf(item.provider) !== -1 && choices.some(choice => sameItem(choice, item)))
     readonly property bool valid: enabledProviders.length > 0 && Object.keys(display).some(key => display[key]) && ["used", "remaining"].indexOf(usageDisplay) !== -1 && validRefreshInterval(refreshIntervalMinutes) && validItems && validThresholds(alertThresholds) && validHours(alertQuietHours) && validHours(alertWorkHours) && (alertSettings.rules || []).every(rule => validThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] : rule.thresholds.join(",")))
     spacing: Style.space(16)
     enabled: !Plugin.Model.settingsSaving
@@ -124,8 +127,10 @@ Column {
     onRefreshIntervalMinutesChanged: saved = false
     onSelectedChanged: {
         saved = false; alertRuleTarget = null
-        if (selected.provider && selected.metric)
+        if (selected.provider && selected.metric && (!selectedItems.length || !sameItem(selectedItems[0], selected))) {
             selectedItems = [itemIdentity(selected)].concat(selectedItems.slice(1).filter(item => !sameItem(item, selected)))
+            normalizeBarItems()
+        }
     }
     onSelectedItemsChanged: saved = false
     onAlertSettingsChanged: saved = false
@@ -174,19 +179,34 @@ Column {
     function closeSelectors() {
         iconSelector.dismiss()
         usageDisplaySelector.dismiss()
+        if (providerSelector) providerSelector.dismiss()
+        providerSelector = null
+    }
+
+    function providerMenuChanged(selector) {
+        if (selector.popupOpen) {
+            iconSelector.dismiss()
+            usageDisplaySelector.dismiss()
+            if (providerSelector && providerSelector !== selector) providerSelector.dismiss()
+            providerSelector = selector
+        } else if (providerSelector === selector) providerSelector = null
     }
 
     function begin() {
         section = "general"
         const settings = Plugin.Model.snapshot.settings || {}
-        order = (settings.order || []).slice()
+        availableProviders = (settings.order || []).slice()
+        order = availableProviders.concat((settings.items || []).map(item => item.provider)
+            .filter((name, index, names) => availableProviders.indexOf(name) === -1 && names.indexOf(name) === index))
         enabledProviders = (settings.enabled || []).slice()
+        rememberedBarItems = {}
         display = Object.assign({}, settings.display || {})
         iconMode = settings.iconMode || "bot"
         usageDisplay = settings.usageDisplay === "remaining" ? "remaining" : "used"
         refreshIntervalMinutes = validRefreshInterval(settings.refreshIntervalMinutes) ? settings.refreshIntervalMinutes : 5
         selectedItems = (settings.items || []).map(itemIdentity)
         selected = selectedItems.length ? Object.assign({}, selectedItems[0]) : Object.assign({}, Plugin.Model.snapshot.selected)
+        normalizeBarItems()
         alertSettings = JSON.parse(JSON.stringify(settings.notifications || {enabled: true, thresholds: [80,95,100], recovery: true, muted_until: 0, rules: [], quiet_hours: {start: "", end: ""}, work_hours: {start: "", end: ""}, recent_only: false}))
         alertThresholds = alertSettings.thresholds.join(",")
         alertRuleTexts = {}
@@ -224,11 +244,12 @@ Column {
     }
 
     function toggleProvider(name) {
-        if (Plugin.Model.settingsSaving) return
+        if (Plugin.Model.settingsSaving || availableProviders.indexOf(name) === -1) return
         const activating = enabledProviders.indexOf(name) === -1
+        if (!activating) rememberBarChoices(name)
         enabledProviders = activating ? enabledProviders.concat([name]) : enabledProviders.filter(item => item !== name)
         if (!activating) selectedItems = selectedItems.filter(item => item.provider !== name)
-        selected = selectedItems.length ? Object.assign({}, selectedItems[0]) : {}
+        normalizeBarItems()
     }
 
     function sameItem(left, right) {
@@ -241,76 +262,72 @@ Column {
 
     function toggleItem(choice) {
         if (Plugin.Model.settingsSaving) return
+        if (enabledProviders.indexOf(choice.provider) === -1 && !selectedItems.some(item => sameItem(item, choice))) return
         selectedItems = selectedItems.some(item => sameItem(item, choice))
             ? selectedItems.filter(item => !sameItem(item, choice))
             : selectedItems.concat([itemIdentity(choice)])
-        selected = selectedItems.length ? Object.assign({}, selectedItems[0]) : {}
-        Qt.callLater(() => {
-            if (!root.visible || root.section !== "providers") return
-            for (let index = 0; index < providerRows.count; index++) {
-                const card = providerRows.itemAt(index)
-                for (let limit = 0; card && limit < card.limitRows.count; limit++) {
-                    const row = card.limitRows.itemAt(limit)
-                    if (row && sameItem(row.modelData, choice)) {
-                        row.forceActiveFocus(Qt.TabFocusReason)
-                        return
-                    }
-                }
-            }
-            focusFirstControl()
-        })
+        normalizeBarItems()
+        const remembered = Object.assign({}, rememberedBarItems)
+        remembered[choice.provider] = selectedItems.filter(item => item.provider === choice.provider).map(itemIdentity)
+        rememberedBarItems = remembered
     }
 
-    function itemChoice(item) {
-        return choices.find(choice => sameItem(choice, item)) || {
-            provider: item.provider, idx: item.idx, metric: item.metric,
-            groupLabel: providerName(item.provider), groupLogoSource: "",
+    function normalizeBarItems() {
+        const rank = name => order.indexOf(name) === -1 ? order.length : order.indexOf(name)
+        selectedItems = selectedItems.map((item, index) => ({item: item, index: index}))
+            .sort((left, right) => rank(left.item.provider) - rank(right.item.provider) || left.index - right.index)
+            .map(entry => entry.item)
+        selected = selectedItems.length ? Object.assign({}, selectedItems[0]) : {}
+    }
+
+    function rememberBarChoices(name) {
+        const items = selectedItems.filter(item => item.provider === name).map(itemIdentity)
+        if (!items.length) return
+        const remembered = Object.assign({}, rememberedBarItems)
+        remembered[name] = items
+        rememberedBarItems = remembered
+    }
+
+    function providerChoices(name) {
+        const live = choices.filter(choice => choice.provider === name)
+        const missing = (rememberedBarItems[name] || []).filter(item => !live.some(choice => sameItem(item, choice)))
+        return live.concat(missing.map(item => Object.assign({}, item, {
+            groupLabel: providerName(name), groupLogoSource: providerLogo(name, null),
             label: item.metric + " (unavailable)"
+        })))
+    }
+
+    function toggleProviderBar(name) {
+        if (Plugin.Model.settingsSaving) return
+        if (selectedItems.some(item => item.provider === name)) {
+            rememberBarChoices(name)
+            selectedItems = selectedItems.filter(item => item.provider !== name)
+        } else {
+            if (enabledProviders.indexOf(name) === -1 || availableProviders.indexOf(name) === -1) return
+            const first = choices.find(item => item.provider === name)
+            const remembered = rememberedBarItems[name] || []
+            const restored = remembered.length ? remembered : (first ? [itemIdentity(first)] : [])
+            selectedItems = selectedItems.concat(restored)
         }
-    }
-
-    function moveBarItem(index, direction) {
-        if (Plugin.Model.settingsSaving) return
-        const other = index + direction
-        if (index < 0 || index >= selectedItems.length || other < 0 || other >= selectedItems.length
-                || (direction !== -1 && direction !== 1)) return
-        const next = selectedItems.slice()
-        const moved = next[index]
-        next[index] = next[other]
-        next[other] = moved
-        selectedItems = next
-        selected = Object.assign({}, selectedItems[0])
-        Qt.callLater(() => {
-            if (!root.visible || root.section !== "providers") return
-            for (let row = 0; row < barOrderRows.count; row++) {
-                const item = barOrderRows.itemAt(row)
-                if (item && sameItem(item.modelData, moved)) {
-                    item.focusMove(direction)
-                    return
-                }
-            }
-        })
-    }
-
-    function removeBarItem(item) {
-        if (Plugin.Model.settingsSaving) return
-        selectedItems = selectedItems.filter(choice => !sameItem(choice, item))
-        selected = selectedItems.length ? Object.assign({}, selectedItems[0]) : {}
-        Qt.callLater(() => {
-            if (!root.visible || root.section !== "providers") return
-            if (barOrderRows.count) barOrderRows.itemAt(0).firstControl.forceActiveFocus(Qt.TabFocusReason)
-            else focusFirstControl()
-        })
+        normalizeBarItems()
     }
 
     function moveProvider(index, direction) {
+        if (Plugin.Model.settingsSaving || index < 0 || index >= order.length || (direction !== -1 && direction !== 1)) return
         const next = order.slice()
         const other = index + direction
         if (other < 0 || other >= next.length) return
+        closeSelectors()
         const value = next[index]
         next[index] = next[other]
         next[other] = value
         order = next
+        normalizeBarItems()
+        Qt.callLater(() => {
+            if (!root.visible || root.section !== "providers") return
+            const row = providerRows.itemAt(other)
+            if (row) row.focusMove(direction)
+        })
     }
 
     function save() {
@@ -361,6 +378,29 @@ Column {
     component Button: Plugin.PanelButton {
         foreground: root.foreground
         fontFamily: root.fontFamily
+    }
+    component ProviderCheckbox: Button {
+        id: checkbox
+        property bool checked: false
+        width: Style.space(28)
+        Accessible.role: Accessible.CheckBox
+        Accessible.checked: checked
+        Rectangle {
+            objectName: checkbox.objectName + "-indicator"
+            anchors.centerIn: parent
+            width: Style.space(14)
+            height: width
+            radius: Style.space(3)
+            color: checkbox.checked ? checkbox.foreground : "transparent"
+            border.width: checkbox.checked ? 0 : 1
+            border.color: Qt.rgba(checkbox.foreground.r, checkbox.foreground.g, checkbox.foreground.b, 0.3)
+            Plugin.PanelIcon {
+                anchors.fill: parent
+                visible: checkbox.checked
+                name: "check"
+                foreground: Commons.Color.popups.background
+            }
+        }
     }
     component Field: Rectangle {
         id: field
@@ -762,159 +802,100 @@ Column {
         width: parent.width
         spacing: Style.space(6)
         SectionHeading {
-            title: "Bar order"
-            description: "Move the displayed limits up or down. The first item appears first in the bar."
+            title: "Providers"
+            description: "One order for Usage and the bar. Click a provider name to choose limits."
         }
-        Label {
-            visible: root.selectedItems.length === 0
-            text: "Choose at least one limit under an active provider below."
-            font.pixelSize: Style.font.caption
-        }
-        Repeater {
-            id: barOrderRows
-            model: root.selectedItems
-            delegate: Row {
-                id: barOrderRow
-                required property var modelData
-                required property int index
-                readonly property var choice: root.itemChoice(modelData)
-                objectName: "bar-order-" + modelData.provider + "-" + modelData.idx + "-" + modelData.metric
-                width: root.width
-                spacing: Style.space(4)
-                property alias firstControl: barRemove
-                function focusMove(direction) {
-                    const requested = direction < 0 ? barUp : barDown
-                    const fallback = direction < 0 ? barDown : barUp
-                    const control = requested.enabled ? requested : fallback.enabled ? fallback : barRemove
-                    control.forceActiveFocus(Qt.TabFocusReason)
-                }
-                Row {
-                    width: Math.max(0, parent.width - Style.space(102))
-                    spacing: Style.space(6)
-                    Image {
-                        width: Style.space(16)
-                        height: width
-                        anchors.verticalCenter: parent.verticalCenter
-                        source: barOrderRow.choice.groupLogoSource
-                        visible: source.toString() !== ""
-                        fillMode: Image.PreserveAspectFit
-                        asynchronous: true
-                    }
-                    Label {
-                        objectName: barOrderRow.objectName + "-label"
-                        width: Math.max(0, parent.width - Style.space(22))
-                        text: (barOrderRow.index + 1) + ". " + barOrderRow.choice.groupLabel + " · " + barOrderRow.choice.label
-                        font.pixelSize: Style.font.caption
-                    }
-                }
-                Button {
-                    id: barUp
-                    objectName: "bar-order-move-up-" + barOrderRow.modelData.provider + "-" + barOrderRow.modelData.idx + "-" + barOrderRow.modelData.metric
-                    width: Style.space(30)
-                    iconName: "arrow-up"
-                    enabled: barOrderRow.index > 0
-                    Accessible.name: "Move " + barOrderRow.choice.groupLabel + " " + barOrderRow.choice.label + " earlier in the bar"
-                    onClicked: root.moveBarItem(barOrderRow.index, -1)
-                }
-                Button {
-                    id: barDown
-                    objectName: "bar-order-move-down-" + barOrderRow.modelData.provider + "-" + barOrderRow.modelData.idx + "-" + barOrderRow.modelData.metric
-                    width: Style.space(30)
-                    iconName: "arrow-down"
-                    enabled: barOrderRow.index < root.selectedItems.length - 1
-                    Accessible.name: "Move " + barOrderRow.choice.groupLabel + " " + barOrderRow.choice.label + " later in the bar"
-                    onClicked: root.moveBarItem(barOrderRow.index, 1)
-                }
-                Button {
-                    id: barRemove
-                    objectName: "bar-order-remove-" + barOrderRow.modelData.provider + "-" + barOrderRow.modelData.idx + "-" + barOrderRow.modelData.metric
-                    width: Style.space(30)
-                    text: "×"
-                    Accessible.name: "Remove " + barOrderRow.choice.groupLabel + " " + barOrderRow.choice.label + " from the bar"
-                    onClicked: root.removeBarItem(barOrderRow.modelData)
-                }
-            }
-        }
-        SectionHeading {
-            title: "Active providers"
-            description: "Active providers refresh usage. Check the limits to show in the bar. Provider arrows set the usage page order."
+        Row {
+            width: parent.width
+            spacing: Style.space(4)
+            Label { width: parent.width - Style.space(100); text: "Active · Provider"; font.pixelSize: Style.font.caption; opacity: 0.5 }
+            Label { width: Style.space(28); text: "Bar"; font.pixelSize: Style.font.caption; horizontalAlignment: Text.AlignHCenter; opacity: 0.5 }
         }
         Repeater {
             id: providerRows
             model: root.order
-            delegate: Rectangle {
-                id: providerCard
+            delegate: Row {
+                id: providerRow
                 required property string modelData
                 required property int index
+                objectName: "provider-row-" + modelData
                 width: root.width
-                height: providerContent.height + Style.space(16)
-                radius: Style.cornerRadius
-                color: "transparent"
-                border.width: 1
-                border.color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.15)
-                property alias firstControl: providerButton
-                property alias limitRows: providerLimits
+                spacing: Style.space(4)
+                readonly property Item firstControl: providerButton.enabled ? providerButton
+                    : providerBar.enabled ? providerBar : providerUp.enabled ? providerUp : providerDown
+                readonly property bool available: root.availableProviders.indexOf(modelData) !== -1
                 readonly property bool active: root.enabledProviders.indexOf(modelData) !== -1
-                Column {
-                    id: providerContent
-                    x: Style.space(8)
-                    y: Style.space(8)
-                    width: parent.width - Style.space(16)
-                    spacing: Style.space(4)
-                    Row {
-                        width: parent.width
-                        spacing: Style.space(4)
-                        Button {
-                            id: providerButton
-                            objectName: "provider-" + providerCard.modelData
-                            width: Math.max(0, parent.width - Style.space(68))
-                            prefixText: providerCard.active ? "[x]" : "[ ]"
-                            text: "Active · " + root.providerName(providerCard.modelData)
-                            logoSource: root.providerLogo(providerCard.modelData, Plugin.Model.snapshot.providers.find(item => item.id === providerCard.modelData))
-                            alignLeft: true
-                            Accessible.role: Accessible.CheckBox
-                            Accessible.checked: providerCard.active
-                            onClicked: root.toggleProvider(providerCard.modelData)
-                        }
-                        Button {
-                            objectName: "provider-move-up-" + providerCard.modelData
-                            width: Style.space(30)
-                            iconName: "arrow-up"
-                            enabled: providerCard.index > 0
-                            Accessible.name: "Move " + root.providerName(providerCard.modelData) + " up on the usage page"
-                            onClicked: root.moveProvider(providerCard.index, -1)
-                        }
-                        Button {
-                            objectName: "provider-move-down-" + providerCard.modelData
-                            width: Style.space(30)
-                            iconName: "arrow-down"
-                            enabled: providerCard.index < root.order.length - 1
-                            Accessible.name: "Move " + root.providerName(providerCard.modelData) + " down on the usage page"
-                            onClicked: root.moveProvider(providerCard.index, 1)
-                        }
+                readonly property bool shown: root.selectedItems.some(item => item.provider === modelData)
+                function focusMove(direction) {
+                    const requested = direction < 0 ? providerUp : providerDown
+                    const fallback = direction < 0 ? providerDown : providerUp
+                    const control = requested.enabled ? requested : fallback.enabled ? fallback : providerBar
+                    control.forceActiveFocus(Qt.TabFocusReason)
+                }
+                ProviderCheckbox {
+                    id: providerButton
+                    objectName: "provider-" + providerRow.modelData
+                    checked: providerRow.active
+                    enabled: providerRow.available
+                    Accessible.name: "Active " + root.providerName(providerRow.modelData)
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.checked: providerRow.active
+                    onClicked: root.toggleProvider(providerRow.modelData)
+                }
+                Plugin.PanelSelect {
+                    id: providerLimits
+                    objectName: "provider-limits-" + providerRow.modelData
+                    width: Math.max(0, parent.width - Style.space(132))
+                    text: root.providerName(providerRow.modelData) + (providerRow.available ? "" : " (unavailable)")
+                    logoSource: providerRow.available ? root.providerLogo(providerRow.modelData, Plugin.Model.snapshot.providers.find(item => item.id === providerRow.modelData)) : ""
+                    popupParent: root.popupParent
+                    popupWidth: root.width
+                    multiple: true
+                    outlined: false
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    choices: root.providerChoices(providerRow.modelData).map(choice => Object.assign({}, choice, {
+                        label: choice.groupLabel + " · " + choice.label,
+                        groupKey: "",
+                        logoSource: choice.groupLogoSource,
+                        objectName: "bar-item-" + choice.provider + "-" + choice.idx + "-" + choice.metric,
+                        checked: root.selectedItems.some(item => root.sameItem(item, choice))
+                    }))
+                    Accessible.name: "Choose bar limits for " + root.providerName(providerRow.modelData)
+                    trailingIconName: providerRow.active && providerRow.available ? "chevron-down" : ""
+                    onActivated: index => root.toggleItem(choices[index])
+                    onPopupOpenChanged: {
+                        if (popupOpen && (!providerRow.active || !providerRow.available)) dismiss()
+                        root.providerMenuChanged(providerLimits)
                     }
-                    Label {
-                        visible: providerCard.active
-                        text: "Show in bar"
-                        font.pixelSize: Style.font.caption
-                    }
-                    Repeater {
-                        id: providerLimits
-                        model: providerCard.active ? root.choices.filter(choice => choice.provider === providerCard.modelData) : []
-                        delegate: Button {
-                            required property var modelData
-                            objectName: "bar-item-" + modelData.provider + "-" + modelData.idx + "-" + modelData.metric
-                            width: parent.width
-                            alignLeft: true
-                            multiline: true
-                            logoSource: modelData.groupLogoSource
-                            readonly property bool checked: root.selectedItems.some(item => root.sameItem(item, modelData))
-                            text: (checked ? "[x]  " : "[ ]  ") + modelData.groupLabel + " · " + modelData.label
-                            Accessible.role: Accessible.CheckBox
-                            Accessible.checked: checked
-                            onClicked: root.toggleItem(modelData)
-                        }
-                    }
+                }
+                ProviderCheckbox {
+                    id: providerBar
+                    objectName: "provider-bar-" + providerRow.modelData
+                    checked: providerRow.shown
+                    enabled: providerRow.shown || (providerRow.available && providerRow.active)
+                    Accessible.name: "Show " + root.providerName(providerRow.modelData) + " in bar"
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.checked: providerRow.shown
+                    onClicked: root.toggleProviderBar(providerRow.modelData)
+                }
+                Button {
+                    id: providerUp
+                    objectName: "provider-move-up-" + providerRow.modelData
+                    width: Style.space(30)
+                    iconName: "arrow-up"
+                    enabled: providerRow.index > 0
+                    Accessible.name: "Move " + root.providerName(providerRow.modelData) + " up in Usage and the bar"
+                    onClicked: root.moveProvider(providerRow.index, -1)
+                }
+                Button {
+                    id: providerDown
+                    objectName: "provider-move-down-" + providerRow.modelData
+                    width: Style.space(30)
+                    iconName: "arrow-down"
+                    enabled: providerRow.index < root.order.length - 1
+                    Accessible.name: "Move " + root.providerName(providerRow.modelData) + " down in Usage and the bar"
+                    onClicked: root.moveProvider(providerRow.index, 1)
                 }
             }
         }

@@ -16,23 +16,28 @@ import render_bar_items_previews as bar_previews
 LIB = bar_previews.LIB
 PROJECT = bar_previews.PROJECT
 FILES = ("linux-providers.png", "linux-providers-reordered.png",
-         "linux-providers-bottom.png", "linux-general.png",
+         "linux-provider-limits.png", "linux-general.png",
          "linux-bar-before.png", "linux-bar-after.png")
+PROVIDERS = ["codex", "claude", "kiro", "cursor", "antigravity",
+             "commandcode", "zai", "devin", "account:work"]
 
 
-def fixture_snapshot(items):
+def fixture_snapshot(provider_order):
+    baseline = bar_previews.fixture_snapshot()
+    from core import config, fetch, notifications, quickshell, state
+
     selected = copy.deepcopy(bar_previews.SELECTED)
-    selected.update(items=copy.deepcopy(items), **items[0])
-    with patch.object(bar_previews, "SELECTED", selected):
-        snapshot = bar_previews.fixture_snapshot()
-    # Include one collecting connection with no bar pin and one inactive
-    # connection, without touching the developer's real configuration.
-    snapshot["settings"]["available"] = ["codex", "claude", "kiro", "cursor"]
-    snapshot["settings"]["order"] = ["codex", "claude", "kiro", "cursor"]
-    snapshot["settings"]["enabled"] = ["codex", "claude", "kiro"]
-    snapshot["settings"]["names"]["cursor"] = "Cursor"
-    snapshot["settings"]["providerIds"]["cursor"] = "cursor"
-    return snapshot
+    state.set_selected_items(selected, state.order_bar_items(bar_previews.ITEMS, provider_order))
+    enabled = [name for name in provider_order if name in ("codex", "claude", "kiro")]
+    logos = {name: str(LIB / "assets/providers" / f"{name}.png") for name in ("codex", "claude")}
+    with patch.object(config, "available_connections", return_value=PROVIDERS), \
+            patch.object(config, "enabled_connection_order", return_value=enabled), \
+            patch.object(config, "connection_info", side_effect=lambda name: {
+                "provider": "codex" if name == "account:work" else name,
+                "label": "Engineering workspace" if name == "account:work" else ""}), \
+            patch.object(notifications, "load_settings", return_value=baseline["settings"]["notifications"]), \
+            patch.object(fetch, "get_version_info", return_value=baseline["version"]):
+        return quickshell.build_snapshot(copy.deepcopy(bar_previews.DATA), selected, logo_paths=logos)
 
 
 def render(output, renderer="software"):
@@ -44,8 +49,9 @@ def render(output, renderer="software"):
     output.mkdir(parents=True, exist_ok=True)
     for name in FILES:
         (output / name).unlink(missing_ok=True)
-    before = fixture_snapshot(bar_previews.ITEMS)
-    after = fixture_snapshot([bar_previews.ITEMS[2], *bar_previews.ITEMS[:2]])
+    (output / "linux-providers-bottom.png").unlink(missing_ok=True)
+    before = fixture_snapshot(PROVIDERS)
+    after = fixture_snapshot(["claude", "codex", *PROVIDERS[2:]])
     with tempfile.TemporaryDirectory(prefix="ai-status-unified-providers-qml-") as directory:
         root = Path(directory)
         for name in ("qs", "Quickshell"):
@@ -56,6 +62,10 @@ def render(output, renderer="software"):
         style = root / "qs/Commons/Style.qml"
         style.write_text(style.read_text().replace("cornerRadius: 0", "cornerRadius: 6")
                          .replace('family: "monospace"', 'family: "Geist Mono"'), encoding="utf-8")
+        # Keep the host's viewport at the normal maximum while testing a short,
+        # compact list. The production plugin still controls all row rendering.
+        host = root / "qs/Ui/KeyboardPanel.qml"
+        host.write_text(host.read_text().replace("return Math.min(value + 32, cap)", "return cap"), encoding="utf-8")
         preview = '''
 import QtQuick
 import QtTest
@@ -129,42 +139,59 @@ Item {
             verify(settings.enabledProviders.indexOf("kiro") !== -1)
             verify(settings.enabledProviders.indexOf("cursor") === -1)
             verify(!settings.selectedItems.some(item => item.provider === "kiro"))
-            verify(!findChild(settings, "bar-item-kiro-0-rolling").checked)
+            verify(!settings.selectedItems.some(item => item.provider === "cursor"))
             scroller.contentY = 0
             wait(300)
             compare(surface.height, 680)
-            for (const item of settings.selectedItems) {
-                const row = findChild(settings, "bar-order-" + item.provider + "-" + item.idx + "-" + item.metric)
+            for (const index of [0, 4, settings.order.length - 1]) {
+                const row = findChild(settings, "provider-row-" + settings.order[index])
                 const position = row.mapToItem(scroller, 0, 0)
                 verify(position.y >= scroller.navigationInset && position.y + row.height <= scroller.height,
-                       "Every selected first/middle/last row must be fully visible")
-                const remove = findChild(settings, "bar-order-remove-" + item.provider + "-" + item.idx + "-" + item.metric)
-                verify(remove.text.length > 0 || Plugin.PanelIcons.path(remove.iconName).length > 0,
-                       "The remove control must render a visible label or bundled icon")
+                       "First/middle/last provider rows must be fully visible")
             }
+            for (const provider of settings.order) {
+                for (const prefix of ["provider-", "provider-bar-"]) {
+                    const control = findChild(settings, prefix + provider)
+                    const indicator = findChild(control, control.objectName + "-indicator")
+                    verify(indicator !== null && indicator.width === 14 && indicator.width <= control.width)
+                    const glyph = indicator.children.find(child => child.name === "check")
+                    verify(glyph !== undefined)
+                    compare(glyph.visible, control.checked)
+                    for (const child of control.children) {
+                        if (typeof child.truncated === "boolean" && child.visible && child.text.length > 0)
+                            verify(!child.truncated, "Active/Bar checkbox content must not be elided")
+                    }
+                }
+            }
+            compare(findChild(settings, "bar-order-codex-0-weekly"), null)
+            const kiro = findChild(settings, "provider-kiro")
+            verify(kiro.Accessible.checked)
+            verify(!findChild(settings, "provider-bar-kiro").Accessible.checked)
+            verify(!findChild(settings, "provider-cursor").Accessible.checked)
+            verify(findChild(settings, "provider-limits-account:work").Accessible.name.indexOf("Engineering workspace") !== -1)
             capture(surface, "linux-providers.png")
 
-            // Move the last identity twice with the production arrow controls.
-            for (let index = 0; index < 2; index++) {
-                mouseClick(findChild(settings, "bar-order-move-up-claude-0-weekly"))
-                wait(100)
-            }
+            // One provider arrow moves every selected limit in that group.
+            mouseClick(findChild(settings, "provider-move-up-claude"))
+            wait(100)
             compare(JSON.stringify(settings.selectedItems), JSON.stringify(scene.after.settings.items))
             compare(JSON.stringify(settings.selected), JSON.stringify(scene.after.settings.items[0]))
-            compare(JSON.stringify(settings.order), JSON.stringify(scene.before.settings.order))
+            compare(JSON.stringify(settings.order), JSON.stringify(scene.after.settings.order))
             scroller.contentY = 0
             wait(200)
             capture(surface, "linux-providers-reordered.png")
 
-            findChild(panel, "panel-key-catcher").forceActiveFocus()
-            scroller.contentY = Math.max(0, scroller.contentHeight - scroller.height)
+            const menu = findChild(settings, "provider-limits-claude")
+            mouseClick(menu)
+            tryCompare(menu, "popupOpen", true)
             wait(200)
-            for (const name of ["kiro", "cursor"]) {
-                const control = findChild(settings, "provider-" + name)
-                const position = control.mapToItem(scroller, 0, 0)
-                verify(position.y >= scroller.navigationInset && position.y + control.height <= scroller.height)
+            for (const item of scene.after.settings.items.filter(item => item.provider === "claude")) {
+                const option = findChild(menu.popupItem, "bar-item-" + item.provider + "-" + item.idx + "-" + item.metric)
+                verify(option !== null && option.Accessible.checked)
             }
-            capture(surface, "linux-providers-bottom.png")
+            verify(!findChild(menu.popupItem, "bar-item-claude-0-weekly:Fable").Accessible.checked)
+            capture(surface, "linux-provider-limits.png")
+            menu.dismiss()
             settings.selectSection("general")
             scroller.contentY = 0
             wait(200)

@@ -444,7 +444,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "Choose your refresh interval and appearance."
         case .alerts: return "Set quota notifications and account-specific rules."
-        case .providers: return "Enable accounts, choose their menu bar limits and arrange the bar order."
+        case .providers: return "One order for Usage and the bar. Click a provider name to choose limits."
         case .guide: return "macOS actions and keyboard shortcuts."
         case .about: return "Version and project links."
         }
@@ -491,6 +491,7 @@ struct SettingsDraft {
     var usageDisplay = "used"
     var refreshIntervalMinutes = RefreshInterval.defaultMinutes
     var items: [Selection] = []
+    var hiddenItems: [String: [Selection]] = [:]
     var selected: Selection {
         get { items.first ?? Selection() }
         set {
@@ -713,10 +714,13 @@ final class Model: ObservableObject {
     }
     var settingsValidation: (section: SettingsSection, message: String)? {
         if draft.enabled.isEmpty { return (.providers, "Enable at least one provider.") }
+        if !draft.enabled.allSatisfy({ snapshot?.settings.available.contains($0) == true }) {
+            return (.providers, "Disable unavailable providers before saving.")
+        }
         if draft.items.isEmpty || Set(draft.items).count != draft.items.count ||
             !draft.items.allSatisfy({ selection in
                 !selection.provider.isEmpty && selection.idx >= 0 && !selection.metric.isEmpty &&
-                    draft.enabled.contains(selection.provider)
+                    draft.enabled.contains(selection.provider) && snapshot?.settings.available.contains(selection.provider) == true
             }) {
             return (.providers, "Choose at least one enabled provider and limit, without duplicates.")
         }
@@ -1001,6 +1005,10 @@ final class Model: ObservableObject {
                               usageDisplay: snapshot.settings.usageDisplay == "remaining" ? "remaining" : "used",
                               refreshIntervalMinutes: snapshot.settings.refreshIntervalMinutes ?? RefreshInterval.defaultMinutes,
                               items: snapshot.pinnedItems)
+        for provider in snapshot.settings.enabled + snapshot.pinnedItems.map(\.provider) where !draft.order.contains(provider) {
+            draft.order.append(provider)
+        }
+        orderBarItems()
         draft.notifications = snapshot.settings.notifications ?? NotificationPreferences()
         draft.notificationThresholds = draft.notifications.thresholds.map(String.init).joined(separator: ", ")
         draft.notificationRuleThresholds = Dictionary(uniqueKeysWithValues: draft.notifications.rules.map {
@@ -1023,12 +1031,57 @@ final class Model: ObservableObject {
     func toggleProvider(_ provider: String) {
         guard !settingsSaving else { return }
         if draft.enabled.contains(provider) {
+            let shown = draft.items.filter { $0.provider == provider }
+            if !shown.isEmpty { draft.hiddenItems[provider] = shown }
             draft.enabled.remove(provider)
             draft.items.removeAll { $0.provider == provider }
         } else {
+            guard snapshot?.settings.available.contains(provider) == true else { return }
             draft.enabled.insert(provider)
         }
         draft.saved = false
+    }
+    func providerShown(_ provider: String) -> Bool { draft.items.contains { $0.provider == provider } }
+    func providerBarChoices(_ provider: String) -> [Choice] {
+        let available = settingsChoices.filter { $0.selection.provider == provider }
+        let known = Set(available.map(\.selection))
+        let remembered = (draft.hiddenItems[provider] ?? []).filter { !known.contains($0) }.map { selection in
+            Choice(selection: selection, label: providerName(provider) + " · " + selection.metric + " (unavailable)",
+                   provider: logoProviderID(provider), logoPath: "")
+        }
+        return available + remembered
+    }
+    func providerLimitChecked(_ selection: Selection) -> Bool {
+        draft.items.contains(selection)
+    }
+    func setProviderShown(_ provider: String, enabled: Bool) {
+        guard !settingsSaving else { return }
+        if enabled {
+            guard draft.enabled.contains(provider), snapshot?.settings.available.contains(provider) == true else { return }
+            var remembered = draft.hiddenItems[provider] ?? []
+            if remembered.isEmpty, let first = choices.first(where: { $0.selection.provider == provider }) {
+                remembered = [first.selection]
+            }
+            for selection in remembered where !draft.items.contains(selection) { draft.items.append(selection) }
+            orderBarItems()
+        } else {
+            let shown = draft.items.filter { $0.provider == provider }
+            if !shown.isEmpty { draft.hiddenItems[provider] = shown }
+            draft.items.removeAll { $0.provider == provider }
+        }
+        draft.saved = false
+    }
+    func setProviderLimit(_ selection: Selection, enabled: Bool) {
+        guard !settingsSaving, draft.enabled.contains(selection.provider) else { return }
+        setBarItem(selection, enabled: enabled)
+        draft.hiddenItems[selection.provider] = draft.items.filter { $0.provider == selection.provider }
+    }
+    private func orderBarItems() {
+        draft.items = draft.items.enumerated().sorted { left, right in
+            let leftOrder = draft.order.firstIndex(of: left.element.provider) ?? draft.order.count
+            let rightOrder = draft.order.firstIndex(of: right.element.provider) ?? draft.order.count
+            return leftOrder == rightOrder ? left.offset < right.offset : leftOrder < rightOrder
+        }.map(\.element)
     }
     func setBarItem(_ selection: Selection, enabled: Bool) {
         guard !settingsSaving else { return }
@@ -1038,18 +1091,14 @@ final class Model: ObservableObject {
         } else {
             draft.items.removeAll { $0 == selection }
         }
-        draft.saved = false
-    }
-    func moveBarItem(_ selection: Selection, _ direction: Int) {
-        guard !settingsSaving, [-1, 1].contains(direction),
-              let index = draft.items.firstIndex(of: selection), draft.items.indices.contains(index + direction) else { return }
-        draft.items.swapAt(index, index + direction)
+        orderBarItems()
         draft.saved = false
     }
     func moveProvider(_ provider: String, _ direction: Int) {
         guard !settingsSaving, [-1, 1].contains(direction),
               let index = draft.order.firstIndex(of: provider), draft.order.indices.contains(index + direction) else { return }
         draft.order.swapAt(index, index + direction)
+        orderBarItems()
         draft.saved = false
     }
     func settingsPayload() -> [String: Any]? {
@@ -1901,70 +1950,45 @@ struct SettingsPage: View {
     }
 
     private var providers: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            barOrder
-            SettingsHeading(title: "Providers and accounts", detail: "Enabled accounts collect usage. Choose which limits appear in the menu bar below each account.")
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text("On").frame(width: 28)
+                Text("Provider / limits").frame(maxWidth: .infinity, alignment: .leading)
+                Text("Bar").frame(width: 28)
+                Spacer().frame(width: 40)
+            }.font(.custom("GeistMono-Regular", size: 11)).accessibilityHidden(true)
             ForEach(model.draft.order, id: \.self) { provider in
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 4) {
-                        Toggle(isOn: Binding(get: { model.draft.enabled.contains(provider) }, set: { _ in model.toggleProvider(provider) })) {
-                            HStack(alignment: .top, spacing: 6) {
-                                ProviderLogo(provider: model.logoProviderID(provider))
-                                Text(model.providerName(provider))
-                            }
-                        }.toggleStyle(.checkbox).modifier(PanelFocusTarget())
-                            .accessibilityLabel("Enable \(model.providerName(provider))")
-                        Spacer(minLength: 0)
-                        ControlButton(icon: "arrow-up", help: "Move \(model.providerName(provider)) up in Usage",
-                                      action: { model.moveProvider(provider, -1) }).disabled(model.draft.order.first == provider)
-                        ControlButton(icon: "arrow-down", help: "Move \(model.providerName(provider)) down in Usage",
-                                      action: { model.moveProvider(provider, 1) }).disabled(model.draft.order.last == provider)
-                    }
-                    if model.draft.enabled.contains(provider) {
-                        Text("Show in bar")
-                            .font(.custom("GeistMono-Regular", size: 11)).padding(.leading, 22)
-                        ForEach(model.choices.filter { $0.selection.provider == provider }) { choice in
-                            Toggle(isOn: Binding(get: { model.draft.items.contains(choice.selection) }, set: {
-                                model.setBarItem(choice.selection, enabled: $0)
-                            })) {
-                                Text(choice.label).fixedSize(horizontal: false, vertical: true)
-                            }.toggleStyle(.checkbox).modifier(PanelFocusTarget())
-                                .accessibilityLabel("Show \(choice.label) in menu bar")
-                        }.padding(.leading, 22)
-                    } else {
-                        Text("Disabled — not collecting usage")
-                            .font(.custom("GeistMono-Regular", size: 11)).padding(.leading, 22)
-                    }
-                }.padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.035)))
-            }
-        }
-    }
-
-    private var barOrder: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SettingsHeading(title: "Bar order", detail: "Items appear from left to right in this order. New selections are added at the end.")
-            if model.draft.items.isEmpty {
-                Text("Choose at least one limit from an enabled account below.")
-                    .font(.custom("GeistMono-Regular", size: 11)).fixedSize(horizontal: false, vertical: true)
-            }
-            ForEach(Array(model.draft.items.enumerated()), id: \.element) { index, selection in
-                let choice = model.settingsChoices.first { $0.selection == selection }
-                let label = choice?.label ?? model.providerName(selection.provider) + " · " + selection.metric + " (unavailable)"
-                HStack(alignment: .center, spacing: 6) {
-                    Text("\(index + 1)").font(.custom("GeistMono-Regular", size: 11)).frame(width: 20)
-                    ProviderLogo(provider: choice?.provider ?? model.logoProviderID(selection.provider), path: choice?.logoPath ?? "")
-                    Text(label).fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    ControlButton(icon: "arrow-up", help: "Move \(label) earlier in menu bar",
-                                  action: { model.moveBarItem(selection, -1) }).disabled(index == 0)
-                    ControlButton(icon: "arrow-down", help: "Move \(label) later in menu bar",
-                                  action: { model.moveBarItem(selection, 1) }).disabled(index == model.draft.items.count - 1)
-                    Button("Remove") { model.setBarItem(selection, enabled: false) }
-                        .buttonStyle(.plain).modifier(PanelFocusTarget())
-                        .font(.custom("GeistMono-Regular", size: 11))
-                        .accessibilityLabel("Remove \(label) from menu bar")
+                let active = model.draft.enabled.contains(provider)
+                let available = model.snapshot?.settings.available.contains(provider) == true
+                let shown = model.providerShown(provider)
+                HStack(spacing: 4) {
+                    Toggle("Active", isOn: Binding(get: { model.draft.enabled.contains(provider) }, set: { _ in model.toggleProvider(provider) }))
+                        .labelsHidden().toggleStyle(.checkbox).modifier(PanelFocusTarget()).frame(width: 28)
+                        .disabled(!available && !active).accessibilityLabel("Activate \(model.providerName(provider))")
+                    Menu {
+                        ForEach(model.providerBarChoices(provider)) { choice in
+                            Toggle(choice.label, isOn: Binding(get: { model.providerLimitChecked(choice.selection) }, set: {
+                                model.setProviderLimit(choice.selection, enabled: $0)
+                            }))
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            ProviderLogo(provider: model.logoProviderID(provider))
+                            Text(available ? model.providerName(provider) : "Unavailable · " + model.providerName(provider))
+                                .lineLimit(1).truncationMode(.tail)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.menuStyle(.borderlessButton).menuIndicator(.hidden).modifier(PanelFocusTarget())
+                        .disabled(!available || !active)
+                        .help(available ? "Choose limits for \(model.providerName(provider))" : "\(model.providerName(provider)) (unavailable)")
+                        .accessibilityLabel("\(model.providerName(provider)), choose limits")
+                    Toggle("Show in bar", isOn: Binding(get: { model.providerShown(provider) }, set: {
+                        model.setProviderShown(provider, enabled: $0)
+                    })).labelsHidden().toggleStyle(.checkbox).modifier(PanelFocusTarget()).frame(width: 28)
+                        .disabled(!active && !shown).accessibilityLabel("Show \(model.providerName(provider)) in bar")
+                    ControlButton(icon: "arrow-up", help: "Move \(model.providerName(provider)) up in Usage and the bar",
+                                  action: { model.moveProvider(provider, -1) }).disabled(model.draft.order.first == provider)
+                    ControlButton(icon: "arrow-down", help: "Move \(model.providerName(provider)) down in Usage and the bar",
+                                  action: { model.moveProvider(provider, 1) }).disabled(model.draft.order.last == provider)
                 }.padding(.vertical, 4)
             }
         }
@@ -2913,9 +2937,9 @@ struct GuidePage: View {
         Row(feature: "Move focus", action: "Tab / Shift+Tab."),
         Row(feature: "Activate a button", action: "Space when focused."),
         Row(feature: "Adjust alert levels", action: "Drag a slider in Alerts."),
-        Row(feature: "Choose menu bar limits", action: "Providers → enable an account and check its limits."),
-        Row(feature: "Reorder menu bar items", action: "Providers → Bar order → up/down buttons."),
-        Row(feature: "Reorder Usage providers", action: "Providers → account up/down buttons."),
+        Row(feature: "Show a provider in the bar", action: "Providers → Active and Show in bar checkboxes."),
+        Row(feature: "Choose menu bar limits", action: "Providers → click a provider name to choose its limits."),
+        Row(feature: "Reorder providers", action: "Providers → up/down buttons reorder Usage and the bar together."),
         Row(feature: "Save settings", action: "Save applies all tabs and keeps Settings open."),
         Row(feature: "Cancel settings", action: "Cancel, Back or Esc returns to Usage without saving."),
         Row(feature: "Reset credits", action: "Click Reset credits when available."),
@@ -3732,9 +3756,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
               var settings = document["settings"] as? [String: Any] else {
             throw AppError.message("Unified provider settings fixture failed.")
         }
+        let unavailable = Selection(provider: "claude", idx: 2, metric: "weekly")
         let pins = [Selection(provider: "claude", metric: "weekly"),
                     Selection(provider: "codex", metric: "weekly"),
-                    Selection(provider: "claude", metric: "rolling")]
+                    Selection(provider: "claude", metric: "rolling"), unavailable]
+        let claudePins = [pins[0], pins[2], unavailable]
+        let original = [pins[1]] + claudePins
+        var names = settings["names"] as? [String: String] ?? [:]
+        names["codex"] = "Codex · Personal account"
+        names["claude"] = "Claude · Main work account"
+        settings["names"] = names
         settings["items"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(pins))
         document["settings"] = settings
         document["selected"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(pins[0]))
@@ -3743,100 +3774,128 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         model.accept(data)
         model.showSettings()
         model.showSettingsSection(.providers)
-        guard model.draft.items == pins, model.settingsValid else {
-            throw AppError.message("Unified Providers changed an existing interleaved menu bar order.")
+        guard model.draft.items == original, model.settingsValid,
+              model.draft.order.filter({ $0 == "claude" }).count == 1,
+              Set(model.draft.items) == Set(pins) else {
+            throw AppError.message("One provider row did not retain all exact limits in the shared provider order.")
         }
         try renderSmokePage(model, name: "settings-providers-original-order", directory: directory)
-        let usageOrder = model.draft.order
         model.draft.saved = true
-        model.moveBarItem(pins[0], -1)
-        model.moveBarItem(pins[2], 1)
-        model.moveBarItem(pins[1], 2)
-        model.moveBarItem(Selection(provider: "unknown", metric: "weekly"), 1)
-        guard model.draft.items == pins, model.draft.saved else {
-            throw AppError.message("Invalid or boundary menu bar moves changed the draft.")
+        model.moveProvider("codex", -1)
+        model.moveProvider("zai", 1)
+        model.moveProvider("claude", 2)
+        model.moveProvider("unknown", 1)
+        guard model.draft.items == original, model.draft.saved else {
+            throw AppError.message("Invalid or boundary provider moves changed the shared order.")
         }
-        model.moveBarItem(pins[1], -1)
-        guard model.draft.items == [pins[1], pins[0], pins[2]], !model.draft.saved else {
-            throw AppError.message("Moving a middle bar item did not swap its exact identity with the preceding item.")
-        }
-        model.moveBarItem(pins[1], 1)
-        model.moveBarItem(pins[2], -1)
-        guard model.draft.items == [pins[0], pins[2], pins[1]] else {
-            throw AppError.message("Moving the first and last menu bar items lost their selected identities.")
-        }
-        model.moveBarItem(pins[0], 1)
-        let reordered = [pins[2], pins[0], pins[1]]
-        guard model.draft.order == usageOrder else {
-            throw AppError.message("Moving menu bar items changed the independent Usage provider order.")
-        }
-        model.moveProvider("codex", 1)
-        guard model.draft.items == reordered, model.draft.selected == pins[2],
+        model.moveProvider("claude", -1)
+        let reordered = claudePins + [pins[1]]
+        guard model.draft.order.first == "claude", model.draft.items == reordered, !model.draft.saved,
               let payload = model.settingsPayload(),
+              payload["enabled"] as? [String] == ["claude", "codex"],
               let encodedItems = payload["items"], let encodedPrimary = payload["selected"],
               try JSONDecoder().decode([Selection].self, from: JSONSerialization.data(withJSONObject: encodedItems)) == reordered,
               try JSONDecoder().decode(Selection.self, from: JSONSerialization.data(withJSONObject: encodedPrimary)) == reordered[0] else {
-            throw AppError.message("Moving a Usage provider changed bar order, or the settings payload lost ordered pins and its primary selection.")
+            throw AppError.message("Provider moves failed to save the same Usage/bar order and exact limit identities.")
         }
+        try renderSmokePage(model, name: "settings-providers-reordered", directory: directory)
         model.settingsSaving = true
-        model.moveBarItem(pins[2], 1)
+        model.setProviderShown("claude", enabled: false)
+        model.setProviderLimit(pins[0], enabled: false)
         model.setBarItem(pins[0], enabled: false)
         model.toggleProvider("claude")
         model.moveProvider("claude", 1)
-        guard model.draft.items == reordered, model.draft.enabled == Set(["codex", "claude"]), model.draft.order.first == "claude" else {
+        guard model.draft.items == reordered, model.draft.enabled == Set(["codex", "claude"]),
+              model.draft.hiddenItems.isEmpty, model.draft.order.first == "claude" else {
             throw AppError.message("Unified provider controls changed settings during a save.")
         }
         model.settingsSaving = false
+        model.setProviderShown("claude", enabled: false)
+        guard model.draft.items == [pins[1]], model.draft.enabled.contains("claude"),
+              model.draft.hiddenItems["claude"] == claudePins, model.settingsValid else {
+            throw AppError.message("Hiding a provider deactivated it or lost its remembered limits.")
+        }
+        try renderSmokePage(model, name: "settings-providers-active-hidden", directory: directory)
         model.showSettingsSection(.general)
         model.accept(data)
         model.showSettingsSection(.providers)
-        guard model.draft.items == reordered else {
-            throw AppError.message("Navigation or refresh discarded the pending bar order.")
+        guard model.draft.items == [pins[1]], model.draft.hiddenItems["claude"] == claudePins,
+              model.draft.order.first == "claude" else {
+            throw AppError.message("Navigation or refresh discarded pending provider order and visibility.")
         }
-        try renderSmokePage(model, name: "settings-providers-bar-order", directory: directory)
+        model.setProviderShown("claude", enabled: true)
+        guard model.draft.items == reordered, model.providerBarChoices("claude").contains(where: { $0.selection == unavailable }) else {
+            throw AppError.message("Showing a provider failed to restore all limits, including an unavailable account index.")
+        }
+        model.setProviderShown("codex", enabled: false)
+        model.toggleProvider("claude")
+        guard model.draft.items.isEmpty, model.draft.enabled == Set(["codex"]),
+              !model.settingsValid, model.settingsValidation?.section == .providers else {
+            throw AppError.message("Deactivating the visible provider silently chose another active provider.")
+        }
+        model.toggleProvider("claude")
+        guard model.draft.items.isEmpty else {
+            throw AppError.message("Activating a provider implicitly showed it in the bar.")
+        }
+        model.setProviderShown("claude", enabled: true)
+        guard model.draft.items == claudePins, model.settingsValid else {
+            throw AppError.message("Reactivation did not retain draft-only remembered limit choices.")
+        }
+        model.setProviderLimit(unavailable, enabled: false)
+        guard model.draft.items == [pins[0], pins[2]], !model.providerLimitChecked(unavailable) else {
+            throw AppError.message("A compact limit menu changed another exact account/limit identity.")
+        }
+        model.setProviderShown("claude", enabled: false)
+        model.setProviderLimit(unavailable, enabled: true)
+        guard model.draft.items == [unavailable], model.providerShown("claude"), model.providerLimitChecked(unavailable) else {
+            throw AppError.message("Choosing a limit from the compact menu did not show that precise limit in the bar.")
+        }
+        model.setProviderShown("claude", enabled: false)
+        model.setProviderShown("claude", enabled: true)
+        guard model.draft.items == [unavailable] else {
+            throw AppError.message("Showing a hidden provider did not retain its latest compact menu selection.")
+        }
         model.back()
         model.showSettings()
         model.showSettingsSection(.providers)
-        guard model.draft.items == pins, model.snapshot?.pinnedItems == pins else {
-            throw AppError.message("Cancel did not restore the saved interleaved menu bar order.")
+        guard model.draft.items == original, model.snapshot?.pinnedItems == pins,
+              model.draft.hiddenItems.isEmpty, model.draft.order.first == "codex" else {
+            throw AppError.message("Cancel did not restore the saved shared order, visibility and draft limit choices.")
         }
-        model.toggleProvider("claude")
-        guard model.draft.items == [pins[1]], model.settingsValid else {
-            throw AppError.message("Disabling an account removed another account's selected limit.")
+        model.toggleProvider("antigravity")
+        guard !model.providerShown("antigravity") else {
+            throw AppError.message("A newly active provider was automatically added to the bar.")
         }
-        model.toggleProvider("claude")
-        guard model.draft.items == [pins[1]] else {
-            throw AppError.message("Enabling an account silently added limits to the bar.")
-        }
-        model.setBarItem(pins[1], enabled: false)
-        guard model.draft.items.isEmpty, !model.settingsValid, model.settingsValidation?.section == .providers else {
-            throw AppError.message("The last selected limit was silently replaced by another account.")
-        }
-        model.setBarItem(pins[0], enabled: true)
-        model.setBarItem(pins[1], enabled: true)
-        model.setBarItem(pins[0], enabled: true)
-        guard model.draft.items == [pins[0], pins[1]] else {
-            throw AppError.message("New bar limits were not appended uniquely in selection order.")
-        }
-        let unavailable = Selection(provider: "claude", idx: 2, metric: "weekly")
-        model.setBarItem(unavailable, enabled: true)
-        model.moveBarItem(unavailable, -1)
-        guard model.draft.items == [pins[0], unavailable, pins[1]], model.settingsValid else {
-            throw AppError.message("Reordering an unavailable limit lost its provider, index or metric identity.")
+        model.setProviderShown("antigravity", enabled: true)
+        guard model.draft.items.last == Selection(provider: "antigravity", metric: "rolling"),
+              model.draft.items.prefix(original.count).elementsEqual(original) else {
+            throw AppError.message("Showing a new provider did not choose its first limit in the shared provider order.")
         }
         let orphan = Selection(provider: "account:deleted", idx: 3, metric: "rolling")
-        model.draft.items.append(orphan)
-        model.toggleProvider("antigravity")
-        model.moveBarItem(orphan, -1)
-        guard model.draft.items == [pins[0], unavailable, orphan, pins[1]],
-              model.settingsChoices.contains(where: { $0.selection == orphan && $0.label.contains("(unavailable)") }),
-              !model.settingsValid, model.settingsValidation?.section == .providers else {
-            throw AppError.message("Provider activation hid or replaced a saved orphan bar item.")
+        var orphanSettings = settings
+        orphanSettings["items"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode([pins[1], orphan, pins[2]]))
+        var orphanDocument = document
+        orphanDocument["settings"] = orphanSettings
+        let orphanModel = Model()
+        orphanModel.accept(try JSONSerialization.data(withJSONObject: orphanDocument))
+        orphanModel.showSettings()
+        orphanModel.showSettingsSection(.providers)
+        orphanModel.toggleProvider("antigravity")
+        guard orphanModel.draft.order.filter({ $0 == orphan.provider }).count == 1,
+              orphanModel.providerShown(orphan.provider), !orphanModel.draft.enabled.contains(orphan.provider),
+              orphanModel.draft.items == [pins[1], pins[2], orphan],
+              !orphanModel.settingsValid, orphanModel.settingsValidation?.section == .providers else {
+            throw AppError.message("An unrelated provider edit hid or duplicated a saved unavailable connection.")
         }
-        try renderSmokePage(model, name: "settings-providers-unavailable", directory: directory)
-        model.setBarItem(orphan, enabled: false)
-        guard model.draft.items == [pins[0], unavailable, pins[1]], model.settingsValid else {
-            throw AppError.message("Removing a deleted account's bar item changed the remaining order.")
+        try renderSmokePage(orphanModel, name: "settings-providers-unavailable", directory: directory)
+        orphanModel.toggleProvider(orphan.provider)
+        guard !orphanModel.draft.enabled.contains(orphan.provider) else {
+            throw AppError.message("A deleted connection could be reactivated.")
+        }
+        orphanModel.setProviderShown(orphan.provider, enabled: false)
+        guard orphanModel.draft.items == [pins[1], pins[2]], orphanModel.settingsValid,
+              orphanModel.settingsPayload() != nil else {
+            throw AppError.message("Hiding an unavailable provider did not resolve validation while retaining the remaining limits.")
         }
     }
 

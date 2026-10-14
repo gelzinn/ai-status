@@ -7,6 +7,8 @@ Plugin.PanelButton {
     id: root
     property var choices: []
     property int currentIndex: -1
+    property bool multiple: false
+    property real popupWidth: width
     property Item popupParent: parent
     property bool popupOpen: false
     property int highlighted: -1
@@ -34,8 +36,15 @@ Plugin.PanelButton {
     function dismiss() { popupOpen = false }
     function choose(index) {
         if (index < 0 || index >= choices.length) return
+        highlighted = index
         activated(index)
-        dismiss()
+        if (!multiple) dismiss()
+        else Qt.callLater(() => {
+            if (popupOpen) {
+                overlay.forceActiveFocus()
+                revealHighlight()
+            }
+        })
     }
     function revealHighlight() {
         const item = options.itemAt(highlighted)
@@ -85,7 +94,7 @@ Plugin.PanelButton {
             id: menu
             objectName: root.objectName + "-menu"
             property point trigger: Qt.point(0, 0)
-            width: Math.min(root.width, overlay.width)
+            width: Math.min(root.popupWidth, overlay.width)
             height: Math.min(optionColumn.implicitHeight + Style.space(8), Style.space(280), Math.max(0, overlay.height - Style.space(8)))
             x: Math.max(0, Math.min(trigger.x, overlay.width - width))
             y: Math.max(0, Math.min(trigger.y + Style.space(4) + height <= overlay.height ? trigger.y + Style.space(4) : trigger.y - root.height - height - Style.space(4), overlay.height - height))
@@ -159,15 +168,19 @@ Plugin.PanelButton {
                                 objectName: option.modelData.objectName || root.objectName + "-option-" + option.index
                                 width: optionColumn.width
                                 text: option.modelData.label
+                                multiline: root.multiple
                                 logoSource: option.modelData.logoSource || ""
-                                prefixText: option.modelData.groupKey ? (root.currentIndex === option.index ? "✓" : " ") : ""
+                                prefixText: root.multiple ? (option.modelData.checked ? "[x]" : "[ ]")
+                                    : option.modelData.groupKey ? (root.currentIndex === option.index ? "✓" : " ") : ""
                                 foreground: root.foreground
                                 fontFamily: root.fontFamily
                                 alignLeft: true
                                 activeFocusOnTab: false
                                 color: root.highlighted === option.index ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12) : "transparent"
                                 Accessible.name: option.modelData.groupLabel ? option.modelData.groupLabel + " · " + text : text
-                                Accessible.selected: root.currentIndex === option.index
+                                Accessible.role: root.multiple ? Accessible.CheckBox : Accessible.Button
+                                Accessible.checked: root.multiple && !!option.modelData.checked
+                                Accessible.selected: root.multiple ? !!option.modelData.checked : root.currentIndex === option.index
                                 onClicked: root.choose(option.index)
                             }
                         }

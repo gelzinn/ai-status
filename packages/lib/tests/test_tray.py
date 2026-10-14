@@ -90,10 +90,10 @@ class DesktopTests(IsolatedState):
         self.assertEqual(settings.message.text(), "Choose at least one bar item.")
         self.assertTrue(settings.message.isVisible())
         self.assertEqual(settings.current_section, "providers")
-        choices = [option for option in settings.bar_items.items if option.checkbox.isEnabled()]
-        for option in choices:
-            option.checkbox.setFocus()
-            QTest.keyClick(option.checkbox, tray.Qt.Key.Key_Space)
+        choices = [option.identity for option in settings.bar_items.items if option.checkbox.isEnabled()]
+        for identity in choices:
+            option = next(item for item in settings.bar_items.items if item.identity == identity)
+            option.checkbox.trigger()
         self.assertEqual(len(settings.bar_selections), len(choices))
         self.assertGreater(len(settings.bar_selections), 10)
         with patch.object(self.dashboard, "refresh"), patch.object(tray.QSystemTrayIcon, "show"):
@@ -121,7 +121,7 @@ class DesktopTests(IsolatedState):
         self.assertEqual(state.get_selected_items(state.load_selected()), pinned)
         self.assertEqual(state.get_refresh_interval_minutes(state.load_selected()), 20)
 
-    def test_unified_provider_cards_reorder_exact_bar_items_without_changing_active_order(self):
+    def test_single_provider_list_reorders_usage_and_grouped_exact_bar_identities(self):
         self.dashboard.on_result("codex", [{"provider": "Codex", "_idx": 0, "metrics": [
             {"type": "rolling", "percentage": 23}, {"type": "weekly", "percentage": 61}]},
             {"provider": "Codex", "_idx": 1, "metrics": [{"type": "weekly", "percentage": 40}]}])
@@ -133,35 +133,32 @@ class DesktopTests(IsolatedState):
         state.save_selected(selected)
         self.dashboard.configure()
         settings = self.dashboard.settings_view
+        self.assertFalse(hasattr(settings, "bar_order"))
         self.assertIs(settings.providers.parentWidget(), settings.sections["providers"])
-        self.assertIs(settings.bar_order.parentWidget(), settings.sections["providers"])
         self.assertIs(settings.refresh_interval.parentWidget(), settings.sections["general"])
-        self.assertEqual([tuple(settings.bar_order.item(i).data(tray.Qt.ItemDataRole.UserRole)) for i in range(3)], choices)
+        grouped = [choices[0], choices[2], choices[1]]
+        self.assertEqual([tuple(value[key] for key in ("provider", "idx", "metric")) for value in settings.bar_selections], grouped)
         settings.select_section("providers")
-        original_order = [settings.providers.item(i).data(tray.Qt.ItemDataRole.UserRole) for i in range(settings.providers.count())]
-        middle = settings.bar_order.item(1)
-        up = next(button for button in settings.bar_order.itemWidget(middle).findChildren(tray.ControlButton)
+        copilot = settings.providers.item(1)
+        up = next(button for button in settings.providers.itemWidget(copilot).findChildren(tray.ControlButton)
                   if button.property("orderDirection") == -1)
         QTest.mouseClick(up, tray.Qt.MouseButton.LeftButton)
-        self.assertEqual([tuple(value[key] for key in ("provider", "idx", "metric")) for value in settings.bar_selections],
-                         [choices[1], choices[0], choices[2]])
-        # Keyboard movement also works while a visible row button has focus.
-        down = next(button for button in settings.bar_order.itemWidget(middle).findChildren(tray.ControlButton)
+        expected = [choices[1], choices[0], choices[2]]
+        self.assertEqual([tuple(value[key] for key in ("provider", "idx", "metric")) for value in settings.bar_selections], expected)
+        down = next(button for button in settings.providers.itemWidget(copilot).findChildren(tray.ControlButton)
                     if button.property("orderDirection") == 1)
         down.setFocus()
         QTest.keyClick(down, tray.Qt.Key.Key_Down, tray.Qt.KeyboardModifier.AltModifier)
-        self.assertEqual([tuple(value[key] for key in ("provider", "idx", "metric")) for value in settings.bar_selections], choices)
-        self.assertEqual([settings.providers.item(i).data(tray.Qt.ItemDataRole.UserRole) for i in range(settings.providers.count())], original_order)
-        settings.bar_order.move_provider(2, -1)
+        self.assertEqual([tuple(value[key] for key in ("provider", "idx", "metric")) for value in settings.bar_selections], grouped)
+        settings.providers.move_provider(0, 1)
         settings.select_section("alerts")
         settings.select_section("providers")
-        expected = [choices[0], choices[2], choices[1]]
         with patch.object(self.dashboard, "refresh"):
             settings.save()
         self.assertEqual([tuple(value[key] for key in ("provider", "idx", "metric"))
                           for value in state.get_selected_items(state.load_selected())], expected)
-        self.assertEqual(config.enabled_order(), ["codex", "copilot"])
-        settings.bar_order.move_provider(0, 1)
+        self.assertEqual(config.enabled_order(), ["copilot", "codex"])
+        settings.providers.move_provider(0, 1)
         settings.cancel_button.click()
         self.dashboard.configure()
         self.assertEqual([tuple(value[key] for key in ("provider", "idx", "metric"))
@@ -175,14 +172,17 @@ class DesktopTests(IsolatedState):
         state.save_selected(selected)
         self.dashboard.configure()
         settings = self.dashboard.settings_view
-        self.assertEqual(settings.bar_selections, pins)
-        self.assertTrue(all("unavailable" in settings.bar_order.item(i).text() for i in range(2)))
+        self.assertEqual(settings.bar_selections, [pins[1], pins[0]])
+        orphan = settings.findChild(tray.QCheckBox, "active-provider-account:deleted")
+        self.assertFalse(orphan.isEnabled())
+        self.assertTrue(settings.provider_bar_checks["account:deleted"].isChecked())
+        self.assertTrue(any("unavailable" in item.text() for item in settings.bar_items.items))
         with patch.object(self.dashboard, "refresh") as refresh:
             settings.save()
         refresh.assert_not_called()
         self.assertEqual(settings.message.text(), "Remove inactive providers from the bar or activate them below.")
         self.assertEqual(state.get_selected_items(state.load_selected()), pins)
-        settings.remove_bar_item([pins[0][key] for key in ("provider", "idx", "metric")])
+        QTest.keyClick(settings.provider_bar_checks["account:deleted"], tray.Qt.Key.Key_Space)
         with patch.object(self.dashboard, "refresh"):
             settings.save()
         self.assertEqual(state.get_selected_items(state.load_selected()), pins[1:])
@@ -194,7 +194,7 @@ class DesktopTests(IsolatedState):
         self.assertEqual(settings.message.text(), "Choose at least one bar item.")
         self.assertEqual(state.get_selected_items(state.load_selected()), pins[1:])
         self.check_bar_items(settings, [("copilot", 0, "rolling"), ("codex", 0, "rolling")])
-        self.assertEqual([value["provider"] for value in settings.bar_selections], ["copilot", "codex"])
+        self.assertEqual([value["provider"] for value in settings.bar_selections], ["codex", "copilot"])
 
     def test_unified_provider_enable_can_stay_active_without_showing_any_of_its_limits(self):
         self.dashboard.configure()
@@ -210,6 +210,54 @@ class DesktopTests(IsolatedState):
         self.assertEqual(config.enabled_order(), ["codex", "copilot"])
         self.assertEqual([value["provider"] for value in state.get_selected_items(state.load_selected())], ["codex"])
 
+    def test_provider_visibility_remembers_exact_limits_without_changing_active_state(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "_idx": 0, "metrics": [
+            {"type": "rolling", "percentage": 23}, {"type": "weekly", "percentage": 61}]},
+            {"provider": "Codex", "_idx": 1, "metrics": [{"type": "weekly", "percentage": 40}]}])
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        wanted = [("codex", 1, "weekly"), ("codex", 0, "weekly")]
+        self.check_bar_items(settings, wanted)
+        expected = [dict(zip(("provider", "idx", "metric"), value)) for value in wanted]
+        row = next(settings.providers.item(i) for i in range(settings.providers.count())
+                   if settings.providers.item(i).data(tray.Qt.ItemDataRole.UserRole) == "codex")
+        self.assertEqual(len(settings.providers.itemWidget(row).findChildren(tray.QCheckBox)), 2)
+        self.assertEqual(row.sizeHint().height(), 36)
+        settings.provider_bar_checks["codex"].setChecked(False)
+        self.assertEqual(settings.bar_selections, [])
+        self.assertEqual(row.checkState(), tray.Qt.CheckState.Checked)
+        settings.provider_bar_checks["codex"].setChecked(True)
+        self.assertEqual(settings.bar_selections, expected)
+        row.setCheckState(tray.Qt.CheckState.Unchecked)
+        self.assertEqual(settings.bar_selections, [])
+        row.setCheckState(tray.Qt.CheckState.Checked)
+        self.assertEqual(settings.bar_selections, [])
+        self.assertFalse(settings.provider_bar_checks["codex"].isChecked())
+        settings.provider_bar_checks["codex"].setChecked(True)
+        self.assertEqual(settings.bar_selections, expected)
+        with patch.object(self.dashboard, "refresh"):
+            settings.save()
+        settings.provider_bar_checks["codex"].setChecked(False)
+        settings.cancel_button.click()
+        self.dashboard.configure()
+        self.assertEqual(self.dashboard.settings_view.bar_selections, expected)
+
+    def test_compact_provider_limits_menu_keyboard_selects_exact_metric(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "rolling", "percentage": 23}, {"type": "weekly", "percentage": 61}]}])
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        settings.select_section("providers")
+        trigger = settings.findChild(tray.QPushButton, "provider-limits-codex")
+        menu = trigger.menu()
+        weekly = next(action for action in menu.actions() if "Weekly" in action.text())
+        menu.popup(trigger.mapToGlobal(tray.QPoint(0, trigger.height())))
+        self.app.processEvents()
+        menu.setActiveAction(weekly)
+        QTest.keyClick(menu, tray.Qt.Key.Key_Return)
+        self.assertIn({"provider": "codex", "idx": 0, "metric": "weekly"}, settings.bar_selections)
+        self.assertTrue(settings.provider_bar_checks["codex"].isChecked())
+
     def test_unrelated_provider_toggle_preserves_orphan_and_missing_limit_drafts(self):
         pins = [{"provider": "account:deleted", "idx": 1, "metric": "weekly"},
                 {"provider": "codex", "idx": 0, "metric": "missing"},
@@ -222,9 +270,9 @@ class DesktopTests(IsolatedState):
         copilot = next(settings.providers.item(i) for i in range(settings.providers.count())
                        if settings.providers.item(i).data(tray.Qt.ItemDataRole.UserRole) == "copilot")
         copilot.setCheckState(tray.Qt.CheckState.Unchecked)
-        self.assertEqual(settings.bar_selections, pins[:2])
+        self.assertEqual(settings.bar_selections, [pins[1], pins[0]])
         copilot.setCheckState(tray.Qt.CheckState.Checked)
-        self.assertEqual(settings.bar_selections, pins[:2])
+        self.assertEqual(settings.bar_selections, [pins[1], pins[0]])
         self.assertEqual(state.get_selected_items(state.load_selected()), pins)
 
     def test_unified_provider_keyboard_controls_keep_focus_when_active_cards_rebuild(self):
@@ -241,10 +289,25 @@ class DesktopTests(IsolatedState):
             self.assertIs(self.dashboard.focusWidget(), replacement)
             QTest.keyClick(replacement, tray.Qt.Key.Key_Space)
             self.assertIn("copilot", settings.enabled_draft)
-            candidate = next(option for option in settings.bar_items.items if option.identity[0] == "copilot")
-            candidate.checkbox.setFocus()
-            QTest.keyClick(candidate.checkbox, tray.Qt.Key.Key_Space)
+            shown = settings.provider_bar_checks["copilot"]
+            shown.setFocus()
+            QTest.keyClick(shown, tray.Qt.Key.Key_Space)
             self.assertIn({"provider": "copilot", "idx": 0, "metric": "rolling"}, settings.bar_selections)
+
+    def test_usage_selection_keeps_bar_items_grouped_by_configured_provider_order(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "rolling", "percentage": 23}, {"type": "weekly", "percentage": 61}]}])
+        self.dashboard.on_result("copilot", [{"provider": "Copilot", "metrics": [
+            {"type": "monthly", "percentage": 42}]}])
+        state.set_selected_items(self.dashboard.selected, [
+            {"provider": "codex", "idx": 0, "metric": "rolling"},
+            {"provider": "codex", "idx": 0, "metric": "weekly"},
+            {"provider": "copilot", "idx": 0, "metric": "monthly"}])
+        with patch.object(tray.QSystemTrayIcon, "show"):
+            self.dashboard.choose_metric(("copilot", 0, "monthly"))
+        self.assertEqual(state.get_selected_items(state.load_selected()), [
+            {"provider": "codex", "idx": 0, "metric": "weekly"},
+            {"provider": "copilot", "idx": 0, "metric": "monthly"}])
 
     def test_multiple_trays_keep_identity_refresh_loading_and_clicked_anchor(self):
         self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
@@ -297,8 +360,7 @@ class DesktopTests(IsolatedState):
         self.assertEqual(state.get_selected_items(state.load_selected()), selections)
         self.dashboard.configure()
         self.assertEqual(self.dashboard.settings_view.bar_selections, selections)
-        self.assertTrue(any("unavailable" in self.dashboard.settings_view.bar_order.item(index).text()
-                            for index in range(self.dashboard.settings_view.bar_order.count())))
+        self.assertTrue(any("unavailable" in item.text() for item in self.dashboard.settings_view.bar_items.items))
         self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
             {"type": "rolling", "percentage": 17}]}])
         self.assertIn("17%", self.dashboard.tray.toolTip())
