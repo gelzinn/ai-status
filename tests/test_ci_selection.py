@@ -63,6 +63,10 @@ class AffectedChecksTests(unittest.TestCase):
         jobs = self.selected("packages/lib/install.sh")
         self.assertTrue({"lint", "installer", "web-build"}.issubset(jobs))
         self.assertTrue(jobs.isdisjoint({"windows-package", "macos-native", "macos-installer", "qml-syntax"}))
+        self.assertEqual(self.selected("packages/lib/update-omarchy.sh"),
+                         {"lint", "python-tests", "installer", "release-package"})
+        self.assertEqual(self.selected("packages/lib/tests/test_omarchy_update.py"),
+                         {"python-tests", "installer"})
 
     def test_macos_installer_does_not_run_the_linux_installer_or_windows_build(self):
         jobs = self.selected("packages/lib/install-macos.sh")

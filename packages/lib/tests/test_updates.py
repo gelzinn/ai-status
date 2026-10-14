@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import shlex
 import shutil
 import signal
 import ssl
@@ -214,7 +215,7 @@ class UpdateGuideTests(unittest.TestCase):
             guide = updates.update_guide()
         self.assertEqual(guide["method"], "omarchy")
         self.assertEqual(guide["actionLabel"], "Update now")
-        self.assertEqual(guide["command"], "omarchy plugin update " + updates.PLUGIN_ID + " --yes && omarchy restart shell")
+        self.assertEqual(guide["command"], "bash " + shlex.quote(str(plugin_lib / "update-omarchy.sh")))
         lib = self.managed_lib()
         with patch.object(paths, "LIB_DIR", lib), patch.object(sys, "platform", "linux"):
             self.assertIn("--bar quickshell", updates.update_guide()["command"])
@@ -230,12 +231,14 @@ class UpdateGuideTests(unittest.TestCase):
                               'if [ "$1" = plugin ]; then exit "$AI_STATUS_TEST_UPDATE_EXIT"; fi\n'
                               'exit "$AI_STATUS_TEST_RESTART_EXIT"\n')
         executable.chmod(0o755)
+        (self.home / ".config/omarchy/plugins" / updates.PLUGIN_ID / ".git").mkdir(parents=True)
         with patch.object(updates, "_installation", return_value=("omarchy", {})):
             guide = updates.update_guide()
         for update_status, restart_status, expected in ((0, 0, 0), (7, 0, 7), (0, 9, 9)):
             with self.subTest(update=update_status, restart=restart_status):
                 log.write_text("")
-                env = dict(os.environ, PATH=str(binary) + os.pathsep + os.environ["PATH"],
+                env = dict(os.environ, HOME=str(self.home), XDG_CACHE_HOME=str(self.home / "cache"),
+                           PATH=str(binary) + os.pathsep + os.environ["PATH"],
                            AI_STATUS_TEST_LOG=str(log), AI_STATUS_TEST_UPDATE_EXIT=str(update_status),
                            AI_STATUS_TEST_RESTART_EXIT=str(restart_status))
                 result = subprocess.run(["bash", "-c", guide["command"]], env=env, capture_output=True, timeout=5)

@@ -758,7 +758,14 @@ fi
 if [ "$BAR" = quickshell ]; then
     PLUGIN_UPDATED=false
     if [ -d "$PLUGIN_DIR/.git" ]; then
-        omarchy plugin update "$PLUGIN_ID" --yes
+        # Older release archives may not contain the recovery helper yet.
+        if [ -f "$INSTALL_DIR/packages/lib/update-omarchy.sh" ]; then
+            # shellcheck source=./update-omarchy.sh
+            source "$INSTALL_DIR/packages/lib/update-omarchy.sh"
+            ai_status_update_omarchy_plugin
+        else
+            omarchy plugin update "$PLUGIN_ID" --yes
+        fi
         PLUGIN_UPDATED=true
     else
         # Local development installs the checkout being tested, rather than main.

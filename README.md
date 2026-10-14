@@ -55,10 +55,11 @@ The plugin includes its Python backend. Click the widget for usage; right-click 
 Update the plugin with:
 
 ```bash
-omarchy plugin update io.github.gelzinn.ai-status && omarchy restart shell
+bash ~/.config/omarchy/plugins/io.github.gelzinn.ai-status/packages/lib/update-omarchy.sh
 ```
 
-After a successful update, restarting the shell loads the new plugin components.
+The helper restarts the shell after a successful update. Older installations
+with blocked updates can use the [recovery command](packages/lib/UPDATES.md#how-it-works).
 
 [Dependencies, placement and configuration →](packages/lib/LINUX.md#omarchy-quickshell-plugin)
 

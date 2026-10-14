@@ -116,7 +116,7 @@ def update_guide():
                      description="Replace this copy with the latest ZIP.\nYour settings stay in AppData.")
     elif method == "omarchy":
         guide.update(title="Update the Omarchy plugin",
-                     command="omarchy plugin update " + PLUGIN_ID + " --yes && omarchy restart shell",
+                     command="bash " + shlex.quote(str(paths.LIB_DIR / "update-omarchy.sh")),
                      actionLabel="Update now", canUpdate=shutil.which("omarchy") is not None,
                      description="Updates in Terminal and restarts the shell.\nYour settings are kept.")
     elif method in ("linux-installer", "macos-installer"):
