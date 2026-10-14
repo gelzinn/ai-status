@@ -14,6 +14,7 @@ try:
     from PySide6.QtGui import QColor, QFocusEvent, QKeyEvent, QMouseEvent, QPixmap, QWheelEvent
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QLabel
+    from shiboken6 import isValid
     from core import tray
     HAS_QT = True
 except ImportError:
@@ -37,8 +38,43 @@ class DesktopTests(IsolatedState):
         self.dashboard.poll.stop()
         self.dashboard.auto_refresh.stop()
         self.dashboard.animation.stop()
-        self.addCleanup(self.dashboard.tray.hide)
-        self.addCleanup(self.dashboard.deleteLater)
+        self.addCleanup(self.dispose_dashboard, self.dashboard)
+
+    def dispose_dashboard(self, dashboard):
+        if not isValid(dashboard):
+            return
+        # Settings and worker completion can restart timers after setUp stops them.
+        # Destroy their receivers before IsolatedState restores the global paths.
+        dashboard.quitting = True
+        for timer in dashboard.findChildren(tray.QTimer):
+            timer.stop()
+        dashboard.hide_trays()
+        dashboard.hide()
+        for thread in dashboard.findChildren(tray.QThread):
+            thread.quit()
+            self.assertTrue(thread.wait(5000), "Desktop worker did not finish during cleanup")
+        dashboard.deleteLater()
+        self.app.sendPostedEvents(None, tray.QEvent.Type.DeferredDelete)
+
+    def test_dashboard_cleanup_cancels_restarted_timers_before_paths_are_restored(self):
+        with patch.object(tray.QTimer, "singleShot"), patch.object(tray.QSystemTrayIcon, "show"):
+            retired = tray.Dashboard(self.app)
+        self.addCleanup(self.dispose_dashboard, retired)
+        retired.data = {"copilot": [{"provider": "Copilot", "metrics": [
+            {"type": "monthly", "percentage": 42}]}]}
+        timers = retired.findChildren(tray.QTimer)
+        for timer in (retired.poll, retired.auto_refresh, retired.animation):
+            timer.start(0)
+        tray.QTimer.singleShot(0, retired, retired.draw)
+        destroyed = MagicMock()
+        retired.destroyed.connect(destroyed)
+        self.assertIsNone(state.load_selected())
+        self.dispose_dashboard(retired)
+        destroyed.assert_called_once()
+        self.assertFalse(isValid(retired))
+        self.assertTrue(all(not isValid(timer) for timer in timers))
+        self.app.processEvents()
+        self.assertIsNone(state.load_selected())
 
     @staticmethod
     def check_bar_items(settings, identities):
@@ -496,8 +532,7 @@ class DesktopTests(IsolatedState):
             dashboard = tray.Dashboard(self.app)
         for timer in (dashboard.poll, dashboard.auto_refresh, dashboard.animation):
             timer.stop()
-        self.addCleanup(dashboard.tray.hide)
-        self.addCleanup(dashboard.deleteLater)
+        self.addCleanup(self.dispose_dashboard, dashboard)
         evaluate.assert_not_called()
 
     def test_fresh_result_is_evaluated_and_notification_click_opens_its_limit(self):
