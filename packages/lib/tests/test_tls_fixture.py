@@ -74,7 +74,11 @@ class TLSFixtureTests(unittest.TestCase):
 
     def test_windows_prefers_openssl_from_git_over_an_unrelated_path_installation(self):
         with tempfile.TemporaryDirectory(prefix="ai-status-test-git-") as temporary:
-            root = Path(temporary)
+            directory = Path(temporary) / "directory"
+            directory.mkdir()
+            # Exercise canonicalization on every host; Windows also expands
+            # short temp paths such as RUNNER~1 to their long spelling.
+            root = directory / ".."
             git = root / "Git" / "cmd" / "git.exe"
             bundled = root / "Git" / "usr" / "bin" / "openssl.exe"
             for executable in (git, bundled):
@@ -84,7 +88,7 @@ class TLSFixtureTests(unittest.TestCase):
             with patch.object(tls_fixture.sys, "platform", "win32"), \
                     patch.object(tls_fixture.shutil, "which", side_effect=lambda name:
                                  str(git) if name == "git.exe" else str(unrelated)):
-                self.assertEqual(tls_fixture._openssl(), str(bundled))
+                self.assertTrue(Path(tls_fixture._openssl()).samefile(bundled))
 
 
 if __name__ == "__main__":
