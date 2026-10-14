@@ -20,9 +20,13 @@ settings/cache live in your user profile.
   account/limit gets its own native tray icon with an account, limit and value
   tooltip. Windows may initially put icons in the hidden-icons menu; move the
   ones you want beside the clock using Windows settings.
-- Click a provider or a metric to select it; the arrows/bullets mark selected
-  items. Clicking or using Up/Down to cycle metrics replaces one selected item
-  and keeps additional selections in provider order. Escape closes the panel.
+- The arrows/bullets mark selected items. With one bar item configured, click
+  a provider or ordinary metric, or use Up/Down to switch the selection.
+  With several configured items, these rows are read-only and keyboard or
+  wheel shortcuts leave the selection unchanged. The panel shows
+  **Bar items: Settings → Providers**; change the selection there. Temporarily
+  unavailable saved items still count. Credit and reset details remain
+  interactive, and the usage list can still scroll. Escape closes the panel.
 - The panel only lists providers with usable metrics. Failed/unconnected providers
   do not occupy rows. The header has **Refresh** and **Settings** icons. The tray
   context menu also contains **Connection details**,

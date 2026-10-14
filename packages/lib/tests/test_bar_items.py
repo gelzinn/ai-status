@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from core import cli, config, daemon, quickshell, render, state, swiftbar
+from core import cli, config, daemon, logos, quickshell, render, state, swiftbar
 
 
 CLAUDE = dict(provider="claude", idx=0, metric="rolling")
@@ -116,25 +116,51 @@ class BarItemsTests(unittest.TestCase):
         self.assertEqual(output["text"], "Claude 75% · Codex " + render.SPINNERS[0] + " · Claude 50%")
         self.assertEqual(render.build_final_state(DATA, selected)["text"], "Claude 75% · Codex 90% · Claude 50%")
 
-    def test_metric_click_and_cycle_keep_extra_pins(self):
-        for action in (lambda: quickshell.select_metric(WEEKLY), lambda: cli.cycle_metric("quickshell")):
-            with self.subTest(action=action), patch.object(state, "load_cache", return_value=DATA), \
-                    patch.object(state, "load_selected", return_value=self.selected([CLAUDE, CODEX])), \
-                    patch.object(state, "save_selected") as save:
-                action()
-                self.assertEqual(save.call_args.args[0]["items"], [WEEKLY, CODEX])
+    def test_quick_selection_counts_normalized_configured_items(self):
+        for selected in (None, {}, CLAUDE, self.selected([]), self.selected([CLAUDE]),
+                         {"items": [CLAUDE, CLAUDE, None, dict(CODEX, idx=True)]}):
+            with self.subTest(selected=selected):
+                self.assertTrue(state.can_select_metric(selected))
+        for items in ([CLAUDE, CODEX], [CLAUDE, WEEKLY],
+                      [CLAUDE, dict(CLAUDE, provider="account:work")],
+                      [CLAUDE, dict(CODEX, provider="unavailable")]):
+            with self.subTest(items=items):
+                self.assertFalse(state.can_select_metric(self.selected(items)))
 
-    def test_click_scroll_and_cycle_keep_the_shared_provider_order(self):
-        for action in (lambda: quickshell.select_metric(CODEX),
-                       lambda: cli.scroll_down("quickshell"),
-                       lambda: cli.cycle_metric("quickshell")):
-            with self.subTest(action=action), patch.object(state, "load_cache", return_value=DATA), \
-                    patch.object(state, "load_selected", return_value=self.selected([CLAUDE, CODEX, WEEKLY])), \
-                    patch.object(state, "save_selected") as save:
-                action()
-                saved = save.call_args.args[0]
-                self.assertEqual(saved["items"], [WEEKLY, CODEX])
-                self.assertEqual({key: saved[key] for key in ("provider", "idx", "metric")}, WEEKLY)
+    def test_multiple_pins_block_click_scroll_cycle_and_stale_swiftbar_actions_without_side_effects(self):
+        actions = [lambda: quickshell.select_metric(WEEKLY), lambda: quickshell.select_metric(CODEX),
+                   lambda: cli._swiftbar_select(["claude", "0", "weekly"])]
+        for frontend in ("waybar", "quickshell", "macos", "swiftbar"):
+            actions.extend([lambda f=frontend: cli.scroll_up(f), lambda f=frontend: cli.scroll_down(f),
+                            lambda f=frontend: cli.cycle_metric(f)])
+        for items in ([CLAUDE, CODEX], [CLAUDE, WEEKLY],
+                      [CLAUDE, dict(CODEX, provider="unavailable")],
+                      [CLAUDE, dict(CLAUDE, provider="account:work")]):
+            for action in actions:
+                selected = self.selected(items, usage_display="remaining", custom={"keep": True})
+                before = copy.deepcopy(selected)
+                with self.subTest(items=items, action=action), patch.object(state, "load_cache", return_value=DATA), \
+                        patch.object(state, "load_selected", return_value=selected), \
+                        patch.object(state, "save_selected") as save, patch.object(logos, "update_current") as logo, \
+                        patch.object(state, "trigger_refresh") as refresh:
+                    action()
+                    self.assertEqual(selected, before)
+                    save.assert_not_called()
+                    logo.assert_not_called()
+                    refresh.assert_not_called()
+
+    def test_legacy_and_explicit_single_pins_still_switch(self):
+        for explicit in (False, True):
+            for action, expected in ((lambda: quickshell.select_metric(WEEKLY), WEEKLY),
+                                     (lambda: cli.cycle_metric("quickshell"), WEEKLY),
+                                     (lambda: cli.scroll_down("quickshell"), CODEX)):
+                selected = self.selected([CLAUDE]) if explicit else dict(CLAUDE, icon_mode="off")
+                with self.subTest(explicit=explicit, expected=expected), \
+                        patch.object(state, "load_cache", return_value=DATA), \
+                        patch.object(state, "load_selected", return_value=selected), \
+                        patch.object(state, "save_selected") as save:
+                    action()
+                    self.assertEqual(save.call_args.args[0]["items"], [expected])
 
     def test_swiftbar_title_and_checks_include_every_selected_item(self):
         selected = self.selected([CODEX, WEEKLY, CLAUDE])
@@ -142,6 +168,18 @@ class BarItemsTests(unittest.TestCase):
             menu = swiftbar.render_menu(DATA, selected)
         self.assertEqual(menu.splitlines()[0], "Codex 10% · Claude 50% · Claude 25%")
         self.assertEqual(menu.count("checked=true"), 3)
+        self.assertNotIn('param2="swiftbar-select"', menu)
+        self.assertNotIn("Cycle metric", menu)
+        self.assertIn('param2="swiftbar-refresh"', menu)
+        self.assertIn('param2="config"', menu)
+
+    def test_swiftbar_missing_second_pin_does_not_enable_selection(self):
+        selected = self.selected([CLAUDE, dict(CODEX, provider="unavailable")])
+        with patch.object(swiftbar.macos.LogoCache, "get", return_value=""):
+            menu = swiftbar.render_menu(DATA, selected)
+        self.assertEqual(menu.splitlines()[0], "Claude 25%")
+        self.assertNotIn('param2="swiftbar-select"', menu)
+        self.assertNotIn("Cycle metric", menu)
 
     def test_waybar_refresh_updates_logo_to_first_visible_item_without_saving_pins(self):
         selected = self.selected([CLAUDE, CODEX])

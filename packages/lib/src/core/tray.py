@@ -45,6 +45,7 @@ QLabel { background: transparent; border: none; }
 QLabel#brand { color: #eeeeee; font-weight: 500; }
 QAbstractButton { border: none; background: transparent; text-align: left; }
 QAbstractButton:hover, QAbstractButton:focus { background: #1c1c1c; border-radius: 8px; }
+QAbstractButton[interactive="false"]:hover, QAbstractButton[interactive="false"]:focus { background: transparent; }
 QAbstractButton#updateLink:hover, QAbstractButton#updateLink:focus { background: #15283d; border-radius: 8px; }
 QWidget#creditTable { border: 1px solid #262626; border-radius: 8px; }
 QWidget#creditTableHeader {
@@ -149,9 +150,34 @@ class UsageButton(QAbstractButton):
     """A focusable, clickable provider/metric row, without native button chrome."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.set_interactive(True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def set_interactive(self, interactive):
+        if self.property("interactive") == interactive:
+            return
+        self.setProperty("interactive", interactive)
+        self.setCursor(Qt.CursorShape.PointingHandCursor if interactive else Qt.CursorShape.ArrowCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus if interactive else Qt.FocusPolicy.NoFocus)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, not interactive)
+        if not interactive:
+            self.setDown(False)
+            self.clearFocus()
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def mousePressEvent(self, event):
+        if not self.property("interactive"):
+            event.ignore()
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if not self.property("interactive"):
+            event.ignore()
+            return
+        super().mouseReleaseEvent(event)
 
     def paintEvent(self, event):
         # Let Qt draw the stylesheet background while child labels draw content.
@@ -165,7 +191,9 @@ class UsageButton(QAbstractButton):
         return self.layout().sizeHint() if self.layout() else QSize(32, 32)
 
     def keyPressEvent(self, event):
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        if not self.property("interactive"):
+            event.ignore()
+        elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.click()
             event.accept()
         else:
@@ -3236,13 +3264,15 @@ class Dashboard(QWidget):
             self.refresh()
         elif event.key() == Qt.Key.Key_C:
             self.configure()
-        elif not self.viewing_credit_details() and event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
+        elif (not self.viewing_credit_details() and state.can_select_metric(self.selected)
+              and event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up)):
             self.cycle_metric(1 if event.key() == Qt.Key.Key_Down else -1)
         else:
             super().keyPressEvent(event)
 
     def wheelEvent(self, event):
-        if self.viewing_credit_details() or self.configuring() or self.viewing_updates():
+        if (self.viewing_credit_details() or self.configuring() or self.viewing_updates()
+                or not state.can_select_metric(self.selected)):
             super().wheelEvent(event)
             return
         self.cycle_metric(1 if event.angleDelta().y() < 0 else -1)
@@ -3309,12 +3339,18 @@ class Dashboard(QWidget):
         elif monetary_key is not None:
             def restore_credit_focus():
                 if self.pages.currentWidget() is self.scroll:
-                    (self.provider_buttons.get(monetary_key[:2]) or self.refresh_button).setFocus()
+                    target = self.provider_buttons.get(monetary_key[:2])
+                    if target is None or not target.property("interactive"):
+                        target = self.bar_items_link if not self.bar_items_link.isHidden() else self.refresh_button
+                    target.setFocus()
             # Removing a credit can rebuild usage while this page is closing.
             # Wait until the replacement provider rows belong to the scroller.
             QTimer.singleShot(0, restore_credit_focus)
         elif heading:
-            (heading.credits if not heading.credits.isHidden() else heading).setFocus()
+            target = heading.credits if not heading.credits.isHidden() else heading
+            if not target.property("interactive"):
+                target = self.bar_items_link
+            target.setFocus()
         elif was_configuring:
             self.settings_button.setFocus()
         elif was_updating:
@@ -3524,6 +3560,11 @@ class Dashboard(QWidget):
             self.schedule_auto_refresh()
             self.update_refresh_status()
 
+    def configure_bar_items(self):
+        self.configure()
+        self.settings_view.select_section("providers")
+        self.settings_view.section_buttons["providers"].setFocus()
+
     def show_diagnostics(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Provider connections")
@@ -3705,6 +3746,9 @@ class Dashboard(QWidget):
             self.schedule_auto_refresh()
 
     def choose_metric(self, value):
+        if (not state.can_select_metric(self.selected)
+                or not state.can_select_metric(state.load_selected() or {})):
+            return
         state.select_primary(self.selected, dict(zip(("provider", "idx", "metric"), value)),
                              provider_order=config.enabled_connection_order())
         state.save_selected(self.selected)
@@ -3718,7 +3762,7 @@ class Dashboard(QWidget):
                 for item in state.get_selected_items(self.selected)}
 
     def cycle_metric(self, step):
-        if self.metric_values:
+        if state.can_select_metric(self.selected) and self.metric_values:
             index = self.metric_values.index(self.selected_value()) if self.selected_value() in self.metric_values else 0
             self.choose_metric(self.metric_values[(index + step) % len(self.metric_values)])
 
@@ -3826,6 +3870,13 @@ class Dashboard(QWidget):
         update_row.addWidget(ArrowIcon(color="#89b4fa"))
         self.update_link.clicked.connect(self.show_updates)
         layout.addWidget(self.update_link)
+        self.bar_items_link = UsageButton()
+        self.bar_items_link.setAccessibleName("Bar items: Settings → Providers")
+        bar_items_row = QHBoxLayout(self.bar_items_link)
+        bar_items_row.setContentsMargins(4, 6, 4, 6)
+        bar_items_row.addWidget(plain_label("Bar items: Settings → Providers"))
+        self.bar_items_link.clicked.connect(self.configure_bar_items)
+        layout.addWidget(self.bar_items_link)
         for name in config.enabled_connection_order():
             for entry in self.data.get(name) or []:
                 metrics = sorted(render.entry_metrics(entry), key=render.metric_sort_key)
@@ -3936,7 +3987,7 @@ class Dashboard(QWidget):
         self.scroll.setWidget(content)
         if focused_value is not None:
             for button in self.metric_buttons:
-                if button.value == focused_value:
+                if button.value == focused_value and button.property("interactive"):
                     button.setFocus()
                     break
         elif focused_update:
@@ -3953,11 +4004,15 @@ class Dashboard(QWidget):
             self.update_view.set_guide(self.update_view.guide, version)
         pinned = self.pinned_values()
         pinned_providers = {value[:2] for value in pinned}
+        quick_switch = state.can_select_metric(self.selected)
+        self.bar_items_link.setVisible(not quick_switch)
         groups = {}
         for name, entry, metric, value in self.visible_metrics:
             groups.setdefault(value[:2], (name, entry))
         for key, (name, entry) in groups.items():
             heading = self.provider_buttons[key]
+            heading.set_interactive(quick_switch)
+            heading.setAccessibleDescription("" if quick_switch else "Manage bar items in Settings → Providers.")
             active = key in pinned_providers
             heading.arrow.setText("→" if active else "")
             heading.name_label.setText(self.entry_name(name, entry))
@@ -3971,6 +4026,8 @@ class Dashboard(QWidget):
             heading.credits.setAccessibleName(f"{self.entry_name(name, entry)}: {available} reset credits. Open reset details")
         group_indices = {key: index for index, key in enumerate(groups)}
         for button, (name, entry, metric, value) in zip(self.metric_buttons, self.visible_metrics):
+            button.set_interactive(quick_switch or bool(button.credit_id))
+            button.setAccessibleDescription("" if button.property("interactive") else "Manage bar items in Settings → Providers.")
             active = value in pinned
             loading = name in self.pending
             color = "#eeeeee" if active else "#888888"
