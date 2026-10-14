@@ -70,7 +70,8 @@ def _scroll(direction, frontend="waybar"):
     new_dir, new_idx = items[(idx + direction) % len(items)]
     new_metric = _first_metric_for(cache, new_dir, new_idx)
     
-    state.select_primary(selected, {"provider": new_dir, "idx": new_idx, "metric": new_metric})
+    state.select_primary(selected, {"provider": new_dir, "idx": new_idx, "metric": new_metric},
+                         provider_order=providers)
 
     state.save_selected(selected)
     if frontend == "waybar":
@@ -103,7 +104,8 @@ def cycle_metric(frontend="waybar"):
     
     new_metric = keys[(pos + 1) % len(keys)]
     
-    state.select_primary(selected, {"provider": provider, "idx": idx, "metric": new_metric})
+    state.select_primary(selected, {"provider": provider, "idx": idx, "metric": new_metric},
+                         provider_order=cfgmod.enabled_connection_order())
 
     state.save_selected(selected)
 

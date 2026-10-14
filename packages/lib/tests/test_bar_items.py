@@ -52,6 +52,20 @@ class BarItemsTests(unittest.TestCase):
         other_account = dict(CODEX, provider="account:work")
         self.assertEqual(state.get_selected_items({"items": [CODEX, other_account]}), [CODEX, other_account])
 
+    def test_provider_order_preserves_account_metric_identity_and_unknown_groups(self):
+        other_account = dict(CODEX, provider="account:work", idx=3)
+        unavailable = dict(WEEKLY, metric="weekly:unavailable")
+        orphan = dict(CODEX, provider="account:deleted", idx=5)
+        other_orphan = dict(CLAUDE, provider="retired")
+        items = [orphan, WEEKLY, CODEX, unavailable, other_account, CLAUDE,
+                 other_orphan, dict(CODEX, label="ignored"), None]
+        before = copy.deepcopy(items)
+        self.assertEqual(state.order_bar_items(items, ["codex", "account:work", "claude"]),
+                         [CODEX, other_account, WEEKLY, unavailable, CLAUDE, orphan, other_orphan])
+        self.assertEqual(state.order_bar_items(items, ["claude", "codex", "account:work"]),
+                         [WEEKLY, unavailable, CLAUDE, CODEX, other_account, orphan, other_orphan])
+        self.assertEqual(items, before)
+
     def test_primary_replacement_preserves_other_slots_and_deduplicates(self):
         selected = self.selected([CLAUDE, CODEX, WEEKLY])
         state.select_primary(selected, CODEX)
@@ -109,6 +123,18 @@ class BarItemsTests(unittest.TestCase):
                     patch.object(state, "save_selected") as save:
                 action()
                 self.assertEqual(save.call_args.args[0]["items"], [WEEKLY, CODEX])
+
+    def test_click_scroll_and_cycle_keep_the_shared_provider_order(self):
+        for action in (lambda: quickshell.select_metric(CODEX),
+                       lambda: cli.scroll_down("quickshell"),
+                       lambda: cli.cycle_metric("quickshell")):
+            with self.subTest(action=action), patch.object(state, "load_cache", return_value=DATA), \
+                    patch.object(state, "load_selected", return_value=self.selected([CLAUDE, CODEX, WEEKLY])), \
+                    patch.object(state, "save_selected") as save:
+                action()
+                saved = save.call_args.args[0]
+                self.assertEqual(saved["items"], [WEEKLY, CODEX])
+                self.assertEqual({key: saved[key] for key in ("provider", "idx", "metric")}, WEEKLY)
 
     def test_swiftbar_title_and_checks_include_every_selected_item(self):
         selected = self.selected([CODEX, WEEKLY, CLAUDE])

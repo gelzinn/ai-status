@@ -354,6 +354,27 @@ class NativeSettingsTests(unittest.TestCase):
         self.assertEqual(selected["icon_mode"], "logo")
         self.refresh.assert_called_once()
 
+    def test_provider_order_roundtrip_drives_bar_pins_and_keeps_unavailable_limits(self):
+        unavailable = dict(provider="claude", idx=0, metric="weekly:unavailable")
+        items = [dict(provider="claude", idx=0, metric="weekly:Fable"),
+                 dict(provider="codex", idx=0, metric="rolling"),
+                 unavailable, dict(provider="claude", idx=0, metric="rolling")]
+        for provider_order, expected in (
+                (["codex", "claude"], [items[1], items[0], unavailable, items[3]]),
+                (["claude", "codex"], [items[0], unavailable, items[3], items[1]])):
+            with self.subTest(order=provider_order):
+                quickshell.save_settings(dict(self.payload, enabled=provider_order, items=items))
+                saved = state.load_selected()
+                self.assertEqual(json.loads(self.config_file.read_text()), provider_order)
+                self.assertEqual(state.get_selected_items(saved), expected)
+                self.assertEqual({key: saved[key] for key in ("provider", "idx", "metric")}, expected[0])
+                snapshot = quickshell.build_snapshot(DATA, saved)
+                self.assertEqual(snapshot["settings"]["items"], expected)
+                self.assertEqual(snapshot["settings"]["enabled"], provider_order)
+                self.assertEqual([{key: item[key] for key in ("provider", "idx", "metric")}
+                                  for item in snapshot["barItems"]],
+                                 [item for item in expected if item != unavailable])
+
     def test_invalid_settings_do_not_write_or_refresh(self):
         invalid = [None, [], {},
             dict(self.payload, enabled=[]),

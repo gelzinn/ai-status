@@ -70,8 +70,8 @@ Click the menu bar item to open or close the panel. The header contains
 **Refresh** and **Settings** controls. Connection cards show their provider
 logos and account or plan names, with usage bars and reset countdowns for
 quotas, and reported costs or balances for API services. Click a connection
-heading or a metric to change the first item in the menu bar, keeping any
-additional selected items. Balances have
+heading or a metric to replace one menu bar selection, keeping additional
+selected items in provider order. Balances have
 no invented percentage; a cost percentage requires a reported limit or a
 configured monitoring budget.
 
@@ -96,13 +96,19 @@ limit. See [provider eligibility](PROVIDERS.md#claude).
 
 ## Settings and About
 
-**General** includes checkboxes for the account/limit items shown in the menu bar.
-Keep one item or select as many as you want; at least one is required. Each
-selected item shows its own usage label. Existing single-item preferences
-remain selected after updating. General also includes menu bar display fields,
-icon mode and the **Automatic refresh** slider. Choose 5–60 minutes in steps
-of 5; the default is 5. Alerts remains separate, with connections enabled,
-disabled and reordered in Providers.
+**Providers** has one compact row per connection with **Active**, its name,
+**Show in bar** and up/down controls. Active controls usage collection even
+when Show in bar is off. Open the row's small menu to choose the account/limit
+items without a second persistent list. Move a provider row to change the
+same order in Usage and the menu bar. Selected limits within that provider
+keep their relative order, including saved limits that are temporarily
+unavailable. Each selected item shows its own usage label. Disabling a
+connection removes its bar items; at least one active connection and one bar
+item are required to save.
+
+**General** includes menu bar display fields, icon mode and the **Automatic
+refresh** slider. Choose 5–60 minutes in steps of 5; the default is 5. Alerts
+remains separate.
 Dragging changes the draft only. Saving the interval updates the daemon's
 schedule without restarting or forcing an extra collection. SwiftBar also
 follows the saved interval. Provider cooldowns and request timeouts are
