@@ -54,6 +54,7 @@ EXACT = {
     "manifest.json": {"python-tests", "installer", "release-config", "release-package"},
     "workspace.config": LINUX_INSTALLER,
     "packages/lib/install.sh": LINUX_INSTALLER | {"web-build"},
+    "packages/lib/update-omarchy.sh": LINUX_INSTALLER,
     "packages/lib/config.sh": LINUX_INSTALLER,
     "packages/lib/check.sh": LINUX_INSTALLER,
     "packages/lib/install-wizard.py": PYTHON | {"installer"},
@@ -111,7 +112,7 @@ def jobs_for_path(filename):
             return {"python-tests", "macos-native"}
         if name.startswith(("test_tray", "test_windows")) or name == "packaged_smoke.py":
             return {"python-tests", "windows-package"}
-        if name == "test_install.py":
+        if name in {"test_install.py", "test_omarchy_update.py"}:
             return {"python-tests", "installer"}
         return {"python-tests", "windows-package"}
     return ALL

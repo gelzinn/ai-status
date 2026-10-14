@@ -21,7 +21,7 @@ ai-status update
 |---|---|
 | Windows installer | Downloads the stable installer, verifies its SHA-256 checksum, then opens setup |
 | Windows portable ZIP | Opens instructions for downloading and replacing the portable copy |
-| Omarchy plugin | Opens a terminal with `omarchy plugin update io.github.gelzinn.ai-status --yes && omarchy restart shell` |
+| Omarchy plugin | Opens a terminal with the bundled recovery helper; updates only AI Status and restarts the shell after success |
 | Linux public installer | Opens a terminal with the public installer, preserving the desktop bar |
 | macOS native public installer | Downloads and verifies the stable package inside the app, installs it, then reopens AI Status automatically |
 | macOS SwiftBar installer | Opens Terminal with the public installer, preserving stream or periodic mode |
@@ -162,13 +162,35 @@ After updating, the script reloads only the selected bar. Waybar receives its ex
 For a plugin installed directly through Omarchy, update only AI Status with:
 
 ```bash
-omarchy plugin update io.github.gelzinn.ai-status && omarchy restart shell
+bash ~/.config/omarchy/plugins/io.github.gelzinn.ai-status/packages/lib/update-omarchy.sh
 ```
 
 The shell restarts only after the plugin update succeeds, so the panel loads
 the updated QML components. Reopen the panel after the restart.
 
-Omarchy keeps the plugin's bar placement and refuses updates it cannot fast-forward. Shared preferences and provider credentials remain outside the plugin checkout.
+The helper first tries Omarchy's normal fast-forward update. Omarchy reports
+any failed merge as “local changes”, which can also happen with divergent Git
+history in an untouched installation. If that update is blocked, the helper
+prepares a clean checkout from the existing origin, preserves the entire old
+directory and Git history, and asks Omarchy to validate and add the replacement.
+It keeps the same plugin id and `shell.json` entry, including bar position and
+plugin settings. Shared AI Status preferences and provider credentials remain
+outside the plugin checkout. Download, validation or installation failures keep
+or restore the previous plugin, and the shell restarts only after success.
+
+Recovery copies are stored outside the active checkout under
+`~/.config/omarchy/plugins/.ai-status-backups/`. This hidden directory is excluded
+from Omarchy's plugin discovery and update scans. Local code changes, staged
+files and ignored files remain in the backup; they are not reapplied to the new
+version.
+
+For an older installation that already fails with `cannot fast-forward` and
+does not include the helper, run the current standalone helper once:
+
+```bash
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/gelzinn/ai-status/main/packages/lib/update-omarchy.sh | bash'
+```
+
 Downloads, checksums, Python validation, CLI import, and dependency checks
 run in a staging directory before replacing the active installation. If
 activation or setup fails, the installer restores the previous files,

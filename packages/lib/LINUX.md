@@ -80,12 +80,19 @@ When a newer stable release is available, the blue **Update available** link ope
 omarchy bar move io.github.gelzinn.ai-status --section right
 
 # Update this plugin, then restart the shell after success:
-omarchy plugin update io.github.gelzinn.ai-status && omarchy restart shell
+bash ~/.config/omarchy/plugins/io.github.gelzinn.ai-status/packages/lib/update-omarchy.sh
 
 # Disable or remove the plugin without deleting shared credentials/preferences:
 omarchy plugin disable io.github.gelzinn.ai-status
 omarchy plugin remove io.github.gelzinn.ai-status
 ```
+
+The update helper recovers blocked fast-forward installs through Omarchy's
+plugin manager and restarts the shell only after success. It preserves the
+previous checkout under the hidden `.ai-status-backups` directory beside the
+installed plugin, keeping provider preferences, credentials and bar placement.
+For an older installation without the helper, see the
+[one-time recovery command](UPDATES.md#how-it-works).
 
 The AI Status installer offers this same integration with `--bar quickshell --configure-bar true`. It keeps the existing lean CLI installation and uses Omarchy's Git-managed add/update commands for the plugin, preserving its placement. If a plugin folder is not Git-managed, it reports the conflict and leaves that folder untouched.
 
