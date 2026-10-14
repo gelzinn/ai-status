@@ -98,6 +98,7 @@ def render(output):
             assert all(value in icon.toolTip() for value, icon in zip(("27%", "45%", "62%"), icons))
             panel.show()
             panel.configure()
+            panel.settings_view.select_section("providers")
             panel.settings_scroll.verticalScrollBar().setValue(0)
             QTest.qWait(150)
             assert panel.settings_view.bar_selections == ITEMS

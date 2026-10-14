@@ -884,6 +884,10 @@ class ProviderDelegate(QStyledItemDelegate):
         option.state &= ~QStyle.StateFlag.State_HasFocus
 
     def paint(self, painter, option, index):
+        if index.data(Qt.ItemDataRole.UserRole + 1):
+            if option.state & QStyle.StateFlag.State_Selected:
+                painter.fillRect(option.rect, QColor("#252525"))
+            return
         label_option = type(option)(option)
         label_option.rect.adjust(0, 0, -60, 0)
         super().paint(painter, label_option, index)
@@ -893,6 +897,8 @@ class ProviderDelegate(QStyledItemDelegate):
             draw_control_icon(painter, rect, icon, "#aaaaaa" if enabled else "#444444")
 
     def editorEvent(self, event, model, option, index):
+        if index.data(Qt.ItemDataRole.UserRole + 1):
+            return False
         if event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
             if event.button() == Qt.MouseButton.LeftButton and event.position().x() >= option.rect.right() - 56:
                 if event.type() == QEvent.Type.MouseButtonRelease:
@@ -923,12 +929,58 @@ class ProviderList(QListWidget):
         self.model().moveRow(QModelIndex(), row, QModelIndex(), other + (1 if direction > 0 else 0))
         self.setCurrentItem(item)
 
+    def register_row_controls(self, item, widget):
+        for button in widget.findChildren(QAbstractButton):
+            button.order_item = item
+            button.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        if hasattr(watched, "order_item"):
+            if event.type() == QEvent.Type.FocusIn:
+                self.setCurrentItem(watched.order_item)
+            elif (event.type() == QEvent.Type.KeyPress
+                  and event.modifiers() & Qt.KeyboardModifier.AltModifier
+                  and event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down)):
+                self.move_provider(self.row(watched.order_item), -1 if event.key() == Qt.Key.Key_Up else 1)
+                return True
+        return super().eventFilter(watched, event)
+
     def keyPressEvent(self, event):
         if event.modifiers() & Qt.KeyboardModifier.AltModifier and event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down):
             self.move_provider(self.currentRow(), -1 if event.key() == Qt.Key.Key_Up else 1)
             event.accept()
         else:
             super().keyPressEvent(event)
+
+
+class BarItemChoice:
+    """One inline checkbox, with the same identity used by the bar renderer."""
+    def __init__(self, identity, text, checkbox):
+        self.identity, self.label, self.checkbox = identity, text, checkbox
+
+    def data(self, role):
+        return self.identity if role == Qt.ItemDataRole.UserRole else None
+
+    def text(self):
+        return self.label
+
+    def checkState(self):
+        return Qt.CheckState.Checked if self.checkbox.isChecked() else Qt.CheckState.Unchecked
+
+    def setCheckState(self, value):
+        self.checkbox.setChecked(value == Qt.CheckState.Checked)
+
+
+class BarItemChoices:
+    """Candidate identities backed by the visible provider-card checkboxes."""
+    def __init__(self):
+        self.items = []
+
+    def count(self):
+        return len(self.items)
+
+    def item(self, index):
+        return self.items[index]
 
 
 @lru_cache(maxsize=1)
@@ -1545,21 +1597,13 @@ class ProviderSettings(QWidget):
         self.navigation.setFixedHeight(navigation_content.sizeHint().height())
         layout.addStretch()
         general = self.sections["general"].layout()
-        general.addWidget(SettingsHeading("Bar items", "Check each account and limit to show in the tray. Choose as many as you need."))
         self.active = QComboBox(self)
         self.active.setIconSize(QSize(16, 16))
         self.active.setAccessibleName("Active provider and limit")
         # Keep a choice model for per-metric alert settings and primary focus.
         self.active.hide()
         self.bar_selections = state.get_selected_items(state.load_selected() or {})
-        self.bar_items = QListWidget()
-        self.bar_items.setAccessibleName("Bar items")
-        self.bar_items.setIconSize(QSize(16, 16))
-        self.bar_items.setMinimumHeight(90)
-        self.bar_items.setMaximumHeight(240)
-        self.bar_items.setStyleSheet("QListWidget { border: 1px solid #303030; border-radius: 6px; padding: 4px; }")
-        general.addWidget(self.bar_items)
-        self.bar_items.itemChanged.connect(self.bar_item_changed)
+        self.bar_items = BarItemChoices()
         selected = state.load_selected() or {}
         general.addSpacing(8)
         general.addWidget(SettingsHeading("Refresh interval", "Check usage every 5–60 minutes. Provider cooldowns still apply."))
@@ -1621,8 +1665,19 @@ class ProviderSettings(QWidget):
         self.icon_mode.setCurrentIndex(self.icon_mode.findData(state.get_icon_mode(selected)))
         general.addWidget(self.icon_mode)
         providers = self.sections["providers"].layout()
-        providers.addWidget(SettingsHeading("Providers", "Enable providers and set their order."))
+        providers.addWidget(SettingsHeading("Bar order", "Reorder selected accounts and limits with the arrows or Alt+Up / Alt+Down. New selections are added last."))
+        self.bar_order = ProviderList()
+        self.bar_order.setAccessibleName("Bar order; drag to reorder or use Alt+Up and Alt+Down")
+        self.bar_order.setStyleSheet("QListWidget { border: 1px solid #303030; border-radius: 6px; padding: 4px; } QListWidget::item { padding: 0; }")
+        providers.addWidget(self.bar_order)
+        self.bar_order_empty = plain_label("Choose a limit below to show it in the bar.", "#666666")
+        self.bar_order_empty.setWordWrap(True)
+        providers.addWidget(self.bar_order_empty)
+        self.bar_order.model().rowsMoved.connect(self.bar_order_moved)
+        providers.addSpacing(8)
+        providers.addWidget(SettingsHeading("Providers", "Active providers check usage. Show in bar chooses each account and limit. Provider arrows change their order on the usage page."))
         self.providers = ProviderList()
+        self.providers.setStyleSheet("QListWidget::item { padding: 0; }")
         enabled = config.enabled_connection_order()
         available = config.available_connections()
         for name in dict.fromkeys(enabled + available):
@@ -1630,11 +1685,11 @@ class ProviderSettings(QWidget):
                 continue
             item = QListWidgetItem(provider_icon(name), provider_name(name))
             item.setData(Qt.ItemDataRole.UserRole, name)
+            item.setData(Qt.ItemDataRole.UserRole + 1, True)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if name in enabled else Qt.CheckState.Unchecked)
             item.setSizeHint(QSize(0, 36))
             self.providers.addItem(item)
-        self.providers.setFixedHeight(self.providers.count() * 36 + 4)
         providers.addWidget(self.providers)
         self.add_notification_controls(self.sections["alerts"].layout())
         self.message = plain_label("")
@@ -1690,15 +1745,22 @@ class ProviderSettings(QWidget):
 
     def reveal_provider_row(self):
         if self.dashboard and self.dashboard.configuring() and self.current_section == "providers":
-            self.dashboard.settings_scroll.ensureWidgetVisible(self.providers)
+            card = self.providers.itemWidget(self.providers.currentItem()) if self.providers.currentItem() else None
+            self.dashboard.settings_scroll.ensureWidgetVisible(card or self.providers)
 
     def update_tab_order(self):
         if not self.dashboard or not self.dashboard.configuring():
             return
+        def row_controls(listing):
+            return [button for index in range(listing.count())
+                    for widget in [listing.itemWidget(listing.item(index))] if widget
+                    for button in widget.findChildren(QAbstractButton)]
+
         fields = {
-            "general": [self.bar_items, self.refresh_interval, self.startup, self.usage_display,
+            "general": [self.refresh_interval, self.startup, self.usage_display,
                         *self.display.values(), self.icon_mode],
-            "providers": [self.providers],
+            "providers": [self.bar_order, *row_controls(self.bar_order),
+                          self.providers, *row_controls(self.providers)],
             "guide": [],
             "about": self.sections["about"].findChildren(SettingsLinkButton),
         }
@@ -1744,7 +1806,12 @@ class ProviderSettings(QWidget):
             self.section_buttons[key].setFocus()
         if scroll and self.dashboard.configuring():
             self.dashboard.fit_content()
-            scroll.verticalScrollBar().setValue(self.section_positions.get(key, 0))
+            position = self.section_positions.get(key, 0)
+            scroll.verticalScrollBar().setValue(position)
+            # Wrapped card headings can change the range after Qt lays out the
+            # restored section at the scrollbar's final viewport width.
+            QTimer.singleShot(0, self, lambda: scroll.verticalScrollBar().setValue(position)
+                              if self.current_section == key else None)
             self.update_tab_order()
 
     def show_guide(self):
@@ -2021,6 +2088,11 @@ class ProviderSettings(QWidget):
     def clear_message(self):
         self.message.hide()
 
+    def set_primary_bar_choice(self):
+        if self.bar_selections:
+            primary = self.bar_selections[0]
+            self.active.setCurrentIndex(self.active.findData([primary[key] for key in ("provider", "idx", "metric")]))
+
     def bar_item_changed(self, item):
         choice = dict(zip(("provider", "idx", "metric"), item.data(Qt.ItemDataRole.UserRole)))
         if item.checkState() == Qt.CheckState.Checked:
@@ -2028,64 +2100,200 @@ class ProviderSettings(QWidget):
                 self.bar_selections.append(choice)
         else:
             self.bar_selections = [value for value in self.bar_selections if value != choice]
-        if self.bar_selections:
-            primary = self.bar_selections[0]
-            self.active.setCurrentIndex(self.active.findData([primary[key] for key in ("provider", "idx", "metric")]))
+        self.set_primary_bar_choice()
+        self.update_bar_order()
         self.clear_message()
 
+    def remove_bar_item(self, identity):
+        self.bar_selections = [value for value in self.bar_selections
+                               if [value[key] for key in ("provider", "idx", "metric")] != identity]
+        for option in self.bar_items.items:
+            if option.identity == identity:
+                option.checkbox.blockSignals(True)
+                option.checkbox.setChecked(False)
+                option.checkbox.blockSignals(False)
+        self.set_primary_bar_choice()
+        self.update_bar_order()
+        self.bar_order.setFocus(Qt.FocusReason.TabFocusReason)
+        self.clear_message()
+
+    def bar_order_moved(self):
+        if getattr(self, "updating_bar_order", False):
+            return
+        self.bar_selections = [dict(zip(("provider", "idx", "metric"), self.bar_order.item(index).data(Qt.ItemDataRole.UserRole)))
+                               for index in range(self.bar_order.count())]
+        self.set_primary_bar_choice()
+        self.update_order_arrows(self.bar_order)
+        self.update_tab_order()
+        self.clear_message()
+
+    def add_order_arrows(self, layout, listing, item, label, context):
+        for direction, icon, word in ((-1, "arrow-up", "up"), (1, "arrow-down", "down")):
+            button = ControlButton(icon, f"Move {label} {word} {context}")
+            button.setProperty("orderDirection", direction)
+            button.setObjectName(f"order-{context}-{item.data(Qt.ItemDataRole.UserRole)}-{word}")
+            button.clicked.connect(lambda checked=False, row_item=item, delta=direction:
+                                   listing.move_provider(listing.row(row_item), delta))
+            layout.addWidget(button)
+        self.update_order_arrows(listing)
+
+    def update_order_arrows(self, listing):
+        for index in range(listing.count()):
+            widget = listing.itemWidget(listing.item(index))
+            if widget:
+                for button in widget.findChildren(ControlButton):
+                    direction = button.property("orderDirection")
+                    button.setEnabled(direction == -1 and index > 0 or direction == 1 and index < listing.count() - 1)
+
+    def update_bar_order(self):
+        self.updating_bar_order = True
+        current = self.bar_order.currentRow()
+        self.bar_order.clear()
+        for value in self.bar_selections:
+            identity = [value[key] for key in ("provider", "idx", "metric")]
+            index = self.active.findData(identity)
+            title = (self.active.itemText(index) if index >= 0 else
+                     provider_name(value["provider"]) + " · " + value["metric"] + " (unavailable)")
+            item = QListWidgetItem(title, self.bar_order)
+            item.setData(Qt.ItemDataRole.UserRole, identity)
+            item.setData(Qt.ItemDataRole.UserRole + 1, True)
+            item.setSizeHint(QSize(0, 58))
+            row = QWidget()
+            layout = QHBoxLayout(row)
+            layout.setContentsMargins(4, 4, 4, 4)
+            layout.setSpacing(2)
+            label = plain_label(title, "#dddddd")
+            label.setWordWrap(True)
+            label.setToolTip(title)
+            layout.addWidget(label, 1)
+            self.add_order_arrows(layout, self.bar_order, item, title, "in bar")
+            remove = QPushButton("×")
+            remove.setFixedSize(28, 28)
+            remove.setAccessibleName("Remove " + title + " from bar")
+            remove.setToolTip(remove.accessibleName())
+            remove.clicked.connect(lambda checked=False, choice=identity: self.remove_bar_item(choice))
+            layout.addWidget(remove)
+            self.bar_order.setItemWidget(item, row)
+            self.bar_order.register_row_controls(item, row)
+        self.bar_order.setFixedHeight(min(300, max(68, self.bar_order.count() * 58 + 10)))
+        self.bar_order.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.bar_order_empty.setVisible(not self.bar_selections)
+        self.bar_order.setVisible(bool(self.bar_selections))
+        if self.bar_order.count():
+            self.bar_order.setCurrentRow(max(0, min(current, self.bar_order.count() - 1)))
+        self.update_order_arrows(self.bar_order)
+        self.updating_bar_order = False
+        self.update_tab_order()
+
     def update_choices(self):
+        if getattr(self, "updating_choices", False):
+            return
+        self.updating_choices = True
         self.store_notification_rule()
+        focus = QApplication.focusWidget()
+        focus_name = focus.objectName() if focus and self.isAncestorOf(focus) else ""
         choice = self.active.currentData()
         if choice is None:
             selected = state.load_selected() or {}
             choice = [selected.get("provider"), selected.get("idx", 0), selected.get("metric")]
         self.active.blockSignals(True)
         self.active.clear()
-        self.bar_items.blockSignals(True)
-        self.bar_items.clear()
+        self.bar_items.items.clear()
         data = getattr(self.dashboard, "data", {})
-        enabled = []
+        enabled = [self.providers.item(index).data(Qt.ItemDataRole.UserRole)
+                   for index in range(self.providers.count())
+                   if self.providers.item(index).checkState() == Qt.CheckState.Checked]
+        # Only an explicit disable removes pins. Opening settings must preserve
+        # saved unavailable accounts/limits, including deleted connections.
+        disabled = set(getattr(self, "enabled_draft", enabled)) - set(enabled)
+        self.bar_selections = [value for value in self.bar_selections if value["provider"] not in disabled]
+        self.enabled_draft = enabled
         for i in range(self.providers.count()):
             item = self.providers.item(i)
-            if item.checkState() != Qt.CheckState.Checked:
-                continue
             name = item.data(Qt.ItemDataRole.UserRole)
-            enabled.append(name)
+            old_card = self.providers.itemWidget(item)
+            if old_card:
+                self.providers.removeItemWidget(item)
+                old_card.hide()
+                old_card.setParent(None)
+                old_card.deleteLater()
+            card = QWidget()
+            layout = QVBoxLayout(card)
+            layout.setContentsMargins(4, 8, 4, 8)
+            layout.setSpacing(5)
+            header = QHBoxLayout()
+            header.setSpacing(4)
+            logo = plain_label("")
+            logo.setPixmap(provider_icon(name).pixmap(16, 16))
+            header.addWidget(logo)
+            title = plain_label(provider_name(name), "#dddddd")
+            title.setWordWrap(True)
+            header.addWidget(title, 1)
+            active = QCheckBox("Active")
+            active.setObjectName("active-provider-" + name)
+            active.setAccessibleName("Active " + provider_name(name))
+            active.setChecked(name in enabled)
+            active.toggled.connect(lambda checked, target=item: target.setCheckState(
+                Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked))
+            header.addWidget(active)
+            self.add_order_arrows(header, self.providers, item, provider_name(name), "on usage page")
+            layout.addLayout(header)
             entries = data.get(name) or [{"provider": provider_name(name), "metrics": []}]
+            if name in enabled:
+                layout.addWidget(plain_label("Show in bar", "#666666"))
+            else:
+                entries = []
             for entry in entries:
                 metrics = render.entry_metrics(entry) or [{"type": "rolling"}]
                 for metric in metrics:
                     key = render.metric_key(metric)
-                    title = render.metric_title(metric, {"usage_display": self.usage_display.currentData()})
+                    metric_title = render.metric_title(metric, {"usage_display": self.usage_display.currentData()})
                     detail = " (" + key.split(":", 1)[1] + ")" if ":" in key and not metric.get("id") and not metric.get("name") else ""
-                    self.active.addItem(provider_icon(name), f"{Dashboard.entry_name(name, entry)} · {title}{detail}",
-                                        [name, entry.get("_idx", 0), key])
-        had_selection = bool(self.bar_selections)
-        self.bar_selections = [value for value in self.bar_selections if value["provider"] in enabled]
+                    title = f"{Dashboard.entry_name(name, entry)} · {metric_title}{detail}"
+                    identity = [name, entry.get("_idx", 0), key]
+                    if name in enabled:
+                        self.active.addItem(provider_icon(name), title, identity)
+                    checkbox = QCheckBox(self.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, 280))
+                    checkbox.setObjectName("bar-choice-" + "-".join(str(part) for part in identity))
+                    checkbox.setAccessibleName("Show " + title + " in bar")
+                    checkbox.setToolTip(title)
+                    checkbox.setChecked(dict(zip(("provider", "idx", "metric"), identity)) in self.bar_selections)
+                    checkbox.setEnabled(name in enabled)
+                    option = BarItemChoice(identity, title, checkbox)
+                    self.bar_items.items.append(option)
+                    checkbox.toggled.connect(lambda checked=False, candidate=option: self.bar_item_changed(candidate))
+                    layout.addWidget(checkbox)
+            height = 52 + (20 if entries else 0) + 31 * sum(len(render.entry_metrics(entry) or [{"type": "rolling"}]) for entry in entries)
+            item.setSizeHint(QSize(0, height))
+            self.providers.setItemWidget(item, card)
+            self.providers.register_row_controls(item, card)
+        self.providers.setFixedHeight(sum(self.providers.item(i).sizeHint().height() for i in range(self.providers.count())) + 4)
         for value in self.bar_selections:
             identity = [value[key] for key in ("provider", "idx", "metric")]
             if self.active.findData(identity) < 0:
                 self.active.addItem(provider_icon(value["provider"]),
                                     provider_name(value["provider"]) + " · " + value["metric"] + " (unavailable)", identity)
-        if (not self.bar_selections and self.active.count()
-                and (had_selection or not getattr(self, "choices_initialized", False))):
+        if not self.bar_selections and self.active.count() and not getattr(self, "choices_initialized", False):
             self.bar_selections = [dict(zip(("provider", "idx", "metric"), self.active.itemData(0)))]
+            for option in self.bar_items.items:
+                if option.identity == self.active.itemData(0):
+                    option.checkbox.blockSignals(True)
+                    option.checkbox.setChecked(True)
+                    option.checkbox.blockSignals(False)
         self.choices_initialized = True
-        for index in range(self.active.count()):
-            identity = self.active.itemData(index)
-            option = QListWidgetItem(self.active.itemIcon(index), self.active.itemText(index), self.bar_items)
-            option.setData(Qt.ItemDataRole.UserRole, identity)
-            option.setFlags(option.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            option.setCheckState(Qt.CheckState.Checked if dict(zip(("provider", "idx", "metric"), identity)) in self.bar_selections
-                                 else Qt.CheckState.Unchecked)
-        self.bar_items.setFixedHeight(min(240, max(90, self.bar_items.sizeHintForRow(0) * self.bar_items.count() + 10)))
         index = self.active.findData(choice)
         self.active.setCurrentIndex(index if index >= 0 else 0)
         self.active.setEnabled(self.active.count() > 0)
         self.active.blockSignals(False)
-        self.bar_items.blockSignals(False)
+        self.update_bar_order()
+        self.update_order_arrows(self.providers)
         self.notification_choice_changed()
         self.clear_message()
+        self.updating_choices = False
+        if focus_name:
+            replacement = self.findChild(QAbstractButton, focus_name)
+            if replacement:
+                replacement.setFocus(Qt.FocusReason.TabFocusReason)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
@@ -2097,11 +2305,23 @@ class ProviderSettings(QWidget):
         order = [self.providers.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.providers.count())
                  if self.providers.item(i).checkState() == Qt.CheckState.Checked]
         display = {key: checkbox.isChecked() for key, checkbox in self.display.items()}
-        if order and not self.bar_selections:
-            self.select_section("general")
+        if not order:
+            self.select_section("providers")
+            self.message.setText("Enable at least one provider.")
+            self.message.show()
+            self.providers.setFocus(Qt.FocusReason.TabFocusReason)
+            return
+        if not self.bar_selections:
+            self.select_section("providers")
             self.message.setText("Choose at least one bar item.")
             self.message.show()
-            self.bar_items.setFocus(Qt.FocusReason.TabFocusReason)
+            self.providers.setFocus(Qt.FocusReason.TabFocusReason)
+            return
+        if any(item["provider"] not in order for item in self.bar_selections):
+            self.select_section("providers")
+            self.message.setText("Remove inactive providers from the bar or activate them below.")
+            self.message.show()
+            self.bar_order.setFocus(Qt.FocusReason.TabFocusReason)
             return
         if not any(display.values()):
             self.select_section("general")
@@ -2265,7 +2485,9 @@ class GuideView(QWidget):
         ("Choose an option", "Up / Down in an open select; Enter confirms and Esc closes."),
         ("Refresh interval", "General slider: 5–60 minutes in 5-minute steps, then Save."),
         ("Adjust alert levels", "Drag a slider or Left / Right / Home / End when focused."),
-        ("Reorder providers", "Row arrows or Alt+Up / Alt+Down in Providers."),
+        ("Choose bar items", "Active and Show in bar checkboxes in Providers."),
+        ("Reorder bar items", "Bar order arrows or Alt+Up / Alt+Down in Providers."),
+        ("Reorder usage page", "Provider row arrows or Alt+Up / Alt+Down in Providers."),
         ("Save changes", "Save applies every Settings tab."),
         ("Discard changes", "Cancel / Back / Esc."),
         ("Credit details", "Click a reset-credit or cloud-credit row."),

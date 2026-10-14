@@ -96,13 +96,18 @@ limit. See [provider eligibility](PROVIDERS.md#claude).
 
 ## Settings and About
 
-**General** includes checkboxes for the account/limit items shown in the menu bar.
-Keep one item or select as many as you want; at least one is required. Each
-selected item shows its own usage label. Existing single-item preferences
-remain selected after updating. General also includes menu bar display fields,
-icon mode and the **Automatic refresh** slider. Choose 5–60 minutes in steps
-of 5; the default is 5. Alerts remains separate, with connections enabled,
-disabled and reordered in Providers.
+**Providers** combines active connections and their account/limit bar
+checkboxes. Active connections are queried even when none of their limits is
+checked for the menu bar. Select as many items as you want, then use the up/down
+controls in **Bar order** to set their exact order, independently of provider
+order in the usage page. Each selected item shows its own usage label. Existing
+selections keep their order, including saved limits that are temporarily
+unavailable. Disabling a connection removes its bar items; at least one active
+connection and one bar item are required to save.
+
+**General** includes menu bar display fields, icon mode and the **Automatic
+refresh** slider. Choose 5–60 minutes in steps of 5; the default is 5. Alerts
+remains separate.
 Dragging changes the draft only. Saving the interval updates the daemon's
 schedule without restarting or forcing an extra collection. SwiftBar also
 follows the saved interval. Provider cooldowns and request timeouts are

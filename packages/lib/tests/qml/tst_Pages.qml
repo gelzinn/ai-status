@@ -5,7 +5,7 @@ import "plugin" as Plugin
 
 Item {
     width: 380
-    height: 800
+    height: 1400
     property var openedReset: null
     property var openedCredit: null
     Connections {
@@ -74,6 +74,8 @@ Item {
             compare(settings.order[0], "claude")
         }
         function test_bar_items_toggle_with_keyboard_retains_focus_and_saved_order() {
+            settings.selectSection("providers")
+            wait(20)
             const target = "bar-item-codex-0-weekly"
             mouseClick(findChild(settings, target))
             wait(20)
@@ -92,11 +94,85 @@ Item {
             compare(Plugin.Model.saved.items[2].metric, "weekly:Fable")
             compare(Plugin.Model.snapshot.selected.provider, "claude")
         }
+        function test_bar_order_moves_first_middle_and_last_without_changing_provider_order() {
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.providers.push({id: "claude", idx: 1, name: "Claude (Max)", metrics: [{key: "weekly", name: "Weekly Usage"}]})
+            const original = [{provider: "claude", idx: 1, metric: "weekly"},
+                {provider: "codex", idx: 0, metric: "weekly"},
+                {provider: "claude", idx: 0, metric: "weekly:Fable"}]
+            snapshot.settings.items = original
+            Plugin.Model.snapshot = snapshot
+            settings.begin()
+            settings.selectSection("providers")
+            wait(20)
+            compare(JSON.stringify(settings.selectedItems), JSON.stringify(original))
+            const providerOrder = settings.order.join(",")
+            verify(!findChild(settings, "bar-order-move-up-claude-1-weekly").enabled)
+            verify(!findChild(settings, "bar-order-move-down-claude-0-weekly:Fable").enabled)
+            settings.moveBarItem(0, -1)
+            settings.moveBarItem(2, 1)
+            compare(JSON.stringify(settings.selectedItems), JSON.stringify(original))
+            mouseClick(findChild(settings, "bar-order-move-down-claude-1-weekly"))
+            wait(20)
+            compare(settings.selected.provider, "codex")
+            verify(findChild(settings, "bar-order-move-down-claude-1-weekly").activeFocus)
+            keyClick(Qt.Key_Space)
+            wait(20)
+            compare(settings.selectedItems[2].idx, 1)
+            // At the last boundary, focus stays with the moved item on its enabled arrow.
+            verify(findChild(settings, "bar-order-move-up-claude-1-weekly").activeFocus)
+            mouseClick(findChild(settings, "bar-order-move-up-claude-0-weekly:Fable"))
+            wait(20)
+            compare(settings.selected.metric, "weekly:Fable")
+            compare(settings.order.join(","), providerOrder)
+            const reordered = JSON.stringify(settings.selectedItems)
+            settings.moveProvider(0, 1)
+            compare(JSON.stringify(settings.selectedItems), reordered)
+            settings.selectSection("general")
+            Plugin.Model.snapshot = JSON.parse(JSON.stringify(snapshot))
+            compare(JSON.stringify(settings.selectedItems), reordered)
+            settings.save()
+            compare(JSON.stringify(Plugin.Model.saved.items), reordered)
+            compare(Plugin.Model.saved.selected.metric, "weekly:Fable")
+            compare(Plugin.Model.saved.enabled[0], "codex")
+            compare(JSON.stringify(Plugin.Model.snapshot.settings.items), JSON.stringify(original))
+            settings.begin()
+            compare(JSON.stringify(settings.selectedItems), JSON.stringify(original))
+        }
+        function test_unavailable_and_orphan_order_survives_unrelated_provider_changes_and_save_lock() {
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.settings.items = [{provider: "account:removed", idx: 2, metric: "weekly"},
+                {provider: "claude", idx: 0, metric: "missing"},
+                {provider: "codex", idx: 0, metric: "weekly"}]
+            Plugin.Model.snapshot = snapshot
+            settings.begin()
+            settings.selectSection("providers")
+            settings.toggleProvider("kiro")
+            settings.toggleProvider("kiro")
+            compare(settings.selectedItems.length, 3)
+            settings.moveBarItem(0, 1)
+            compare(settings.selected.metric, "missing")
+            verify(!settings.valid)
+            const before = JSON.stringify(settings.selectedItems)
+            Plugin.Model.settingsSaving = true
+            settings.moveBarItem(0, 1)
+            settings.removeBarItem(settings.selectedItems[0])
+            settings.toggleItem(settings.selectedItems[0])
+            settings.toggleProvider("claude")
+            compare(JSON.stringify(settings.selectedItems), before)
+            Plugin.Model.settingsSaving = false
+            settings.removeBarItem(settings.selectedItems[1])
+            verify(settings.valid)
+            settings.save()
+            compare(Plugin.Model.saved.items[0].metric, "missing")
+            compare(Plugin.Model.saved.items[1].provider, "codex")
+        }
         function test_pinned_unavailable_item_is_retained_and_can_be_removed() {
             const snapshot = Plugin.Model.snapshot
             snapshot.settings.items = [{provider: "claude", idx: 0, metric: "missing"}, {provider: "codex", idx: 0, metric: "weekly"}]
             Plugin.Model.snapshot = Object.assign({}, snapshot)
             settings.begin()
+            settings.selectSection("providers")
             verify(findChild(settings, "bar-item-claude-0-missing") !== null)
             settings.save()
             compare(Plugin.Model.saved.items[0].metric, "missing")
@@ -104,7 +180,7 @@ Item {
             compare(settings.selected.provider, "codex")
             settings.toggleItem(settings.selectedItems[0])
             verify(!settings.valid)
-            compare(settings.validationSection, "general")
+            compare(settings.validationSection, "providers")
         }
         function test_orphaned_saved_pin_is_visible_and_removable_without_mutating_snapshot() {
             const snapshot = Plugin.Model.snapshot
@@ -113,12 +189,13 @@ Item {
             Plugin.Model.snapshot = Object.assign({}, snapshot)
             const before = JSON.stringify(Plugin.Model.snapshot.settings.items)
             settings.begin()
+            settings.selectSection("providers")
             wait(20)
-            const orphan = findChild(settings, "bar-item-account:removed-0-weekly")
+            const orphan = findChild(settings, "bar-order-remove-account:removed-0-weekly")
             verify(orphan !== null && orphan.visible)
-            verify(orphan.text.indexOf("(unavailable)") !== -1)
+            verify(findChild(settings, "bar-order-account:removed-0-weekly-label").text.indexOf("(unavailable)") !== -1)
             verify(!settings.valid)
-            compare(settings.validationSection, "general")
+            compare(settings.validationSection, "providers")
             compare(JSON.stringify(Plugin.Model.snapshot.settings.items), before)
             mouseClick(orphan)
             verify(settings.valid)
@@ -226,7 +303,8 @@ Item {
         }
         function test_general_unifies_usage_display_and_refresh_in_one_draft() {
             compare(settings.sections.map(item => item.key).join(","), "general,alerts,providers,guide,about")
-            verify(findChild(settings, "settings-section-general").visible)
+            verify(findChild(settings, "settings-refresh-interval").visible)
+            verify(!findChild(settings, "bar-item-claude-0-rolling").visible)
             verify(findChild(settings, "settings-usage-display").visible)
             verify(findChild(settings, "settings-refresh-interval").visible)
             compare(findChild(settings, "settings-section-appearance"), null)
@@ -518,10 +596,15 @@ Item {
             compare(title.width, titleWidth)
             compare(value.text, Plugin.Model.spinner)
         }
-        function test_disabling_active_provider_selects_an_enabled_one() {
+        function test_disabling_last_displayed_provider_keeps_others_active_without_pinning_them() {
             settings.toggleProvider("claude")
-            compare(settings.selected.provider, "codex")
-            verify(settings.valid)
+            compare(settings.selectedItems.length, 0)
+            compare(settings.enabledProviders.join(","), "codex")
+            verify(!settings.valid)
+            compare(settings.validationSection, "providers")
+            settings.save()
+            compare(Plugin.Model.saved, null)
+            settings.toggleItem(settings.choices.find(item => item.provider === "codex" && item.metric === "weekly"))
             settings.save()
             compare(Plugin.Model.saved.enabled.length, 1)
             compare(Plugin.Model.saved.selected.provider, "codex")
@@ -567,16 +650,17 @@ Item {
             settings.selectSection("providers")
             wait(20)
             mouseClick(findChild(settings, "provider-claude"))
-            compare(settings.selected.provider, "codex")
-            settings.selectSection("general")
+            compare(settings.selectedItems.length, 0)
             wait(20)
             const item = findChild(settings, "bar-item-codex-0-weekly")
             mouseClick(item)
-            compare(settings.selectedItems.length, 2)
-            keyClick(Qt.Key_Space)
             compare(settings.selectedItems.length, 1)
+            keyClick(Qt.Key_Space)
+            compare(settings.selectedItems.length, 0)
         }
         function test_bar_checklist_preserves_order_and_shows_logos_independent_of_icon_mode() {
+            settings.selectSection("providers")
+            wait(20)
             settings.iconMode = "off"
             for (const choice of settings.choices) {
                 const option = findChild(settings, "bar-item-" + choice.provider + "-" + choice.idx + "-" + choice.metric)
@@ -610,6 +694,7 @@ Item {
             snapshot.settings.providerIds = {claude: "claude", cursor: "cursor", codex: "codex", "account:work": "claude"}
             Plugin.Model.snapshot = Object.assign({}, snapshot)
             settings.begin()
+            settings.selectSection("providers")
             compare(settings.choices.map(item => item.provider).join(","), "claude,claude,claude,account:work,cursor,cursor,cursor,codex,codex")
             compare(settings.choices.filter(item => item.provider === "cursor").map(item => item.label).join(","), "Cursor Models,Other Models,On-demand spend")
             settings.selected = {provider: "cursor", idx: 0, metric: "monthly:On-demand spend this billing cycle (USD)"}
@@ -762,10 +847,11 @@ Item {
             verify(!usageDisplay.popupOpen)
         }
         function test_provider_rows_show_official_names_and_logos_independent_of_bar_icon() {
+            settings.selectSection("providers")
             settings.iconMode = "off"
             for (const name of settings.order) {
                 const row = findChild(settings, "provider-" + name)
-                compare(row.text, Plugin.Model.snapshot.settings.names[name])
+                compare(row.text, "Active · " + Plugin.Model.snapshot.settings.names[name])
                 verify(row.logoSource.toString().endsWith("/" + name + ".png"))
                 tryCompare(findChild(row, "provider-logo"), "status", Image.Ready)
             }

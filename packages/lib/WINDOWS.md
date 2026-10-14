@@ -28,16 +28,20 @@ settings/cache live in your user profile.
   context menu also contains **Connection details**,
   update/log actions and **Exit**. R refreshes usage and C opens settings.
 - **Settings** opens inside the panel, with the back arrow before the title.
-  Use the account/limit checkboxes to select one or more items for the tray,
-  with no fixed item count and at least one required. Existing single-item
-  preferences remain selected after updating. Set display fields and the bar
-  icon, enable/disable
-  providers, and reorder them with drag and drop, the per-row arrows, or
-  Alt+Up/Down. **Save** applies changes and keeps settings open; the back arrow,
+  **Providers** combines active connections and their account/limit bar
+  checkboxes. Active connections are queried even when none of their limits
+  appears in the tray. Select as many items as you want, then use **Bar order**
+  to reorder selections with drag and drop, the row arrows, or Alt+Up/Down.
+  Saved selections keep their order, including temporarily unavailable limits;
+  provider order in the usage page stays independent. Windows controls the
+  actual positions and visibility of native tray icons, even though AI Status
+  saves and processes your selected order. Disabling a connection removes its
+  bar items; at least one active connection and one bar item are required to
+  save. **Save** applies changes and keeps settings open; the back arrow,
   Escape or **Cancel** returns to usage and discards any remaining unsaved edits.
   Starting at sign-in is optional and disabled by default.
-- **General** combines the selected items, startup and display controls formerly
-  in Appearance. Its **Automatic refresh** slider offers 5–60 minutes in steps
+- **General** contains startup, display fields and the bar icon.
+  Its **Automatic refresh** slider offers 5–60 minutes in steps
   of 5, defaulting to 5. Dragging changes the draft; **Save** updates the running
   schedule and **Cancel** discards changes. Saving only the interval does not
   force an extra collection. Alerts stays separate. Request timeouts and

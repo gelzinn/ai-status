@@ -118,7 +118,8 @@ Item {
             panel.configure()
             const settings = findChild(panel, "panel-settings-page")
             const scroller = findChild(panel, "panel-scroller")
-            compare(settings.section, "general")
+            settings.selectSection("providers")
+            compare(settings.section, "providers")
             compare(settings.selectedItems.length, 3)
             compare(settings.refreshIntervalMinutes, 5)
             for (const item of scene.captureSnapshot.settings.items) {

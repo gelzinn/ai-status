@@ -43,6 +43,10 @@ class DesktopTests(IsolatedState):
     @staticmethod
     def check_bar_items(settings, identities):
         wanted = [list(value) for value in identities]
+        for selected in settings.bar_selections[:]:
+            identity = [selected[key] for key in ("provider", "idx", "metric")]
+            if identity not in wanted:
+                settings.remove_bar_item(identity)
         for index in range(settings.bar_items.count()):
             item = settings.bar_items.item(index)
             if item.data(tray.Qt.ItemDataRole.UserRole) not in wanted:
@@ -85,15 +89,16 @@ class DesktopTests(IsolatedState):
         settings.save_button.click()
         self.assertEqual(settings.message.text(), "Choose at least one bar item.")
         self.assertTrue(settings.message.isVisible())
-        self.assertEqual(settings.current_section, "general")
-        for index in range(settings.bar_items.count()):
-            settings.bar_items.setCurrentRow(index)
-            QTest.keyClick(settings.bar_items, tray.Qt.Key.Key_Space)
-        self.assertEqual(len(settings.bar_selections), settings.bar_items.count())
+        self.assertEqual(settings.current_section, "providers")
+        choices = [option for option in settings.bar_items.items if option.checkbox.isEnabled()]
+        for option in choices:
+            option.checkbox.setFocus()
+            QTest.keyClick(option.checkbox, tray.Qt.Key.Key_Space)
+        self.assertEqual(len(settings.bar_selections), len(choices))
         self.assertGreater(len(settings.bar_selections), 10)
         with patch.object(self.dashboard, "refresh"), patch.object(tray.QSystemTrayIcon, "show"):
             settings.save_button.click()
-        self.assertEqual(len(state.get_selected_items(state.load_selected())), settings.bar_items.count())
+        self.assertEqual(len(state.get_selected_items(state.load_selected())), len(choices))
 
     def test_extra_bar_item_changes_are_saved_while_interval_only_changes_keep_all_pins(self):
         self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
@@ -115,6 +120,131 @@ class DesktopTests(IsolatedState):
         save_order.assert_not_called()
         self.assertEqual(state.get_selected_items(state.load_selected()), pinned)
         self.assertEqual(state.get_refresh_interval_minutes(state.load_selected()), 20)
+
+    def test_unified_provider_cards_reorder_exact_bar_items_without_changing_active_order(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "_idx": 0, "metrics": [
+            {"type": "rolling", "percentage": 23}, {"type": "weekly", "percentage": 61}]},
+            {"provider": "Codex", "_idx": 1, "metrics": [{"type": "weekly", "percentage": 40}]}])
+        self.dashboard.on_result("copilot", [{"provider": "Copilot", "metrics": [
+            {"type": "monthly", "percentage": 42}]}])
+        choices = [("codex", 1, "weekly"), ("copilot", 0, "monthly"), ("codex", 0, "rolling")]
+        selected = dict(state.load_selected() or {})
+        state.set_selected_items(selected, [dict(zip(("provider", "idx", "metric"), value)) for value in choices])
+        state.save_selected(selected)
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        self.assertIs(settings.providers.parentWidget(), settings.sections["providers"])
+        self.assertIs(settings.bar_order.parentWidget(), settings.sections["providers"])
+        self.assertIs(settings.refresh_interval.parentWidget(), settings.sections["general"])
+        self.assertEqual([tuple(settings.bar_order.item(i).data(tray.Qt.ItemDataRole.UserRole)) for i in range(3)], choices)
+        settings.select_section("providers")
+        original_order = [settings.providers.item(i).data(tray.Qt.ItemDataRole.UserRole) for i in range(settings.providers.count())]
+        middle = settings.bar_order.item(1)
+        up = next(button for button in settings.bar_order.itemWidget(middle).findChildren(tray.ControlButton)
+                  if button.property("orderDirection") == -1)
+        QTest.mouseClick(up, tray.Qt.MouseButton.LeftButton)
+        self.assertEqual([tuple(value[key] for key in ("provider", "idx", "metric")) for value in settings.bar_selections],
+                         [choices[1], choices[0], choices[2]])
+        # Keyboard movement also works while a visible row button has focus.
+        down = next(button for button in settings.bar_order.itemWidget(middle).findChildren(tray.ControlButton)
+                    if button.property("orderDirection") == 1)
+        down.setFocus()
+        QTest.keyClick(down, tray.Qt.Key.Key_Down, tray.Qt.KeyboardModifier.AltModifier)
+        self.assertEqual([tuple(value[key] for key in ("provider", "idx", "metric")) for value in settings.bar_selections], choices)
+        self.assertEqual([settings.providers.item(i).data(tray.Qt.ItemDataRole.UserRole) for i in range(settings.providers.count())], original_order)
+        settings.bar_order.move_provider(2, -1)
+        settings.select_section("alerts")
+        settings.select_section("providers")
+        expected = [choices[0], choices[2], choices[1]]
+        with patch.object(self.dashboard, "refresh"):
+            settings.save()
+        self.assertEqual([tuple(value[key] for key in ("provider", "idx", "metric"))
+                          for value in state.get_selected_items(state.load_selected())], expected)
+        self.assertEqual(config.enabled_order(), ["codex", "copilot"])
+        settings.bar_order.move_provider(0, 1)
+        settings.cancel_button.click()
+        self.dashboard.configure()
+        self.assertEqual([tuple(value[key] for key in ("provider", "idx", "metric"))
+                          for value in self.dashboard.settings_view.bar_selections], expected)
+
+    def test_unified_provider_order_keeps_orphan_pins_until_removed_and_validation_is_explicit(self):
+        pins = [{"provider": "account:deleted", "idx": 3, "metric": "weekly:retired"},
+                {"provider": "codex", "idx": 0, "metric": "missing"}]
+        selected = dict(state.load_selected() or {})
+        state.set_selected_items(selected, pins)
+        state.save_selected(selected)
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        self.assertEqual(settings.bar_selections, pins)
+        self.assertTrue(all("unavailable" in settings.bar_order.item(i).text() for i in range(2)))
+        with patch.object(self.dashboard, "refresh") as refresh:
+            settings.save()
+        refresh.assert_not_called()
+        self.assertEqual(settings.message.text(), "Remove inactive providers from the bar or activate them below.")
+        self.assertEqual(state.get_selected_items(state.load_selected()), pins)
+        settings.remove_bar_item([pins[0][key] for key in ("provider", "idx", "metric")])
+        with patch.object(self.dashboard, "refresh"):
+            settings.save()
+        self.assertEqual(state.get_selected_items(state.load_selected()), pins[1:])
+        for value in pins:
+            settings.remove_bar_item([value[key] for key in ("provider", "idx", "metric")])
+        self.assertEqual(settings.bar_selections, [])
+        settings.save()
+        self.assertEqual(settings.current_section, "providers")
+        self.assertEqual(settings.message.text(), "Choose at least one bar item.")
+        self.assertEqual(state.get_selected_items(state.load_selected()), pins[1:])
+        self.check_bar_items(settings, [("copilot", 0, "rolling"), ("codex", 0, "rolling")])
+        self.assertEqual([value["provider"] for value in settings.bar_selections], ["copilot", "codex"])
+
+    def test_unified_provider_enable_can_stay_active_without_showing_any_of_its_limits(self):
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        self.check_bar_items(settings, [("codex", 0, "rolling")])
+        copilot = next(settings.providers.item(i) for i in range(settings.providers.count())
+                       if settings.providers.item(i).data(tray.Qt.ItemDataRole.UserRole) == "copilot")
+        self.assertEqual(copilot.checkState(), tray.Qt.CheckState.Checked)
+        self.assertTrue(all(not option.checkbox.isChecked() for option in settings.bar_items.items
+                            if option.identity[0] == "copilot"))
+        with patch.object(self.dashboard, "refresh"):
+            settings.save()
+        self.assertEqual(config.enabled_order(), ["codex", "copilot"])
+        self.assertEqual([value["provider"] for value in state.get_selected_items(state.load_selected())], ["codex"])
+
+    def test_unrelated_provider_toggle_preserves_orphan_and_missing_limit_drafts(self):
+        pins = [{"provider": "account:deleted", "idx": 1, "metric": "weekly"},
+                {"provider": "codex", "idx": 0, "metric": "missing"},
+                {"provider": "copilot", "idx": 0, "metric": "monthly"}]
+        selected = dict(state.load_selected() or {})
+        state.set_selected_items(selected, pins)
+        state.save_selected(selected)
+        self.dashboard.configure()
+        settings = self.dashboard.settings_view
+        copilot = next(settings.providers.item(i) for i in range(settings.providers.count())
+                       if settings.providers.item(i).data(tray.Qt.ItemDataRole.UserRole) == "copilot")
+        copilot.setCheckState(tray.Qt.CheckState.Unchecked)
+        self.assertEqual(settings.bar_selections, pins[:2])
+        copilot.setCheckState(tray.Qt.CheckState.Checked)
+        self.assertEqual(settings.bar_selections, pins[:2])
+        self.assertEqual(state.get_selected_items(state.load_selected()), pins)
+
+    def test_unified_provider_keyboard_controls_keep_focus_when_active_cards_rebuild(self):
+        with patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.configure()
+            settings = self.dashboard.settings_view
+            settings.select_section("providers")
+            self.app.processEvents()
+            active = settings.findChild(tray.QCheckBox, "active-provider-copilot")
+            active.setFocus()
+            QTest.keyClick(active, tray.Qt.Key.Key_Space)
+            self.assertNotIn("copilot", settings.enabled_draft)
+            replacement = settings.findChild(tray.QCheckBox, "active-provider-copilot")
+            self.assertIs(self.dashboard.focusWidget(), replacement)
+            QTest.keyClick(replacement, tray.Qt.Key.Key_Space)
+            self.assertIn("copilot", settings.enabled_draft)
+            candidate = next(option for option in settings.bar_items.items if option.identity[0] == "copilot")
+            candidate.checkbox.setFocus()
+            QTest.keyClick(candidate.checkbox, tray.Qt.Key.Key_Space)
+            self.assertIn({"provider": "copilot", "idx": 0, "metric": "rolling"}, settings.bar_selections)
 
     def test_multiple_trays_keep_identity_refresh_loading_and_clicked_anchor(self):
         self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
@@ -167,8 +297,8 @@ class DesktopTests(IsolatedState):
         self.assertEqual(state.get_selected_items(state.load_selected()), selections)
         self.dashboard.configure()
         self.assertEqual(self.dashboard.settings_view.bar_selections, selections)
-        self.assertTrue(any("unavailable" in self.dashboard.settings_view.bar_items.item(index).text()
-                            for index in range(self.dashboard.settings_view.bar_items.count())))
+        self.assertTrue(any("unavailable" in self.dashboard.settings_view.bar_order.item(index).text()
+                            for index in range(self.dashboard.settings_view.bar_order.count())))
         self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
             {"type": "rolling", "percentage": 17}]}])
         self.assertIn("17%", self.dashboard.tray.toolTip())
@@ -576,6 +706,7 @@ class DesktopTests(IsolatedState):
                 about_view.findChild(tray.QPushButton, "about-issues").click()
                 self.assertEqual(browser.call_args.args[0].toString(), tray.about.GITHUB + "/issues/new")
             settings.section_buttons["providers"].click()
+            self.app.processEvents()
             self.assertIs(self.dashboard.settings_view, settings)
             self.assertEqual(settings.current_section, "providers")
             self.assertEqual(settings.icon_mode.currentData(), "off")
@@ -798,8 +929,6 @@ class DesktopTests(IsolatedState):
             QTest.keyClick(settings.section_buttons["alerts"], tray.Qt.Key.Key_Left)
             self.assertEqual(settings.current_section, "general")
             QTest.keyClick(settings.section_buttons["general"], tray.Qt.Key.Key_Tab)
-            self.assertIs(self.dashboard.focusWidget(), settings.bar_items)
-            QTest.keyClick(settings.bar_items, tray.Qt.Key.Key_Tab)
             self.assertIs(self.dashboard.focusWidget(), settings.refresh_interval)
             settings.section_buttons["alerts"].setFocus()
             QTest.keyClick(settings.section_buttons["alerts"], tray.Qt.Key.Key_Space)
@@ -1438,15 +1567,17 @@ class DesktopTests(IsolatedState):
         settings = self.dashboard.settings_view
         settings.select_section("providers")
         providers = settings.providers
+        pinned = list(settings.bar_selections)
         self.app.processEvents()
         first, second = providers.item(0), providers.item(1)
-        # Exercise the delegate's actual per-row down arrow.
-        rect = providers.visualItemRect(first)
-        QTest.mouseClick(providers.viewport(), tray.Qt.MouseButton.LeftButton,
-                         pos=tray.QPoint(rect.right() - 14, rect.center().y()))
+        # Exercise the visible provider-card arrow.
+        down = next(button for button in providers.itemWidget(first).findChildren(tray.ControlButton)
+                    if button.property("orderDirection") == 1)
+        QTest.mouseClick(down, tray.Qt.MouseButton.LeftButton)
         self.assertIs(providers.item(0), second)
         self.assertIs(providers.item(1), first)
         self.assertEqual(first.checkState(), tray.Qt.CheckState.Checked)
+        providers.setCurrentItem(first)
         QTest.keyClick(providers, tray.Qt.Key.Key_Up, tray.Qt.KeyboardModifier.AltModifier)
         self.assertIs(providers.item(0), first)
         # Qt's internal drop path moves rows in this same native model.
@@ -1454,6 +1585,7 @@ class DesktopTests(IsolatedState):
         self.assertIs(providers.item(0), second)
         self.assertEqual(providers.dragDropMode(), tray.QListWidget.DragDropMode.InternalMove)
         self.assertEqual(second.checkState(), tray.Qt.CheckState.Checked)
+        self.assertEqual(settings.bar_selections, pinned)
         with patch.object(self.dashboard, "refresh"):
             settings.save()
         self.assertEqual(config.enabled_order(), ["copilot", "codex"])
@@ -1465,6 +1597,11 @@ class DesktopTests(IsolatedState):
         self.assertEqual(settings.active.currentData()[0], "codex")
         settings.providers.item(0).setCheckState(tray.Qt.CheckState.Unchecked)
         self.assertEqual(settings.active.currentData()[0], "copilot")
+        self.assertEqual(settings.bar_selections, [])
+        settings.save()
+        self.assertEqual(settings.current_section, "providers")
+        self.assertEqual(settings.message.text(), "Choose at least one bar item.")
+        self.check_bar_items(settings, [("copilot", 0, "rolling")])
         with patch.object(self.dashboard, "refresh"):
             settings.save()
         self.assertEqual(state.load_selected()["provider"], "copilot")
@@ -2875,14 +3012,17 @@ class DesktopTests(IsolatedState):
             self.assertEqual(view.action.text(), "Retry")
             self.assertTrue(view.action.isEnabled())
 
-    def test_provider_settings_save_disabled_providers(self):
+    def test_provider_settings_requires_an_active_provider_before_saving(self):
         settings = tray.ProviderSettings(self.dashboard)
         self.addCleanup(settings.deleteLater)
         for i in range(settings.providers.count()):
             settings.providers.item(i).setCheckState(tray.Qt.CheckState.Unchecked)
-        with patch.object(paths, "IS_WINDOWS", False):
+        with patch.object(paths, "IS_WINDOWS", False), patch.object(config, "save_connection_order") as save_order:
             settings.save()
-        self.assertEqual(config.enabled_order(), [])
+        save_order.assert_not_called()
+        self.assertEqual(config.enabled_order(), ["codex", "copilot"])
+        self.assertEqual(settings.current_section, "providers")
+        self.assertEqual(settings.message.text(), "Enable at least one provider.")
 
     def test_settings_display_names_preserve_ids_and_reordering(self):
         config.save_config(["zai", "commandcode", "claude"])

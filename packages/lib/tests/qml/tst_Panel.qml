@@ -836,20 +836,19 @@ Item {
             const settings = configureManyProviders()
             const scroller = findChild(panel, "panel-scroller")
             const first = findChild(settings, "provider-claude")
-            const last = findChild(settings, "provider-move-up-" + settings.order[settings.order.length - 1])
+            const last = findChild(settings, "bar-item-" + settings.order[settings.order.length - 1] + "-0-weekly:Fable")
             first.forceActiveFocus(Qt.TabFocusReason)
             verifyControlInViewport(first, scroller)
-            compare(scroller.contentY, 0)
             let focused = first
             let count = 0
-            while (focused !== last && count++ < 100)
+            while (focused !== last && count++ < settings.order.length * 10)
                 focused = tabToNextControl(focused, scroller, false)
             compare(focused, last)
             verify(count > 40)
             verify(scroller.contentY > scroller.height)
             const bottomPosition = scroller.contentY
             count = 0
-            while (focused !== first && count++ < 100)
+            while (focused !== first && count++ < settings.order.length * 10)
                 focused = tabToNextControl(focused, scroller, true)
             compare(focused, first)
             verify(scroller.contentY < bottomPosition)
@@ -858,7 +857,7 @@ Item {
         function test_fixed_footer_and_header_focus_preserve_settings_scroll() {
             const settings = configureManyProviders()
             const scroller = findChild(panel, "panel-scroller")
-            const about = findChild(settings, "provider-move-up-" + settings.order[settings.order.length - 1])
+            const about = findChild(settings, "bar-item-" + settings.order[settings.order.length - 1] + "-0-weekly:Fable")
             scroller.contentY = Math.max(0, scroller.contentHeight - scroller.height)
             about.forceActiveFocus(Qt.TabFocusReason)
             verifyControlInViewport(about, scroller)
@@ -917,9 +916,7 @@ Item {
             keyClick(Qt.Key_Tab)
             verify(findChild(panel, "settings-nav-about").activeFocus)
             keyClick(Qt.Key_Tab)
-            verify(findChild(settings, "bar-item-claude-0-rolling").activeFocus)
-            // General keeps bar items, refresh and display controls together.
-            for (let index = 0; index < settings.choices.length; index++) keyClick(Qt.Key_Tab)
+            // General starts with refresh; provider and bar choices share Providers.
             verify(findChild(settings, "refresh-interval-slider").activeFocus)
             keyClick(Qt.Key_Tab)
             verify(findChild(settings, "usage-display").activeFocus)
@@ -1406,13 +1403,21 @@ Item {
                     compare(after.pixel(Math.round(position.x + x), Math.round(position.y + y)), before.pixel(Math.round(position.x + x), Math.round(position.y + y)))
             }
         }
-        function test_unified_general_keeps_bar_items_and_refresh_display_controls_reachable() {
+        function test_unified_settings_keep_provider_bar_and_general_controls_reachable() {
             panel.configure()
             wait(20)
             const settings = findChild(panel, "panel-settings-page")
             const scroller = findChild(panel, "panel-scroller")
             const before = JSON.stringify(settings.selectedItems)
-            for (const name of ["bar-item-claude-0-rolling", "refresh-interval-slider", "usage-display", "icon-mode"]) {
+            for (const name of ["refresh-interval-slider", "usage-display", "icon-mode"]) {
+                const control = findChild(settings, name)
+                control.forceActiveFocus(Qt.TabFocusReason)
+                verifyControlInViewport(control, scroller)
+            }
+            settings.selectSection("providers")
+            settings.toggleProvider("kiro")
+            wait(20)
+            for (const name of ["bar-order-remove-claude-0-rolling", "provider-claude", "bar-item-claude-0-rolling", "provider-codex", "bar-item-codex-0-weekly", "provider-kiro", "bar-item-kiro-0-rolling"]) {
                 const control = findChild(settings, name)
                 control.forceActiveFocus(Qt.TabFocusReason)
                 verifyControlInViewport(control, scroller)
