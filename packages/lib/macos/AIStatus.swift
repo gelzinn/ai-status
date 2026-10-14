@@ -2039,7 +2039,7 @@ struct SettingsPage: View {
                 Text("On").frame(width: 28)
                 Text("Provider / limits").frame(maxWidth: .infinity, alignment: .leading)
                 Text("Bar").frame(width: 28)
-                Spacer().frame(width: 40)
+                Spacer().frame(width: Assets.panelIcons.controls.size * 2 + 4)
             }.font(.custom("GeistMono-Regular", size: 11)).accessibilityHidden(true)
             ForEach(model.draft.order, id: \.self) { provider in
                 let active = model.draft.enabled.contains(provider)
