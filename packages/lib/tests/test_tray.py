@@ -830,7 +830,8 @@ class DesktopTests(IsolatedState):
         for i in range(settings.active.count()):
             self.assertTrue(tray.icon_has_pixels(settings.active.itemIcon(i)))
         self.assertEqual(settings.active.currentData()[0], "codex")
-        self.assertEqual(settings.active.itemIcon(settings.active.currentIndex()).cacheKey(), tray.provider_icon("codex").cacheKey())
+        self.assertEqual(settings.active.itemIcon(settings.active.currentIndex()).pixmap(16, 16).toImage(),
+                         tray.provider_icon("codex").pixmap(16, 16).toImage())
         settings.display["show_provider"].setChecked(False)
         settings.icon_mode.setCurrentIndex(settings.icon_mode.findData("logo"))
         settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
