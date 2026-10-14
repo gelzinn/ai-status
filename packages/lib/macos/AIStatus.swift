@@ -421,6 +421,7 @@ struct Snapshot: Decodable {
         if let items = settings.items, !items.isEmpty { return items }
         return [selected]
     }
+    var allowsQuickSelection: Bool { pinnedItems.count <= 1 }
 }
 
 enum Page: Equatable {
@@ -920,7 +921,7 @@ final class Model: ObservableObject {
                 total + 62 + provider.metrics.reduce(0) { $0 + (provider.monetaryCredit($1) == nil ? 78 : 36) } + (provider.cached ? 18 : 0)
                     + ((provider.resetCredits?.available ?? 0) > 0 ? 36 : 0)
             }
-            return min(680, max(180, CGFloat(height)))
+            return min(680, max(180, CGFloat(height + (snapshot?.allowsQuickSelection == false ? 46 : 0))))
         }
     }
 
@@ -996,6 +997,7 @@ final class Model: ObservableObject {
         }
     }
     func select(_ selection: Selection) {
+        guard snapshot?.allowsQuickSelection == true else { return }
         guard let data = try? JSONEncoder().encode(selection), let json = String(data: data, encoding: .utf8) else { return }
         enqueue(["select-metric", "--frontend", "macos", "--selection-json", json]) { [weak self] error in
             if let error = error { self?.error = error }
@@ -1030,6 +1032,10 @@ final class Model: ObservableObject {
         if section == .alerts && invalidAdvancedNotifications { notificationAdvancedExpanded = true }
         settingsSection = section
         changed?()
+    }
+    func showBarSettings() {
+        showSettings()
+        showSettingsSection(.providers)
     }
     func toggleProvider(_ provider: String) {
         guard !settingsSaving else { return }
@@ -1777,10 +1783,20 @@ struct UsagePage: View {
                      "No usage available. Connect a provider and refresh.")
                 HoverButton(action: model.showSettings) { Text("Settings") }
             }
+            if model.snapshot?.allowsQuickSelection == false {
+                HoverButton(padding: 4, action: model.showBarSettings) {
+                    HStack {
+                        Text("Bar items: Settings → Providers")
+                        Spacer(minLength: 0)
+                        PanelIcon(name: "arrow-right")
+                    }.font(.custom("GeistMono-Regular", size: 11)).foregroundColor(Palette.dim)
+                }
+            }
             ForEach(Array((model.snapshot?.providers ?? []).enumerated()), id: \.element.id) { groupIndex, provider in
                 let selected = model.snapshot?.pinnedItems.contains { $0.provider == provider.connectionID && $0.idx == provider.idx } == true
                 VStack(alignment: .leading, spacing: 16) {
-                    HoverButton(action: { if let metric = provider.metrics.first { model.select(provider.selection(metric)) } }) {
+                    UsageSelectionRow(allowsSelection: model.snapshot?.allowsQuickSelection == true,
+                                      action: { if let metric = provider.metrics.first { model.select(provider.selection(metric)) } }) {
                         HStack(spacing: 8) {
                             Text(selected ? "→" : " ").frame(width: 14)
                             ProviderLogo(provider: provider.providerID, path: provider.logoPath)
@@ -1803,7 +1819,8 @@ struct UsagePage: View {
                                 .accessibilityLabel("\(provider.name), \(credit.title), \(credit.value), show details")
                         } else {
                             let active = model.snapshot?.pinnedItems.contains(provider.selection(metric)) == true
-                            HoverButton(padding: 4, action: { model.select(provider.selection(metric)) }) {
+                            UsageSelectionRow(allowsSelection: model.snapshot?.allowsQuickSelection == true, padding: 4,
+                                              action: { model.select(provider.selection(metric)) }) {
                                 HStack(alignment: .top, spacing: 8) {
                                     Text(active ? "•" : " ").frame(width: 16)
                                     VStack(alignment: .leading, spacing: 4) {
@@ -1841,6 +1858,22 @@ struct UsagePage: View {
                     }
                 }
             }
+        }
+    }
+}
+
+struct UsageSelectionRow<Label: View>: View {
+    let allowsSelection: Bool
+    var padding: CGFloat = 6
+    let action: () -> Void
+    @ViewBuilder let label: () -> Label
+
+    var body: some View {
+        if allowsSelection {
+            HoverButton(padding: padding, action: action, label: label)
+        } else {
+            label().frame(maxWidth: .infinity, alignment: .leading).padding(padding)
+                .accessibilityElement(children: .combine)
         }
     }
 }
@@ -3000,7 +3033,7 @@ struct GuidePage: View {
         Row(feature: "Open Usage", action: "Click the menu bar icon."),
         Row(feature: "Settings", action: "Gear icon or C on Usage; or right-click the menu bar icon → Settings."),
         Row(feature: "Refresh", action: "Refresh icon or R on Usage."),
-        Row(feature: "Choose a limit", action: "Click a limit on Usage."),
+        Row(feature: "Choose a limit", action: "With one bar item configured, click a limit on Usage. With several, use Providers."),
         Row(feature: "Scroll content", action: "Trackpad or mouse wheel."),
         Row(feature: "Switch tabs", action: "Click a Settings tab. Scroll the strip to reveal more."),
         Row(feature: "Move focus", action: "Tab / Shift+Tab."),
@@ -3598,6 +3631,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         try smokeMenuTracking()
         try smokeSettingsSelects(sample: sample)
         try smokeBarItems(sample: sample, directory: previewDirectory)
+        try smokeQuickSelection(sample: sample, directory: previewDirectory)
         try smokeUnifiedProviders(sample: sample, directory: previewDirectory)
         try smokeBarExample(sample: sample, directory: previewDirectory)
         try smokeRefreshInterval(sample: sample)
@@ -3645,7 +3679,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         }
         model.showAbout()
         try renderSmokePage(model, name: "about", directory: previewDirectory)
-        print("AI Status macOS smoke OK: usage, multiple menu bar items, settings subnavigation and shared draft, refresh interval, quota notifications, reset credits, Cloud credits, live update progress, settings guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+        print("AI Status macOS smoke OK: usage, multiple menu bar items, read-only multi-item usage, settings subnavigation and shared draft, refresh interval, quota notifications, reset credits, Cloud credits, live update progress, settings guide, about, accounts, metered values, resources, panel icons, keyboard focus, snapshot validation")
+    }
+
+    private static func smokeQuickSelection(sample: String, directory: URL?) throws {
+        let model = Model()
+        let choice = Selection(provider: "claude", metric: "rolling")
+        model.accept(Data(sample.utf8))
+        guard model.snapshot?.allowsQuickSelection == true else {
+            throw AppError.message("Legacy single-item usage lost quick selection.")
+        }
+        // A runtime-free model exposes any attempted backend action as an error.
+        model.select(choice)
+        guard model.error == "The AI Status runtime is unavailable." else {
+            throw AppError.message("Single-item usage stopped dispatching metric selection.")
+        }
+        model.error = ""
+        try renderSmokePage(model, name: "usage-single-item", directory: directory)
+        guard var document = try JSONSerialization.jsonObject(with: Data(sample.utf8)) as? [String: Any],
+              var settings = document["settings"] as? [String: Any] else {
+            throw AppError.message("Read-only multi-item usage fixture failed.")
+        }
+        let codex = Selection(provider: "codex", metric: "weekly")
+        let unavailable = Selection(provider: "account:unavailable", idx: 3, metric: "weekly")
+        let scenarios: [(String, [Selection])] = [
+            ("usage-multiple-items", [codex, choice]),
+            ("usage-multiple-limits", [choice, Selection(provider: "claude", metric: "weekly")]),
+            ("usage-multiple-items-unavailable", [codex, unavailable]),
+        ]
+        for (name, pins) in scenarios {
+            settings["items"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(pins))
+            document["settings"] = settings
+            document["selected"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(pins[0]))
+            let data = try JSONSerialization.data(withJSONObject: document)
+            model.accept(data)
+            guard model.snapshot?.allowsQuickSelection == false else {
+                throw AppError.message("\(name) counted visible data instead of all configured menu bar items.")
+            }
+            model.select(choice)
+            model.select(codex)
+            model.select(pins[0])
+            guard model.error.isEmpty, model.snapshot?.pinnedItems == pins, model.snapshot?.selected == pins[0] else {
+                throw AppError.message("\(name) dispatched a quick selection or changed saved menu bar items.")
+            }
+            model.page = .usage
+            try renderSmokePage(model, name: name, directory: directory)
+            model.showBarSettings()
+            guard model.page == .settings, model.settingsSection == .providers,
+                  Set(model.draft.items) == Set(pins), model.snapshot?.pinnedItems == pins else {
+                throw AppError.message("The bar-items hint failed to open Providers without changing saved choices.")
+            }
+        }
+        settings["items"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode([codex]))
+        document["settings"] = settings
+        document["selected"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(codex))
+        model.accept(try JSONSerialization.data(withJSONObject: document))
+        guard model.snapshot?.allowsQuickSelection == true else {
+            throw AppError.message("Returning to one configured item did not restore quick selection.")
+        }
+        model.select(choice)
+        guard model.error == "The AI Status runtime is unavailable." else {
+            throw AppError.message("Single-item quick selection did not resume after a multi-item snapshot.")
+        }
     }
 
     private static func smokeBarItems(sample: String, directory: URL?) throws {
@@ -4931,6 +5026,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         settings["order"] = [identity]
         settings["names"] = [identity: "Claude · Work"]
         settings["providerIds"] = [identity: "claude"]
+        settings["items"] = [
+            ["provider": identity, "idx": 2, "metric": "rolling"] as [String: Any],
+            ["provider": identity, "idx": 2, "metric": "credits:claude-cloud"] as [String: Any],
+        ]
         document["settings"] = settings
         document["selected"] = ["provider": identity, "idx": 2, "metric": "rolling"] as [String: Any]
         let states = [("available", "$42.50", 42.5), ("exhausted", "$0.00", 0.0),
@@ -4957,6 +5056,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             let model = Model()
             model.accept(try JSONSerialization.data(withJSONObject: document))
             guard let current = model.selectedProvider, current.providerID == "claude",
+                  model.snapshot?.allowsQuickSelection == false,
                   current.metrics.count == 2, current.metrics[0].percentage == 9,
                   current.metrics[1].percentage == nil, current.metrics[1].usable,
                   current.metrics[1].displayValue == value, current.metrics[1].detail == detail,

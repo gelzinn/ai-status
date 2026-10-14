@@ -10,8 +10,16 @@ Column {
     signal resetRequested(string provider, int idx)
     signal creditRequested(string provider, int idx, string creditId)
     signal settingsRequested()
+    signal providersRequested()
     spacing: Style.space(20)
     readonly property var selectedItems: (Plugin.Model.snapshot.settings || {}).items || [Plugin.Model.snapshot.selected]
+    readonly property bool canSelectMetric: selectedItems.length <= 1
+    onCanSelectMetricChanged: {
+        if (!canSelectMetric && visible && providerRepeater) {
+            for (let index = 0; index < providerRepeater.count; index++)
+                providerRepeater.itemAt(index).releaseSelectionFocus()
+        }
+    }
 
     function syncProviders() {
         StableList.sync(providers, Plugin.Model.snapshot.providers, entry => entry.id + ":" + entry.idx)
@@ -62,6 +70,17 @@ Column {
             onClicked: root.settingsRequested()
         }
     }
+    Plugin.PanelButton {
+        id: barSettings
+        objectName: "usage-bar-settings"
+        visible: !root.canSelectMetric
+        width: parent.width
+        text: "Bar items: Settings → Providers"
+        alignLeft: true
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        onClicked: root.providersRequested()
+    }
     Repeater {
         id: providerRepeater
         model: providers
@@ -74,7 +93,16 @@ Column {
             readonly property bool selected: root.selectedItems.some(item => item.provider === modelData.id && item.idx === modelData.idx)
             width: root.width
             spacing: Style.space(10)
-            function choose(key) { Plugin.Model.selectMetric(modelData.id, modelData.idx, key) }
+            function choose(key) {
+                if (root.canSelectMetric) Plugin.Model.selectMetric(modelData.id, modelData.idx, key)
+            }
+            function releaseSelectionFocus() {
+                if (providerHeading.activeFocus) barSettings.forceActiveFocus()
+                for (let index = 0; index < metricRepeater.count; index++) {
+                    const item = metricRepeater.itemAt(index)
+                    if (item.activeFocus && !item.creditEntry) barSettings.forceActiveFocus()
+                }
+            }
             function creditButton(creditId) {
                 for (let index = 0; index < metricRepeater.count; index++) {
                     const item = metricRepeater.itemAt(index)
@@ -88,11 +116,14 @@ Column {
             ListModel { id: metrics; dynamicRoles: true }
 
             Item {
+                id: providerHeading
+                objectName: "usage-provider-" + provider.modelData.id + "-" + provider.modelData.idx
                 width: parent.width
                 height: heading.implicitHeight + Style.space(8)
-                activeFocusOnTab: true
-                Accessible.role: Accessible.Button
+                activeFocusOnTab: root.canSelectMetric
+                Accessible.role: root.canSelectMetric ? Accessible.Button : Accessible.StaticText
                 Accessible.name: provider.modelData.name
+                Accessible.onPressAction: if (root.canSelectMetric) provider.choose(provider.modelData.metrics[0].key)
                 Keys.onReturnPressed: provider.choose(provider.modelData.metrics[0].key)
                 Keys.onSpacePressed: provider.choose(provider.modelData.metrics[0].key)
                 Row {
@@ -129,6 +160,7 @@ Column {
                 }
                 MouseArea {
                     anchors.fill: parent
+                    enabled: root.canSelectMetric
                     cursorShape: Qt.PointingHandCursor
                     onClicked: { parent.forceActiveFocus(); provider.choose(provider.modelData.metrics[0].key) }
                 }
@@ -155,14 +187,16 @@ Column {
                         readonly property bool selected: root.selectedItems.some(item => item.provider === provider.modelData.id && item.idx === provider.modelData.idx && item.metric === modelData.key)
                         readonly property var creditEntry: (provider.modelData.monetaryCredits || []).find(item => "credits:" + item.id === modelData.key) || null
                         readonly property bool inlineAmount: !!creditEntry || modelData.isAmount === true
+                        readonly property bool interactive: !!creditEntry || root.canSelectMetric
                         width: provider.width
                         implicitHeight: block.implicitHeight
-                        activeFocusOnTab: true
-                        Accessible.role: Accessible.Button
+                        activeFocusOnTab: interactive
+                        Accessible.role: interactive ? Accessible.Button : Accessible.StaticText
                         Accessible.name: provider.modelData.name + " " + modelData.name + " " + (modelData.value || Math.round(modelData.percentage) + "%")
+                        Accessible.onPressAction: activate()
                         function activate() {
                             if (creditEntry) root.creditRequested(provider.modelData.id, provider.modelData.idx, creditEntry.id)
-                            else provider.choose(modelData.key)
+                            else if (root.canSelectMetric) provider.choose(modelData.key)
                         }
                         Keys.onReturnPressed: activate()
                         Keys.onEnterPressed: activate()
@@ -258,6 +292,7 @@ Column {
                         MouseArea {
                             id: metricMouse
                             anchors.fill: parent
+                            enabled: metric.interactive
                             hoverEnabled: !!metric.creditEntry
                             cursorShape: Qt.PointingHandCursor
                             onClicked: { metric.forceActiveFocus(); metric.activate() }

@@ -65,20 +65,29 @@ class MacOSFrontendTests(unittest.TestCase):
         save.assert_called_once_with({**SELECTED, **choice, "items": [choice]})
         refresh.assert_not_called()
 
-    def test_metric_selection_keeps_other_menu_bar_items_in_provider_order(self):
-        pinned = [{"provider": "claude", "idx": 0, "metric": "rolling"},
-                  {"provider": "claude", "idx": 0, "metric": "weekly"}]
+    def test_metric_selection_preserves_all_configured_menu_bar_items(self):
+        claude = {"provider": "claude", "idx": 0, "metric": "rolling"}
+        scenarios = [
+            [claude, {"provider": "codex", "idx": 1, "metric": "weekly"}],
+            [claude, {"provider": "claude", "idx": 0, "metric": "weekly"}],
+            [claude, {"provider": "account:unavailable", "idx": 3, "metric": "weekly"}],
+        ]
         choice = {"provider": "codex", "idx": 1, "metric": "weekly"}
-        selected = dict(SELECTED, items=pinned)
-        with patch.object(state, "load_cache", return_value=DATA), \
-                patch.object(state, "load_selected", return_value=selected), \
-                patch.object(state, "save_selected") as save, \
-                patch.object(state, "trigger_refresh") as refresh:
-            result, errors = self.invoke(["select-metric", "--frontend", "macos",
-                                          "--selection-json", json.dumps(choice)])
-        self.assertIn(result, (0, None), errors)
-        save.assert_called_once_with({**SELECTED, **pinned[1], "items": [pinned[1], choice]})
-        refresh.assert_not_called()
+        for pinned in scenarios:
+            for target in (choice, pinned[0]):
+                with self.subTest(items=pinned, target=target):
+                    selected = dict(SELECTED, items=pinned)
+                    original = json.loads(json.dumps(selected))
+                    with patch.object(state, "load_cache", return_value=DATA), \
+                            patch.object(state, "load_selected", return_value=selected), \
+                            patch.object(state, "save_selected") as save, \
+                            patch.object(state, "trigger_refresh") as refresh:
+                        result, errors = self.invoke(["select-metric", "--frontend", "macos",
+                                                      "--selection-json", json.dumps(target)])
+                    self.assertIn(result, (0, None), errors)
+                    self.assertEqual(selected, original)
+                    save.assert_not_called()
+                    refresh.assert_not_called()
 
     def test_bad_selections_do_not_change_the_saved_metric(self):
         invalid = [None, [], "claude", {}, {"provider": "codex", "idx": True, "metric": "weekly"},

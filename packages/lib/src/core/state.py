@@ -86,6 +86,11 @@ def order_bar_items(items, provider_order):
                   key=lambda item: ranks.get(item["provider"], len(ranks)))
 
 
+def can_select_metric(selected):
+    """Quick switching is unambiguous only with at most one configured item."""
+    return len(get_selected_items(selected)) <= 1
+
+
 def set_selected_items(selected, items):
     """Replace the bar list and mirror its first item for legacy consumers."""
     selected["items"] = get_selected_items({"items": items})

@@ -51,6 +51,32 @@ Item {
                 isAmount: result.monetaryCredits[0].status === "available", detail: "Expires 2099-11-05T07:59:00Z"})
             return result
         }
+        function test_multiple_bar_items_keep_credit_actions_and_link_to_provider_settings() {
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            snapshot.settings.items = [{provider: "claude", idx: 0, metric: "rolling"},
+                                       {provider: "codex", idx: 0, metric: "weekly"}]
+            snapshot.providers[0] = withCloud(snapshot.providers[0])
+            Plugin.Model.snapshot = snapshot
+            wait(20)
+            const original = JSON.stringify(snapshot.settings.items)
+            mouseClick(findChild(panel, "usage-metric-claude-0-credits:claude-cloud"))
+            wait(20)
+            compare(panel.creditSelection.creditId, "claude-cloud")
+            panel.showUsage()
+            wait(20)
+            mouseClick(findChild(panel, "reset-credits-codex-0"))
+            wait(20)
+            compare(panel.resetProvider.id, "codex")
+            panel.showUsage()
+            wait(20)
+            compare(Plugin.Model.chosen, null)
+            compare(JSON.stringify(Plugin.Model.snapshot.settings.items), original)
+            mouseClick(findChild(panel, "usage-bar-settings"))
+            wait(20)
+            verify(panel.configurationPage)
+            compare(findChild(panel, "panel-settings-page").section, "providers")
+            compare(Plugin.Model.chosen, null)
+        }
         function prepareCloud() {
             const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
             snapshot.providers[0] = withCloud(snapshot.providers[0])

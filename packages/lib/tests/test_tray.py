@@ -14,6 +14,7 @@ try:
     from PySide6.QtGui import QColor, QFocusEvent, QKeyEvent, QMouseEvent, QPixmap, QWheelEvent
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QLabel
+    from shiboken6 import isValid
     from core import tray
     HAS_QT = True
 except ImportError:
@@ -37,8 +38,43 @@ class DesktopTests(IsolatedState):
         self.dashboard.poll.stop()
         self.dashboard.auto_refresh.stop()
         self.dashboard.animation.stop()
-        self.addCleanup(self.dashboard.tray.hide)
-        self.addCleanup(self.dashboard.deleteLater)
+        self.addCleanup(self.dispose_dashboard, self.dashboard)
+
+    def dispose_dashboard(self, dashboard):
+        if not isValid(dashboard):
+            return
+        # Settings and worker completion can restart timers after setUp stops them.
+        # Destroy their receivers before IsolatedState restores the global paths.
+        dashboard.quitting = True
+        for timer in dashboard.findChildren(tray.QTimer):
+            timer.stop()
+        dashboard.hide_trays()
+        dashboard.hide()
+        for thread in dashboard.findChildren(tray.QThread):
+            thread.quit()
+            self.assertTrue(thread.wait(5000), "Desktop worker did not finish during cleanup")
+        dashboard.deleteLater()
+        self.app.sendPostedEvents(None, tray.QEvent.Type.DeferredDelete)
+
+    def test_dashboard_cleanup_cancels_restarted_timers_before_paths_are_restored(self):
+        with patch.object(tray.QTimer, "singleShot"), patch.object(tray.QSystemTrayIcon, "show"):
+            retired = tray.Dashboard(self.app)
+        self.addCleanup(self.dispose_dashboard, retired)
+        retired.data = {"copilot": [{"provider": "Copilot", "metrics": [
+            {"type": "monthly", "percentage": 42}]}]}
+        timers = retired.findChildren(tray.QTimer)
+        for timer in (retired.poll, retired.auto_refresh, retired.animation):
+            timer.start(0)
+        tray.QTimer.singleShot(0, retired, retired.draw)
+        destroyed = MagicMock()
+        retired.destroyed.connect(destroyed)
+        self.assertIsNone(state.load_selected())
+        self.dispose_dashboard(retired)
+        destroyed.assert_called_once()
+        self.assertFalse(isValid(retired))
+        self.assertTrue(all(not isValid(timer) for timer in timers))
+        self.app.processEvents()
+        self.assertIsNone(state.load_selected())
 
     @staticmethod
     def check_bar_items(settings, identities):
@@ -294,20 +330,121 @@ class DesktopTests(IsolatedState):
             QTest.keyClick(shown, tray.Qt.Key.Key_Space)
             self.assertIn({"provider": "copilot", "idx": 0, "metric": "rolling"}, settings.bar_selections)
 
-    def test_usage_selection_keeps_bar_items_grouped_by_configured_provider_order(self):
+    def test_multiple_bar_items_keep_usage_rows_readonly_and_link_to_provider_settings(self):
         self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
             {"type": "rolling", "percentage": 23}, {"type": "weekly", "percentage": 61}]}])
         self.dashboard.on_result("copilot", [{"provider": "Copilot", "metrics": [
             {"type": "monthly", "percentage": 42}]}])
-        state.set_selected_items(self.dashboard.selected, [
+        pins = [
             {"provider": "codex", "idx": 0, "metric": "rolling"},
             {"provider": "codex", "idx": 0, "metric": "weekly"},
-            {"provider": "copilot", "idx": 0, "metric": "monthly"}])
+            {"provider": "copilot", "idx": 0, "metric": "monthly"}]
+        state.set_selected_items(self.dashboard.selected, pins)
+        state.save_selected(self.dashboard.selected)
+        saved = state.load_selected()
         with patch.object(tray.QSystemTrayIcon, "show"):
+            self.dashboard.draw()
+        heading = self.dashboard.provider_buttons[("copilot", 0)]
+        row = self.dashboard.metric_buttons[-1]
+        for button in [*self.dashboard.provider_buttons.values(), *self.dashboard.metric_buttons]:
+            self.assertTrue(button.isEnabled())
+            self.assertEqual(button.cursor().shape(), tray.Qt.CursorShape.ArrowCursor)
+            self.assertEqual(button.focusPolicy(), tray.Qt.FocusPolicy.NoFocus)
+        self.assertTrue(all(button.bullet.text() == "•" for button in self.dashboard.metric_buttons))
+        self.assertFalse(self.dashboard.bar_items_link.isHidden())
+        with patch.object(state, "save_selected") as save:
+            heading.click()
+            row.click()
+            QTest.mouseClick(row, tray.Qt.MouseButton.LeftButton)
+            QTest.keyClick(row, tray.Qt.Key.Key_Return)
+            QTest.keyClick(row, tray.Qt.Key.Key_Space)
             self.dashboard.choose_metric(("copilot", 0, "monthly"))
-        self.assertEqual(state.get_selected_items(state.load_selected()), [
-            {"provider": "codex", "idx": 0, "metric": "weekly"},
-            {"provider": "copilot", "idx": 0, "metric": "monthly"}])
+            self.dashboard.cycle_metric(1)
+            self.dashboard.cycle_metric(-1)
+            for key in (tray.Qt.Key.Key_Down, tray.Qt.Key.Key_Up):
+                event = QKeyEvent(tray.QEvent.Type.KeyPress, key, tray.Qt.KeyboardModifier.NoModifier)
+                self.dashboard.keyPressEvent(event)
+                self.assertFalse(event.isAccepted())
+            wheel = QWheelEvent(tray.QPointF(10, 10), tray.QPointF(10, 10), tray.QPoint(), tray.QPoint(0, -120),
+                                tray.Qt.MouseButton.NoButton, tray.Qt.KeyboardModifier.NoModifier,
+                                tray.Qt.ScrollPhase.NoScrollPhase, False)
+            self.dashboard.wheelEvent(wheel)
+            self.assertFalse(wheel.isAccepted())
+        save.assert_not_called()
+        self.assertEqual(self.dashboard.selected, saved)
+        self.assertEqual(state.load_selected(), saved)
+        with patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.show()
+            self.dashboard.resize(380, 260)
+            self.app.processEvents()
+            viewport = self.dashboard.scroll.viewport()
+            point = tray.QPoint(10, 10)
+            scroll_wheel = QWheelEvent(tray.QPointF(point), tray.QPointF(viewport.mapToGlobal(point)),
+                                       tray.QPoint(), tray.QPoint(0, -120), tray.Qt.MouseButton.NoButton,
+                                       tray.Qt.KeyboardModifier.NoModifier, tray.Qt.ScrollPhase.NoScrollPhase, False)
+            QApplication.sendEvent(viewport, scroll_wheel)
+            self.app.processEvents()
+            self.assertGreater(self.dashboard.scroll.verticalScrollBar().value(), 0)
+        self.assertEqual(state.load_selected(), saved)
+        self.dashboard.bar_items_link.click()
+        self.assertTrue(self.dashboard.configuring())
+        self.assertEqual(self.dashboard.settings_view.current_section, "providers")
+        self.assertEqual(self.dashboard.settings_view.bar_selections, pins)
+
+    def test_missing_configured_bar_item_does_not_reenable_usage_switching(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "rolling", "percentage": 23}, {"type": "weekly", "percentage": 61}]}])
+        for missing in ({"provider": "copilot", "idx": 0, "metric": "monthly"},
+                        {"provider": "codex", "idx": 1, "metric": "weekly"},
+                        {"provider": "codex", "idx": 0, "metric": "unavailable"}):
+            with self.subTest(missing=missing):
+                pins = [{"provider": "codex", "idx": 0, "metric": "rolling"}, missing]
+                state.set_selected_items(self.dashboard.selected, pins)
+                state.save_selected(self.dashboard.selected)
+                self.dashboard.pending.add(missing["provider"])
+                self.dashboard.draw()
+                self.assertEqual(len(self.dashboard.metric_trays), 0)
+                self.assertTrue(all(button.focusPolicy() == tray.Qt.FocusPolicy.NoFocus
+                                    for button in self.dashboard.metric_buttons))
+                self.dashboard.metric_buttons[-1].click()
+                self.dashboard.pending.clear()
+                self.dashboard.on_error(missing["provider"], "Session expired")
+                self.dashboard.cycle_metric(1)
+                self.assertEqual(state.get_selected_items(state.load_selected()), pins)
+
+    def test_saved_multiple_bar_items_guard_a_stale_dashboard_selection(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "rolling", "percentage": 23}, {"type": "weekly", "percentage": 61}]}])
+        saved = dict(self.dashboard.selected, usage_display="remaining")
+        state.set_selected_items(saved, [{"provider": "codex", "idx": 0, "metric": "rolling"},
+                                         {"provider": "copilot", "idx": 0, "metric": "monthly"}])
+        state.save_selected(saved)
+        self.dashboard.choose_metric(("codex", 0, "weekly"))
+        self.assertEqual(state.load_selected(), saved)
+
+    def test_usage_switching_updates_in_place_when_bar_item_count_changes(self):
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "rolling", "percentage": 23}, {"type": "weekly", "percentage": 61}]}])
+        rows = self.dashboard.metric_buttons[:]
+        heading = self.dashboard.provider_buttons[("codex", 0)]
+        pins = [{"provider": "codex", "idx": 0, "metric": "rolling"},
+                {"provider": "codex", "idx": 0, "metric": "weekly"}]
+        with patch.object(tray.QSystemTrayIcon, "show"):
+            state.set_selected_items(self.dashboard.selected, pins)
+            state.save_selected(self.dashboard.selected)
+            self.dashboard.draw()
+        self.assertEqual(rows, self.dashboard.metric_buttons)
+        self.assertEqual(heading.focusPolicy(), tray.Qt.FocusPolicy.NoFocus)
+        self.assertEqual(rows[1].cursor().shape(), tray.Qt.CursorShape.ArrowCursor)
+        state.set_selected_items(self.dashboard.selected, pins[:1])
+        state.save_selected(self.dashboard.selected)
+        self.dashboard.draw()
+        self.assertEqual(rows, self.dashboard.metric_buttons)
+        self.assertTrue(self.dashboard.bar_items_link.isHidden())
+        self.assertEqual(heading.focusPolicy(), tray.Qt.FocusPolicy.StrongFocus)
+        self.assertEqual(rows[1].cursor().shape(), tray.Qt.CursorShape.PointingHandCursor)
+        QTest.keyClick(rows[1], tray.Qt.Key.Key_Return)
+        self.assertEqual(state.get_selected_items(state.load_selected()), pins[1:])
 
     def test_multiple_trays_keep_identity_refresh_loading_and_clicked_anchor(self):
         self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
@@ -366,7 +503,7 @@ class DesktopTests(IsolatedState):
         self.assertIn("17%", self.dashboard.tray.toolTip())
         self.assertEqual(state.get_selected_items(state.load_selected()), selections)
 
-    def test_primary_navigation_preserves_extra_pins_and_tooltip_value_with_long_names(self):
+    def test_multi_item_navigation_preserves_all_pins_and_tooltip_value_with_long_names(self):
         self.dashboard.on_result("codex", [{"provider": "Codex " + "😀" * 100, "metrics": [
             {"type": "rolling", "name": "Long " * 30, "percentage": 23},
             {"type": "weekly", "percentage": 61}]}])
@@ -375,13 +512,16 @@ class DesktopTests(IsolatedState):
         selections = [{"provider": "codex", "idx": 0, "metric": "rolling:Long " + "Long " * 29},
                       {"provider": "copilot", "idx": 0, "metric": "monthly"}]
         state.set_selected_items(self.dashboard.selected, selections)
+        state.save_selected(self.dashboard.selected)
+        saved = state.load_selected()
         with patch.object(tray.QSystemTrayIcon, "show"):
             self.dashboard.draw()
         tooltip = self.dashboard.tray.toolTip()
         self.assertIn("23%", tooltip)
         self.assertLess(len(tooltip.encode("utf-16-le")) // 2, 128)
         self.dashboard.choose_metric(("codex", 0, "weekly"))
-        self.assertEqual(state.get_selected_items(state.load_selected())[1], selections[1])
+        self.assertEqual(state.load_selected(), saved)
+        self.assertEqual(self.dashboard.tray.toolTip(), tooltip)
 
     def test_startup_cache_does_not_trigger_notifications(self):
         cached = [{"provider": "Codex", "_dir": "codex", "_idx": 0,
@@ -392,8 +532,7 @@ class DesktopTests(IsolatedState):
             dashboard = tray.Dashboard(self.app)
         for timer in (dashboard.poll, dashboard.auto_refresh, dashboard.animation):
             timer.stop()
-        self.addCleanup(dashboard.tray.hide)
-        self.addCleanup(dashboard.deleteLater)
+        self.addCleanup(self.dispose_dashboard, dashboard)
         evaluate.assert_not_called()
 
     def test_fresh_result_is_evaluated_and_notification_click_opens_its_limit(self):
@@ -1810,6 +1949,42 @@ class DesktopTests(IsolatedState):
                 "monetary_credits": [{"id": "claude-cloud", "title": "Cloud credits", "currency": "USD",
                     "balance": balance, "limit": 250, "used": 250 - balance,
                     "expires_at": "2099-11-05T07:59:00Z", "available": True}], **overrides}
+
+    def test_multi_item_usage_keeps_credit_details_and_reset_actions_interactive(self):
+        config.save_config(["claude", "codex"])
+        entry = self.cloud_entry(reset_credits={"available": 2})
+        self.dashboard.on_result("claude", [entry])
+        self.dashboard.on_result("codex", [{"provider": "Codex", "metrics": [
+            {"type": "weekly", "percentage": 23}]}])
+        state.set_selected_items(self.dashboard.selected, [
+            {"provider": "claude", "idx": 0, "metric": "rolling"},
+            {"provider": "codex", "idx": 0, "metric": "weekly"}])
+        state.save_selected(self.dashboard.selected)
+        saved = state.load_selected()
+        with patch.object(tray.QSystemTrayIcon, "show"), \
+             patch.object(self.dashboard, "isActiveWindow", return_value=True):
+            self.dashboard.draw()
+            self.dashboard.show()
+            self.app.processEvents()
+            row = next(button for button in self.dashboard.metric_buttons if button.credit_id)
+            heading = self.dashboard.provider_buttons[("claude", 0)]
+            self.assertEqual(row.focusPolicy(), tray.Qt.FocusPolicy.StrongFocus)
+            self.assertEqual(row.cursor().shape(), tray.Qt.CursorShape.PointingHandCursor)
+            self.assertEqual(heading.credits.focusPolicy(), tray.Qt.FocusPolicy.StrongFocus)
+            QTest.keyClick(row, tray.Qt.Key.Key_Return)
+            self.assertTrue(self.dashboard.viewing_credit_details())
+            self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.monetary_scroll)
+            self.dashboard.go_back()
+            heading.credits.click()
+            self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.credits_scroll)
+            self.dashboard.go_back()
+            row.click()
+            entry.pop("monetary_credits")
+            self.dashboard.on_result("claude", [entry])
+            self.app.processEvents()
+            self.assertIs(self.dashboard.pages.currentWidget(), self.dashboard.scroll)
+            self.assertTrue(self.dashboard.bar_items_link.hasFocus())
+        self.assertEqual(state.load_selected(), saved)
 
     def test_cloud_details_display_balance_validity_and_account_without_selecting_the_amount(self):
         config.save_config(["claude"])

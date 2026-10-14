@@ -232,7 +232,7 @@ Item {
             verify(!settings.valid)
             compare(settings.validationSection, "providers")
         }
-        function test_usage_highlights_every_pinned_metric_and_keeps_primary_for_actions() {
+        function test_usage_with_multiple_pins_is_passive_and_preserves_highlights() {
             const snapshot = Plugin.Model.snapshot
             snapshot.settings.items = [{provider: "claude", idx: 0, metric: "rolling"},
                 {provider: "claude", idx: 0, metric: "weekly:Fable"}, {provider: "codex", idx: 0, metric: "weekly"}]
@@ -245,6 +245,60 @@ Item {
             verify(findChild(usage, "usage-metric-codex-0-weekly").selected)
             verify(!findChild(usage, "usage-metric-codex-0-rolling").selected)
             compare(Plugin.Model.snapshot.selected.metric, "rolling")
+            const before = JSON.stringify(Plugin.Model.snapshot)
+            verify(findChild(usage, "usage-bar-settings").visible)
+            for (const id of ["usage-provider-codex-0", "usage-metric-claude-0-rolling",
+                              "usage-metric-codex-0-rolling", "usage-metric-codex-0-weekly"]) {
+                const row = findChild(usage, id)
+                verify(!row.activeFocusOnTab)
+                compare(row.Accessible.role, Accessible.StaticText)
+                mouseClick(row)
+                row.forceActiveFocus()
+                keyClick(Qt.Key_Return)
+                keyClick(Qt.Key_Enter)
+                keyClick(Qt.Key_Space)
+                compare(Plugin.Model.chosen, null)
+            }
+            compare(JSON.stringify(Plugin.Model.snapshot), before)
+        }
+        function test_quick_selection_uses_configured_pins_and_reenables_for_one_pin() {
+            const snapshot = JSON.parse(JSON.stringify(Plugin.Model.snapshot))
+            const first = {provider: "claude", idx: 0, metric: "rolling"}
+            snapshot.settings.items = [first, {provider: "missing", idx: 2, metric: "monthly"}]
+            snapshot.barItems = [first]
+            Plugin.Model.snapshot = snapshot
+            usage.visible = true
+            settings.visible = false
+            wait(20)
+            verify(!usage.canSelectMetric)
+            mouseClick(findChild(usage, "usage-metric-codex-0-weekly"))
+            compare(Plugin.Model.chosen, null)
+            snapshot.settings.items = [first]
+            Plugin.Model.snapshot = JSON.parse(JSON.stringify(snapshot))
+            wait(20)
+            verify(usage.canSelectMetric)
+            verify(!findChild(usage, "usage-bar-settings").visible)
+            const heading = findChild(usage, "usage-provider-codex-0")
+            verify(heading.activeFocusOnTab)
+            mouseClick(heading)
+            compare(Plugin.Model.chosen.provider, "codex")
+            compare(Plugin.Model.chosen.metric, "rolling")
+            const weekly = findChild(usage, "usage-metric-codex-0-weekly")
+            mouseClick(weekly)
+            compare(Plugin.Model.chosen.metric, "weekly")
+            findChild(usage, "usage-metric-claude-0-weekly").forceActiveFocus()
+            keyClick(Qt.Key_Space)
+            compare(Plugin.Model.chosen.provider, "claude")
+            compare(Plugin.Model.chosen.metric, "weekly")
+            snapshot.settings.items = [first, {provider: "claude", idx: 0, metric: "weekly"}]
+            Plugin.Model.snapshot = JSON.parse(JSON.stringify(snapshot))
+            Plugin.Model.chosen = null
+            wait(20)
+            verify(!usage.canSelectMetric)
+            verify(findChild(usage, "usage-bar-settings").activeFocus)
+            verify(!findChild(usage, "usage-metric-claude-0-weekly").activeFocusOnTab)
+            mouseClick(weekly)
+            compare(Plugin.Model.chosen, null)
         }
         function test_refresh_interval_draft_save_cancel_and_legacy_default() {
             compare(settings.refreshIntervalMinutes, 5)

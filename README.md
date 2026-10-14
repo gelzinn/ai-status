@@ -69,7 +69,7 @@ with blocked updates can use the [recovery command](packages/lib/UPDATES.md#how-
 curl -fsSL https://ai-status.gelzin.com/install | bash -s -- --bar waybar
 ```
 
-The installer walks you through provider selection and appearance, then configures Waybar. Hover for details, scroll to switch providers, middle-click to switch limits and right-click for configuration.
+The installer walks you through provider selection and appearance, then configures Waybar. Hover for details and right-click for configuration. With one bar item configured, scroll switches providers and middle-click switches limits. With several items configured, use configuration to change the selection.
 
 Run the same command to update to the latest stable release. Existing preferences are preserved, and the installer keeps a backup of your Waybar configuration. The installer also supports Omarchy; omit `--bar waybar` to detect your active bar automatically.
 
@@ -250,6 +250,7 @@ process. The connection stores the variable reference, not the key value.
 
 - **29 providers in one view.** Track subscription limits, API costs and prepaid balances, including separate rolling, weekly, monthly and per-model windows.
 - **Choose what stays visible.** Settings → Providers has one compact row per connection: **Active**, its name, **Show in bar** and reorder arrows. Active controls usage collection; Show in bar controls visibility. Click the provider name to choose account/limit items in a small menu. Move a row up or down to set the same provider order in Usage and the bar. Linux and macOS show selected usage together; Windows creates a tray icon for each item with its account, limit and value in the tooltip. Windows controls icon visibility and placement in its notification area. Choose display fields and icon style in General.
+- **Keep multiple bar items fixed.** With one item configured, click a provider or limit in Usage to switch it. With several configured items, those rows display usage without changing the bar; **Bar items: Settings → Providers** points to the controls for changing the selection. Credits and reset details remain interactive. Temporarily unavailable saved items still count toward this rule.
 - **Multiple accounts.** Add as many connections as you need for each provider, with independent labels, credentials, caches and selected metrics. Manage connections with `ai-status accounts`; enable and reorder them in the desktop Settings.
 - **Native settings.** One Providers list combines active connections, bar visibility and shared ordering in the Omarchy, Windows and macOS panels. A connection can stay active without appearing in the bar. Limit choices open from its row, keeping the list compact. General contains appearance and automatic refresh; Alerts stays separate. Windows also supports drag and drop; Waybar uses an interactive configuration TUI.
 - **Apply available resets.** See reset countdowns and Claude/Codex reset credits, with expiry dates, remaining time and time zones when reported. Choose **Apply** in the native panels to confirm within that row, then hold the confirmation button for **3 seconds** to consume one credit. Releasing early resets the progress. Usage refreshes afterward; uncertain results require checking the account before confirming another reset. [Reset eligibility →](packages/lib/PROVIDERS.md#claude)

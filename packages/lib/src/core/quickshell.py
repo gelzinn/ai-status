@@ -181,10 +181,12 @@ def select_metric(selection):
     if (not isinstance(provider, str) or type(idx) is not int or idx < 0
             or not isinstance(key, str) or not key):
         raise ValueError("Invalid metric selection")
+    selected = state.load_selected() or {}
     for entry in state.load_cache():
         if render.connection_key(entry) == provider and entry.get("_idx", 0) == idx and provider in config.enabled_connection_order():
             if key in [render.metric_key(metric) for metric in usable_metrics(entry)]:
-                selected = state.load_selected() or {}
+                if not state.can_select_metric(selected):
+                    return
                 state.select_primary(selected, {"provider": provider, "idx": idx, "metric": key},
                                      provider_order=config.enabled_connection_order())
                 state.save_selected(selected)
