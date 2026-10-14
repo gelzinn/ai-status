@@ -1783,6 +1783,15 @@ struct UsagePage: View {
                      "No usage available. Connect a provider and refresh.")
                 HoverButton(action: model.showSettings) { Text("Settings") }
             }
+            if model.snapshot?.allowsQuickSelection == false {
+                HoverButton(padding: 4, action: model.showBarSettings) {
+                    HStack {
+                        Text("Bar items: Settings → Providers")
+                        Spacer(minLength: 0)
+                        PanelIcon(name: "arrow-right")
+                    }.font(.custom("GeistMono-Regular", size: 11)).foregroundColor(Palette.dim)
+                }
+            }
             ForEach(Array((model.snapshot?.providers ?? []).enumerated()), id: \.element.id) { groupIndex, provider in
                 let selected = model.snapshot?.pinnedItems.contains { $0.provider == provider.connectionID && $0.idx == provider.idx } == true
                 VStack(alignment: .leading, spacing: 16) {
@@ -1847,15 +1856,6 @@ struct UsagePage: View {
                             }
                         }.padding(.leading, 18)
                     }
-                }
-            }
-            if model.snapshot?.allowsQuickSelection == false {
-                HoverButton(padding: 4, action: model.showBarSettings) {
-                    HStack {
-                        Text("Bar items: Settings → Providers")
-                        Spacer(minLength: 0)
-                        PanelIcon(name: "arrow-right")
-                    }.font(.custom("GeistMono-Regular", size: 11)).foregroundColor(Palette.dim)
                 }
             }
         }
