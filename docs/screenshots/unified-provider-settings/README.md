@@ -64,3 +64,27 @@ These captures render the production Qt panel offscreen with the Fusion style
 and Windows options enabled. They validate its controls, not the native
 Windows notification area. Windows controls actual tray icon positions and
 visibility even though AI Status saves and processes the selected item order.
+
+## Native macOS
+
+The macOS captures come from CI run
+[38564408858](https://github.com/gelzinn/ai-status/actions/runs/38564408858),
+artifact `macos-panel-preview`, built from commit `9e001c9`. Production builds,
+native menu checks, provider-row layout probes and the full developer smoke
+passed on macOS 14. All captured provider rows are 36 px tall and their logos
+are 16 px; the Bar header aligns with the visibility checkbox. The version
+label is sample fixture data.
+
+`macos-providers.png` shows the single provider list in its saved order;
+`macos-providers-reordered.png` moves Claude before Codex in both Usage and the
+bar. Multiple selected limits stay grouped under their provider and retain
+their identities. `macos-providers-active-hidden.png` shows an active provider
+with Bar unchecked; `macos-providers-unavailable.png` retains an unavailable
+saved connection once in the same list so it can be hidden. `macos-general.png`
+contains refresh and appearance.
+
+To reproduce on macOS, build the separate developer smoke app with
+`AI_STATUS_SMOKE` and run its executable with
+`--smoke --preview-directory /tmp/ai-status-providers-preview`, following
+`.github/workflows/ci.yml` under `macos-native`. CI also verifies that production
+artifacts omit developer fixtures.
