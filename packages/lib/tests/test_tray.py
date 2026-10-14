@@ -76,6 +76,18 @@ class DesktopTests(IsolatedState):
         self.app.processEvents()
         self.assertIsNone(state.load_selected())
 
+    def test_fixture_cleanup_destroys_dashboard_and_global_reset_event_filter(self):
+        fixture = DesktopTests("test_builtin_provider_labels_and_icons_need_no_connection_discovery")
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        dashboard = fixture.dashboard
+        hold_button = dashboard.credits_view.confirm_button
+        destroyed = []
+        dashboard.destroyed.connect(lambda: destroyed.append("dashboard"))
+        hold_button.destroyed.connect(lambda: destroyed.append("hold button"))
+        fixture.doCleanups()
+        self.assertCountEqual(destroyed, ["dashboard", "hold button"])
+
     @staticmethod
     def check_bar_items(settings, identities):
         wanted = [list(value) for value in identities]
@@ -3273,6 +3285,28 @@ class DesktopTests(IsolatedState):
         with patch.object(paths, "IS_WINDOWS", False):
             settings.save()
         self.assertEqual(config.enabled_order(), ["claude", "zai", "commandcode"])
+
+    def test_builtin_provider_labels_and_icons_need_no_connection_discovery(self):
+        with patch.object(config, "connection_info", side_effect=AssertionError("Unexpected connection discovery")):
+            for name, info in tray.PROVIDERS.items():
+                self.assertEqual(tray.provider_name(name), info["name"])
+                self.assertTrue(tray.icon_has_pixels(tray.provider_icon(name)), name)
+            self.assertEqual(tray.provider_name("unknown-provider"), "unknown-provider")
+            self.assertEqual(tray.provider_icon("unknown-provider").cacheKey(), tray.status_icon().cacheKey())
+
+    def test_saved_account_labels_and_icons_follow_current_configuration(self):
+        from core import accounts
+        record = {"id": "work", "provider": "codex", "label": "Work"}
+        accounts.save_document({"accounts": [record]}, config.accounts_file())
+        self.assertEqual(tray.provider_name("account:work"), "Codex · Work")
+        self.assertEqual(tray.provider_icon("account:work").cacheKey(), tray.provider_icon("codex").cacheKey())
+        record.update(provider="copilot", label="Renamed")
+        accounts.save_document({"accounts": [record]}, config.accounts_file())
+        self.assertEqual(tray.provider_name("account:work"), "Copilot · Renamed")
+        self.assertEqual(tray.provider_icon("account:work").cacheKey(), tray.provider_icon("copilot").cacheKey())
+        accounts.save_document({"accounts": []}, config.accounts_file())
+        self.assertEqual(tray.provider_name("account:work"), "account:work · account:work")
+        self.assertEqual(tray.provider_icon("account:work").cacheKey(), tray.status_icon().cacheKey())
 
     def test_clicking_provider_and_cycling_metrics_updates_tray_logo(self):
         self.dashboard.on_result("codex", [{"provider": "Codex (Pro)", "_idx": 0,
