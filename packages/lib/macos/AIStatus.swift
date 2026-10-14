@@ -3033,7 +3033,7 @@ struct GuidePage: View {
         Row(feature: "Open Usage", action: "Click the menu bar icon."),
         Row(feature: "Settings", action: "Gear icon or C on Usage; or right-click the menu bar icon → Settings."),
         Row(feature: "Refresh", action: "Refresh icon or R on Usage."),
-        Row(feature: "Choose a limit", action: "Click a limit on Usage."),
+        Row(feature: "Choose a limit", action: "With one bar item configured, click a limit on Usage. With several, use Providers."),
         Row(feature: "Scroll content", action: "Trackpad or mouse wheel."),
         Row(feature: "Switch tabs", action: "Click a Settings tab. Scroll the strip to reveal more."),
         Row(feature: "Move focus", action: "Tab / Shift+Tab."),
