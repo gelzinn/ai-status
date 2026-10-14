@@ -29,6 +29,31 @@ Item {
             return JSON.stringify({schemaVersion: 1, text: "Claude 95%", providers: [],
                 notificationActivation: identity ? {id: identity, provider: "claude", idx: 0, metric: "weekly"} : null})
         }
+        function test_multiple_configured_items_do_not_enqueue_selection_actions() {
+            Backend.Model.consumers = 0
+            Backend.Model.actions = []
+            const first = {provider: "claude", idx: 0, metric: "rolling"}
+            const second = {provider: "unavailable", idx: 2, metric: "weekly"}
+            Backend.Model.snapshot = {providers: [], barItems: [first], settings: {items: [first, second]}}
+            verify(!Backend.Model.canSelectMetric)
+            Backend.Model.selectMetric("codex", 0, "weekly")
+            Backend.Model.action("scroll-up")
+            Backend.Model.action("scroll-down")
+            Backend.Model.action("cycle-metric")
+            compare(Backend.Model.actions.length, 0)
+            Backend.Model.action("refresh")
+            compare(Backend.Model.actions.length, 1)
+            compare(Backend.Model.actions[0][0], "refresh")
+            Backend.Model.actions = []
+            Backend.Model.snapshot = {settings: {items: [first]}}
+            verify(Backend.Model.canSelectMetric)
+            Backend.Model.selectMetric("codex", 0, "weekly")
+            Backend.Model.action("scroll-down")
+            Backend.Model.action("cycle-metric")
+            compare(Backend.Model.actions.length, 3)
+            compare(Backend.Model.actions[0][0], "select-metric")
+            Backend.Model.actions = []
+        }
         function test_notification_click_opens_once_and_restart_does_not_replay() {
             Backend.Model.accept(snapshot("old"))
             compare(activation.count, 0)

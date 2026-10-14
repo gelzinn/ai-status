@@ -36,6 +36,9 @@ def _first_metric_for(cache, dir_name, idx):
     return keys[0] if keys else "rolling"
 
 def _scroll(direction, frontend="waybar"):
+    selected = state.load_selected() or {}
+    if not state.can_select_metric(selected):
+        return
     providers = cfgmod.enabled_connection_order()
     if not providers:
         return
@@ -58,7 +61,6 @@ def _scroll(direction, frontend="waybar"):
             return
         items = [(p, 0) for p in providers]
 
-    selected = state.load_selected() or {}
     current_dir = selected.get("provider")
     current_idx = selected.get("idx", 0)
 
@@ -85,6 +87,8 @@ def scroll_down(frontend="waybar"):
 
 def cycle_metric(frontend="waybar"):
     selected = state.load_selected() or {}
+    if not state.can_select_metric(selected):
+        return
     provider = selected.get("provider")
     idx = selected.get("idx", 0)
     current = selected.get("metric", "rolling")

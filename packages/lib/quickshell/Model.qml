@@ -10,6 +10,7 @@ Item {
     property int retryDelay: 1000
     property string errorMessage: ""
     property var snapshot: ({text: "AI Status …", providers: [], selected: {}, loading: true})
+    readonly property bool canSelectMetric: !snapshot.settings || !snapshot.settings.items || snapshot.settings.items.length <= 1
     property var actions: []
     property bool settingsSaving: false
     property string settingsError: ""
@@ -72,6 +73,7 @@ Item {
 
     function action(command) {
         if (["refresh", "scroll-up", "scroll-down", "cycle-metric"].indexOf(command) !== -1) {
+            if (command !== "refresh" && !canSelectMetric) return
             if (command === "refresh" && snapshot.loading) return
             actions = actions.concat([[command, "--frontend", "quickshell"]])
             drain()
@@ -79,6 +81,7 @@ Item {
     }
 
     function selectMetric(provider, idx, metric) {
+        if (!canSelectMetric) return
         actions = actions.concat([["select-metric", "--frontend", "quickshell", "--selection-json",
                                   JSON.stringify({provider: provider, idx: idx, metric: metric})]])
         drain()

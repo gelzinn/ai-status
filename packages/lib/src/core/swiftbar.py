@@ -74,6 +74,7 @@ def title_text(cache, selected, spinner=None):
 
 def render_menu(cache, selected, spinner=None, title_image=None):
     snapshot = _snapshot(cache, selected, spinner)
+    can_select = state.can_select_metric(selected)
     bar_items = snapshot.get("barItems", [])
     title = snapshot["text"].replace("\U000f06a9", "").strip().replace("…", spinner or "…")
     title_params = []
@@ -103,7 +104,9 @@ def render_menu(cache, selected, spinner=None, title_image=None):
         active = any(item["provider"] == provider["id"] and item["idx"] == provider["idx"] for item in bar_items)
         select = (provider["id"], str(provider["idx"]))
         first = provider["metrics"][0]["key"]
-        params = ["size=14", *_action("swiftbar-select", *select, first)]
+        params = ["size=14"]
+        if can_select:
+            params.extend(_action("swiftbar-select", *select, first))
         if provider["logoPath"]:
             params.append(f"image={_image(provider['logoPath'])}")
         if not active:
@@ -115,7 +118,9 @@ def render_menu(cache, selected, spinner=None, title_image=None):
             out.append(_line(provider["error"], "size=11", f"color={FAINT}"))
         for metric in provider["metrics"]:
             checked = any(item["provider"] == provider["id"] and item["idx"] == provider["idx"] and item["metric"] == metric["key"] for item in bar_items)
-            params = [f"font={BAR_FONT}", "size=13", *_action("swiftbar-select", *select, metric["key"])]
+            params = [f"font={BAR_FONT}", "size=13"]
+            if can_select:
+                params.extend(_action("swiftbar-select", *select, metric["key"]))
             params.append("checked=true" if checked else f"color={DIM}")
             value = metric["value"]
             bar = f"{_bar(metric['percentage'])}  " if metric["hasPercentage"] else ""
@@ -130,9 +135,10 @@ def render_menu(cache, selected, spinner=None, title_image=None):
                 out.append("--" + _line(detail, "size=11"))
                 if row["remaining"]:
                     out.append("--" + _line(row["remaining"], "size=11", f"color={FAINT}"))
-    out.extend(["---", _line("Refresh", *_action("swiftbar-refresh")),
-                _line("Cycle metric", *_action("cycle-metric", "--frontend", "swiftbar")),
-                _line("Settings", *_action("config", "--frontend", "swiftbar", terminal=True)),
+    out.extend(["---", _line("Refresh", *_action("swiftbar-refresh"))])
+    if can_select:
+        out.append(_line("Cycle metric", *_action("cycle-metric", "--frontend", "swiftbar")))
+    out.extend([_line("Settings", *_action("config", "--frontend", "swiftbar", terminal=True)),
                 _line("About AI Status", f"href={snapshot['about']['github']}", "size=11", f"color={DIM}")])
     return "\n".join(out)
 

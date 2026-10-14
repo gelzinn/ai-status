@@ -455,6 +455,11 @@ Ui.Panel {
                         onResetRequested: (provider, idx) => root.showResetCredits(provider, idx)
                         onCreditRequested: (provider, idx, creditId) => root.showUsageCredits(provider, idx, creditId)
                         onSettingsRequested: root.configure()
+                        onProvidersRequested: {
+                            root.configure()
+                            settings.selectSection("providers")
+                            Qt.callLater(() => settingsNavigation.focusCurrentControl())
+                        }
                     }
                     Plugin.UpdatePage {
                         id: updates

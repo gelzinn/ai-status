@@ -98,6 +98,20 @@ class LinuxNotificationActionTests(IsolatedState):
         self.assertEqual(popen.call_args.args[0][-3:], ["--", event["title"], event["body"]])
         self.assertNotIn("shell", popen.call_args.kwargs)
 
+    def test_notification_opens_usage_without_changing_multiple_configured_pins(self):
+        selected = state.set_selected_items({"usage_display": "remaining"}, [
+            {"provider": "codex", "idx": 0, "metric": "rolling"},
+            {"provider": "unavailable", "idx": 2, "metric": "weekly"},
+        ])
+        state.save_selected(selected)
+        with patch.object(state, "save_selected") as save:
+            desktop_notifications._activate_linux(EVENT)
+        self.assertEqual(state.load_selected(), selected)
+        save.assert_not_called()
+        activation = paths.read_json(paths.RUNTIME_DIR / "notification-activation.json")
+        for key in ("id", "provider", "idx", "metric"):
+            self.assertEqual(activation[key], EVENT[key])
+
     def test_rejected_action_options_retry_plain_delivery_only_before_acceptance(self):
         notifier = FakeNotifier(identity=b"", returncode=1)
         with patch.object(sys, "platform", "linux"), \
@@ -135,13 +149,19 @@ class LinuxNotificationActionTests(IsolatedState):
         self.assertFalse((paths.RUNTIME_DIR / "notification-activation.json").exists())
 
     def test_notification_click_rejects_disabled_or_missing_metric(self):
-        for event, order in ((EVENT, []), (dict(EVENT, metric="monthly"), ["codex"]),
-                             (dict(EVENT, idx=-1), ["codex"])):
-            with self.subTest(event=event, order=order):
-                config.save_config(order)
-                desktop_notifications._activate_linux(event)
-                self.assertEqual(state.load_selected()["metric"], "rolling")
-                self.assertFalse((paths.RUNTIME_DIR / "notification-activation.json").exists())
+        for multiple in (False, True):
+            selected = {"provider": "codex", "idx": 0, "metric": "rolling"}
+            if multiple:
+                state.set_selected_items(selected, [selected.copy(),
+                    {"provider": "unavailable", "idx": 2, "metric": "weekly"}])
+            state.save_selected(selected)
+            for event, order in ((EVENT, []), (dict(EVENT, metric="monthly"), ["codex"]),
+                                 (dict(EVENT, idx=-1), ["codex"])):
+                with self.subTest(multiple=multiple, event=event, order=order):
+                    config.save_config(order)
+                    desktop_notifications._activate_linux(event)
+                    self.assertEqual(state.load_selected(), selected)
+                    self.assertFalse((paths.RUNTIME_DIR / "notification-activation.json").exists())
 
     def test_timeout_waiting_for_click_reaps_listener(self):
         notifier = FakeNotifier(wait_for_action=True)
