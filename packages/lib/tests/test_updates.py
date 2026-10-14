@@ -11,7 +11,6 @@ import plistlib
 import shlex
 import shutil
 import signal
-import ssl
 import subprocess
 import sys
 import tempfile
@@ -22,6 +21,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from core import cli, fetch, paths, updates
+from tls_fixture import localhost_tls_context, localhost_tls_fingerprint
 
 
 class VersionDetectionTests(unittest.TestCase):
@@ -602,11 +602,6 @@ with patch.object(updates, 'run_update', side_effect=run):
 class NativeWindowsDownloadTests(unittest.TestCase):
     def test_native_powershell_tls_streaming_and_failure_paths(self):
         self.assertTrue(shutil.which("powershell.exe"), "Windows PowerShell is required for installer downloads")
-        openssl = shutil.which("openssl")
-        if not openssl:
-            candidate = Path("C:/Program Files/Git/usr/bin/openssl.exe")
-            openssl = str(candidate) if candidate.is_file() else None
-        self.assertTrue(openssl, "OpenSSL build tool is required for the temporary TLS fixture")
         payload = b"installer-fixture" * 16384
 
         class Handler(BaseHTTPRequestHandler):
@@ -632,14 +627,9 @@ class NativeWindowsDownloadTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory(prefix="ai-status-windows-download-") as temporary:
             folder = Path(temporary)
-            key, certificate = folder / "key.pem", folder / "cert.pem"
-            subprocess.run([openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
-                            "-subj", "/CN=localhost", "-keyout", str(key), "-out", str(certificate)],
-                           capture_output=True, check=True, timeout=15)
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.load_cert_chain(certificate, key)
-            fingerprint = hashlib.sha1(ssl.PEM_cert_to_DER_cert(certificate.read_text())).hexdigest().upper()
-            # Trust only this ephemeral certificate in this test's subprocess.
+            context = localhost_tls_context()
+            fingerprint = localhost_tls_fingerprint()
+            # Trust only this test certificate in this test's subprocess.
             # A compiled callback avoids PowerShell's missing-runspace error on
             # the .NET TLS worker thread. Production certificate checks remain on.
             callback = """
