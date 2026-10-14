@@ -28,9 +28,10 @@ PROVIDERS = paths.read_json(ASSETS / "providers.json") or paths.read_json(
 
 
 def provider_name(key):
-    info = config.connection_info(key) or {"provider": key, "label": key}
-    name = PROVIDERS.get(info["provider"], {}).get("name", key)
-    return name + (" · " + info["label"] if key.startswith("account:") else "")
+    if key.startswith("account:"):
+        info = config.connection_info(key) or {"provider": key, "label": key}
+        return PROVIDERS.get(info["provider"], {}).get("name", key) + " · " + info["label"]
+    return PROVIDERS.get(key, {}).get("name", key)
 
 # Colors, spacing and typography match the landing page's WaybarReplica.
 PANEL_BORDER_COLOR = "#262626"
@@ -102,7 +103,8 @@ def asset_icon(filename):
 
 
 def provider_icon(name):
-    name = (config.connection_info(name) or {}).get("provider", name)
+    if name.startswith("account:"):
+        name = (config.connection_info(name) or {}).get("provider", name)
     filename = f"providers/{name}.png"
     if (ASSETS / filename).is_file():
         return asset_icon(filename)

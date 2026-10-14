@@ -14,12 +14,13 @@ def providers_dir():
 
 def available_providers():
     d = providers_dir()
-    if not os.path.isdir(d):
+    try:
+        # DirEntry reuses directory metadata on Windows instead of issuing a
+        # separate stat call for every provider on every settings update.
+        with os.scandir(d) as entries:
+            return sorted(p.name for p in entries if not p.name.startswith("__") and p.is_dir())
+    except (FileNotFoundError, NotADirectoryError):
         return []
-    return sorted(
-        p for p in os.listdir(d)
-        if os.path.isdir(os.path.join(d, p)) and not p.startswith("__")
-    )
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -70,7 +71,9 @@ def connection_info(identity):
 
 def enabled_connection_order():
     document = accounts.load_document(accounts_file())
-    enabled = list(dict.fromkeys(name for name in enabled_order() if name in available_providers()))
+    available = set(available_providers())
+    enabled = list(dict.fromkeys(name for name in enabled_order()
+                                if isinstance(name, str) and name in available))
     enabled += ["account:" + record["id"] for record in document["accounts"] if record["enabled"]]
     order = document.get("order", [])
     return [identity for identity in order if identity in enabled] + [identity for identity in enabled if identity not in order]
@@ -89,7 +92,8 @@ def save_connection_order(identities):
     """Persist settings without deleting disabled accounts or credential refs."""
     if not isinstance(identities, list) or any(not isinstance(identity, str) for identity in identities):
         raise ValueError("Connection order must be a list of connection IDs.")
-    if len(set(identities)) != len(identities) or any(identity not in available_connections() for identity in identities):
+    available = set(available_connections())
+    if len(set(identities)) != len(identities) or any(identity not in available for identity in identities):
         raise ValueError("Connection order contains an unknown or duplicate connection.")
     document = accounts.load_document(accounts_file())
     selected = set(identities)

@@ -88,6 +88,23 @@ class AccountTests(unittest.TestCase):
         config.save_config([])
         self.assertEqual(fetch.fetch_all_data(), [])
 
+    def test_provider_discovery_tracks_directory_changes_without_a_stale_cache(self):
+        (self.providers / "__pycache__").mkdir()
+        (self.providers / "notes.txt").write_text("not a provider", encoding="utf-8")
+        self.assertEqual(config.available_providers(), ["codex"])
+        added = self.providers / "new-provider"
+        added.mkdir()
+        config.save_config(["new-provider", "codex", "new-provider", "missing"])
+        self.assertEqual(config.available_providers(), ["codex", "new-provider"])
+        self.assertEqual(config.enabled_connection_order(), ["new-provider", "codex"])
+        added.rmdir()
+        self.assertEqual(config.available_providers(), ["codex"])
+        self.assertEqual(config.enabled_connection_order(), ["codex"])
+
+    def test_saved_provider_order_ignores_unknown_and_malformed_entries(self):
+        config.save_config(["codex", {}, [], None, "missing", "codex"])
+        self.assertEqual(config.enabled_connection_order(), ["codex"])
+
     def test_explicit_accounts_run_with_disabled_default_and_keep_identity(self):
         config.save_config([])
         self.save([self.record("personal", 11, env={"TEST_TOKEN": "PERSONAL_TOKEN"}),

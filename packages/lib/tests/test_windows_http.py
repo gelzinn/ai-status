@@ -4,17 +4,13 @@ import ctypes as C
 import gzip
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-from pathlib import Path
-import shutil
-import ssl
-import subprocess
 import sys
-import tempfile
 import threading
 import unittest
 from unittest.mock import Mock, patch
 
 from core import provider_http, windows_http as http
+from tls_fixture import localhost_tls_context
 
 
 class HTTPPolicyTests(unittest.TestCase):
@@ -156,21 +152,8 @@ class NativeHTTPTests(unittest.TestCase):
             http.request(url + "/slow", timeout=0.1)
 
     def test_native_tls_rejects_untrusted_certificate(self):
-        openssl = shutil.which("openssl")
-        if not openssl:
-            candidate = Path("C:/Program Files/Git/usr/bin/openssl.exe")
-            openssl = str(candidate) if candidate.is_file() else None
-        if not openssl:
-            self.fail("OpenSSL build tool is required to create the temporary TLS test certificate")
-        with tempfile.TemporaryDirectory() as folder:
-            key, cert = str(Path(folder) / "key.pem"), str(Path(folder) / "cert.pem")
-            subprocess.run([openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
-                            "-subj", "/CN=localhost", "-keyout", key, "-out", cert],
-                           capture_output=True, check=True, timeout=15)
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-            context.load_cert_chain(cert, key)
-            with server(context) as (_, url), self.assertRaises(OSError):
-                http.request(url, timeout=2)
+        with server(localhost_tls_context()) as (_, url), self.assertRaises(OSError):
+            http.request(url, timeout=2)
 
 
 if __name__ == "__main__":

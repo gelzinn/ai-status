@@ -2,8 +2,13 @@
 
 Use x64 Python 3.12, Inno Setup 6, and Visual Studio Build Tools with the x64
 C++ compiler and Windows SDK on a Windows build machine. Git for Windows
-supplies the OpenSSL **test tool** used to generate an untrusted localhost
-certificate; OpenSSL is not shipped with the app. From the repo:
+supplies the OpenSSL test tool used to generate a temporary, self-signed localhost
+certificate. Tests prefer that bundled tool over other PATH installations and
+use EC P-256 with an isolated configuration to avoid slow RSA key generation.
+The certificate and key are generated once per test process, loaded into memory,
+and immediately deleted. Tests never change the OS certificate store; the
+download test pins its certificate only inside its own PowerShell subprocess.
+OpenSSL is not shipped with the app. From the repo:
 
 ```powershell
 python -m venv .venv
