@@ -442,9 +442,9 @@ enum SettingsSection: String, CaseIterable, Identifiable {
     }
     var detail: String {
         switch self {
-        case .general: return "Choose your menu bar items, refresh interval and appearance."
+        case .general: return "Choose your refresh interval and appearance."
         case .alerts: return "Set quota notifications and account-specific rules."
-        case .providers: return "Enable providers and arrange their order in Usage."
+        case .providers: return "One order for Usage and the bar. Click a provider name to choose limits."
         case .guide: return "macOS actions and keyboard shortcuts."
         case .about: return "Version and project links."
         }
@@ -491,6 +491,7 @@ struct SettingsDraft {
     var usageDisplay = "used"
     var refreshIntervalMinutes = RefreshInterval.defaultMinutes
     var items: [Selection] = []
+    var hiddenItems: [String: [Selection]] = [:]
     var selected: Selection {
         get { items.first ?? Selection() }
         set {
@@ -631,6 +632,9 @@ final class Model: ObservableObject {
     }
     @Published var draft = SettingsDraft()
     @Published var settingsSection: SettingsSection = .general
+    #if AI_STATUS_SMOKE
+    var smokeProviderRowFrames: [String: CGRect] = [:]
+    #endif
     @Published var notificationAdvancedExpanded = false
     @Published var notificationEditingSelection: Selection?
     @Published var notificationRuleFocusRequest = 0
@@ -713,12 +717,15 @@ final class Model: ObservableObject {
     }
     var settingsValidation: (section: SettingsSection, message: String)? {
         if draft.enabled.isEmpty { return (.providers, "Enable at least one provider.") }
+        if !draft.enabled.allSatisfy({ snapshot?.settings.available.contains($0) == true }) {
+            return (.providers, "Disable unavailable providers before saving.")
+        }
         if draft.items.isEmpty || Set(draft.items).count != draft.items.count ||
             !draft.items.allSatisfy({ selection in
                 !selection.provider.isEmpty && selection.idx >= 0 && !selection.metric.isEmpty &&
-                    draft.enabled.contains(selection.provider)
+                    draft.enabled.contains(selection.provider) && snapshot?.settings.available.contains(selection.provider) == true
             }) {
-            return (.general, "Choose at least one enabled provider and limit, without duplicates.")
+            return (.providers, "Choose at least one enabled provider and limit, without duplicates.")
         }
         if !RefreshInterval.valid(draft.refreshIntervalMinutes) {
             return (.general, "Choose a refresh interval from 5 to 60 minutes in 5-minute steps.")
@@ -732,7 +739,7 @@ final class Model: ObservableObject {
         return nil
     }
     var settingsSelectionLabel: String {
-        let first = settingsChoices.first { $0.selection == draft.selected }?.label ?? "Choose a provider and limit in General."
+        let first = settingsChoices.first { $0.selection == draft.selected }?.label ?? "Choose a provider and limit in Providers."
         return draft.items.count > 1 ? "\(draft.items.count) menu bar items · " + first : first
     }
     var invalidAdvancedNotifications: Bool {
@@ -1001,6 +1008,10 @@ final class Model: ObservableObject {
                               usageDisplay: snapshot.settings.usageDisplay == "remaining" ? "remaining" : "used",
                               refreshIntervalMinutes: snapshot.settings.refreshIntervalMinutes ?? RefreshInterval.defaultMinutes,
                               items: snapshot.pinnedItems)
+        for provider in snapshot.settings.enabled + snapshot.pinnedItems.map(\.provider) where !draft.order.contains(provider) {
+            draft.order.append(provider)
+        }
+        orderBarItems()
         draft.notifications = snapshot.settings.notifications ?? NotificationPreferences()
         draft.notificationThresholds = draft.notifications.thresholds.map(String.init).joined(separator: ", ")
         draft.notificationRuleThresholds = Dictionary(uniqueKeysWithValues: draft.notifications.rules.map {
@@ -1021,23 +1032,76 @@ final class Model: ObservableObject {
         changed?()
     }
     func toggleProvider(_ provider: String) {
-        if draft.enabled.contains(provider) { draft.enabled.remove(provider) } else { draft.enabled.insert(provider) }
-        draft.items.removeAll { !draft.enabled.contains($0.provider) }
-        if draft.items.isEmpty, let first = choices.first { draft.items = [first.selection] }
+        guard !settingsSaving else { return }
+        if draft.enabled.contains(provider) {
+            let shown = draft.items.filter { $0.provider == provider }
+            if !shown.isEmpty { draft.hiddenItems[provider] = shown }
+            draft.enabled.remove(provider)
+            draft.items.removeAll { $0.provider == provider }
+        } else {
+            guard snapshot?.settings.available.contains(provider) == true else { return }
+            draft.enabled.insert(provider)
+        }
         draft.saved = false
+    }
+    func providerShown(_ provider: String) -> Bool { draft.items.contains { $0.provider == provider } }
+    func providerBarChoices(_ provider: String) -> [Choice] {
+        let available = settingsChoices.filter { $0.selection.provider == provider }
+        let known = Set(available.map(\.selection))
+        let remembered = (draft.hiddenItems[provider] ?? []).filter { !known.contains($0) }.map { selection in
+            Choice(selection: selection, label: providerName(provider) + " · " + selection.metric + " (unavailable)",
+                   provider: logoProviderID(provider), logoPath: "")
+        }
+        return available + remembered
+    }
+    func providerLimitChecked(_ selection: Selection) -> Bool {
+        draft.items.contains(selection)
+    }
+    func setProviderShown(_ provider: String, enabled: Bool) {
+        guard !settingsSaving else { return }
+        if enabled {
+            guard draft.enabled.contains(provider), snapshot?.settings.available.contains(provider) == true else { return }
+            var remembered = draft.hiddenItems[provider] ?? []
+            if remembered.isEmpty, let first = choices.first(where: { $0.selection.provider == provider }) {
+                remembered = [first.selection]
+            }
+            for selection in remembered where !draft.items.contains(selection) { draft.items.append(selection) }
+            orderBarItems()
+        } else {
+            let shown = draft.items.filter { $0.provider == provider }
+            if !shown.isEmpty { draft.hiddenItems[provider] = shown }
+            draft.items.removeAll { $0.provider == provider }
+        }
+        draft.saved = false
+    }
+    func setProviderLimit(_ selection: Selection, enabled: Bool) {
+        guard !settingsSaving, draft.enabled.contains(selection.provider) else { return }
+        setBarItem(selection, enabled: enabled)
+        draft.hiddenItems[selection.provider] = draft.items.filter { $0.provider == selection.provider }
+    }
+    private func orderBarItems() {
+        draft.items = draft.items.enumerated().sorted { left, right in
+            let leftOrder = draft.order.firstIndex(of: left.element.provider) ?? draft.order.count
+            let rightOrder = draft.order.firstIndex(of: right.element.provider) ?? draft.order.count
+            return leftOrder == rightOrder ? left.offset < right.offset : leftOrder < rightOrder
+        }.map(\.element)
     }
     func setBarItem(_ selection: Selection, enabled: Bool) {
         guard !settingsSaving else { return }
         if enabled {
+            guard draft.enabled.contains(selection.provider) else { return }
             if !draft.items.contains(selection) { draft.items.append(selection) }
-        } else if draft.items.count > 1 {
+        } else {
             draft.items.removeAll { $0 == selection }
         }
+        orderBarItems()
         draft.saved = false
     }
     func moveProvider(_ provider: String, _ direction: Int) {
-        guard let index = draft.order.firstIndex(of: provider), draft.order.indices.contains(index + direction) else { return }
+        guard !settingsSaving, [-1, 1].contains(direction),
+              let index = draft.order.firstIndex(of: provider), draft.order.indices.contains(index + direction) else { return }
         draft.order.swapAt(index, index + direction)
+        orderBarItems()
         draft.saved = false
     }
     func settingsPayload() -> [String: Any]? {
@@ -1402,6 +1466,44 @@ final class PanelSelectMenuPresenter: ObservableObject {
             menu.addItem(item)
         }
         return (menu, target)
+    }
+
+    static func makeChecklist<Value: Hashable>(title: String, options: [PanelSelectOption<Value>],
+                                               checked: Set<Value>, toggle: @escaping (Value, Bool) -> Void) -> (NSMenu, PanelSelectMenuActions) {
+        let menu = NSMenu(title: title)
+        menu.autoenablesItems = false
+        menu.font = NSFont(name: "GeistMono-Regular", size: 13) ?? .monospacedSystemFont(ofSize: 13, weight: .regular)
+        let target = PanelSelectMenuActions(actions: options.map { option in
+            { toggle(option.value, !checked.contains(option.value)) }
+        })
+        for (index, option) in options.enumerated() {
+            let item = NSMenuItem(title: option.title, action: #selector(PanelSelectMenuActions.select(_:)), keyEquivalent: "")
+            item.tag = index
+            item.target = target
+            item.state = checked.contains(option.value) ? .on : .off
+            if let provider = option.provider, let image = Assets.image(provider: provider, path: option.logoPath)?.copy() as? NSImage {
+                image.size = NSSize(width: 16, height: 16)
+                image.isTemplate = false
+                item.image = image
+            }
+            menu.addItem(item)
+        }
+        if options.isEmpty {
+            let item = NSMenuItem(title: "No limits available", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+        return (menu, target)
+    }
+
+    func presentChecklist<Value: Hashable>(title: String, options: [PanelSelectOption<Value>],
+                                           checked: Set<Value>, toggle: @escaping (Value, Bool) -> Void) {
+        guard let anchor = anchor, anchor.window != nil else { return }
+        let (menu, target) = Self.makeChecklist(title: title, options: options, checked: checked, toggle: toggle)
+        menu.minimumWidth = anchor.bounds.width
+        withExtendedLifetime(target) {
+            _ = menu.popUp(positioning: nil, at: NSPoint(x: anchor.bounds.minX, y: anchor.bounds.maxY + 4), in: anchor)
+        }
     }
 
     func present<Value: Hashable>(title: String, options: [PanelSelectOption<Value>],
@@ -1811,6 +1913,49 @@ struct SettingsHeading: View {
     }
 }
 
+struct ProviderLimitsButton: View {
+    @ObservedObject var model: Model
+    let provider: String
+    @StateObject private var presenter = PanelSelectMenuPresenter()
+    private var available: Bool { model.snapshot?.settings.available.contains(provider) == true }
+    private func openMenu() {
+        let options = model.providerBarChoices(provider).map {
+            PanelSelectOption(value: $0.selection, title: $0.label, provider: $0.provider, logoPath: $0.logoPath)
+        }
+        presenter.presentChecklist(title: "Limits for " + model.providerName(provider), options: options,
+                                   checked: Set(model.draft.items)) { selection, enabled in
+            model.setProviderLimit(selection, enabled: enabled)
+        }
+    }
+    var body: some View {
+        HoverButton(padding: 0, action: openMenu) {
+            HStack(spacing: 6) {
+                ProviderLogo(provider: model.logoProviderID(provider))
+                Text(available ? model.providerName(provider) : "Unavailable · " + model.providerName(provider))
+                    .lineLimit(1).truncationMode(.tail)
+            }.font(Assets.font).frame(height: 24)
+        }.background(PanelSelectMenuAnchor(presenter: presenter).allowsHitTesting(false))
+            .help(available ? "Choose limits for \(model.providerName(provider))" : "\(model.providerName(provider)) (unavailable)")
+            .accessibilityLabel("\(model.providerName(provider)), choose limits")
+    }
+}
+
+struct ProviderRowLayoutProbe: ViewModifier {
+    let model: Model
+    let provider: String
+    func body(content: Content) -> some View {
+        #if AI_STATUS_SMOKE
+        content.background(GeometryReader { geometry in
+            let frame = geometry.frame(in: .global)
+            Color.clear.onAppear { model.smokeProviderRowFrames[provider] = frame }
+                .onChange(of: frame) { model.smokeProviderRowFrames[provider] = $0 }
+        })
+        #else
+        content
+        #endif
+    }
+}
+
 struct SettingsPage: View {
     @ObservedObject var model: Model
     private let fields = [("show_provider", "Provider name"), ("show_model", "Model / plan"),
@@ -1837,24 +1982,6 @@ struct SettingsPage: View {
 
     private var general: some View {
         VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                SettingsHeading(title: "Menu bar items", detail: "Choose as many accounts and limits as you want in your menu bar.")
-                Text("Select at least one. Items appear in the order you add them.")
-                    .font(.custom("GeistMono-Regular", size: 11)).fixedSize(horizontal: false, vertical: true)
-                ForEach(model.settingsChoices) { choice in
-                    let checked = model.draft.items.contains(choice.selection)
-                    Toggle(isOn: Binding(get: { model.draft.items.contains(choice.selection) }, set: {
-                        model.setBarItem(choice.selection, enabled: $0)
-                    })) {
-                        HStack(alignment: .top, spacing: 8) {
-                            ProviderLogo(provider: choice.provider, path: choice.logoPath)
-                            Text(choice.label).fixedSize(horizontal: false, vertical: true)
-                        }
-                    }.toggleStyle(.checkbox).modifier(PanelFocusTarget())
-                        .disabled(checked && model.draft.items.count == 1)
-                        .accessibilityLabel(choice.label)
-                }
-            }
             VStack(alignment: .leading, spacing: 8) {
                 SettingsHeading(title: "Automatic refresh", detail: "Provider cooldowns may delay a refresh when requests are limited.")
                 HStack(spacing: 8) {
@@ -1908,20 +2035,30 @@ struct SettingsPage: View {
 
     private var providers: some View {
         VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text("On").frame(width: 28)
+                Text("Provider / limits").frame(maxWidth: .infinity, alignment: .leading)
+                Text("Bar").frame(width: 28)
+                Spacer().frame(width: Assets.panelIcons.controls.size * 2 + 4)
+            }.font(.custom("GeistMono-Regular", size: 11)).accessibilityHidden(true)
             ForEach(model.draft.order, id: \.self) { provider in
+                let active = model.draft.enabled.contains(provider)
+                let available = model.snapshot?.settings.available.contains(provider) == true
+                let shown = model.providerShown(provider)
                 HStack(spacing: 4) {
-                    Toggle(isOn: Binding(get: { model.draft.enabled.contains(provider) }, set: { _ in model.toggleProvider(provider) })) {
-                        HStack(alignment: .top, spacing: 6) {
-                            ProviderLogo(provider: model.logoProviderID(provider))
-                            Text(model.providerName(provider))
-                        }
-                    }.toggleStyle(.checkbox).modifier(PanelFocusTarget())
-                    Spacer(minLength: 0)
-                    ControlButton(icon: "arrow-up", help: "Move \(model.providerName(provider)) up",
+                    Toggle("Active", isOn: Binding(get: { model.draft.enabled.contains(provider) }, set: { _ in model.toggleProvider(provider) }))
+                        .labelsHidden().toggleStyle(.checkbox).modifier(PanelFocusTarget()).frame(width: 28)
+                        .disabled(!available && !active).accessibilityLabel("Activate \(model.providerName(provider))")
+                    ProviderLimitsButton(model: model, provider: provider).disabled(!available || !active)
+                    Toggle("Show in bar", isOn: Binding(get: { model.providerShown(provider) }, set: {
+                        model.setProviderShown(provider, enabled: $0)
+                    })).labelsHidden().toggleStyle(.checkbox).modifier(PanelFocusTarget()).frame(width: 28)
+                        .disabled(!active && !shown).accessibilityLabel("Show \(model.providerName(provider)) in bar")
+                    ControlButton(icon: "arrow-up", help: "Move \(model.providerName(provider)) up in Usage and the bar",
                                   action: { model.moveProvider(provider, -1) }).disabled(model.draft.order.first == provider)
-                    ControlButton(icon: "arrow-down", help: "Move \(model.providerName(provider)) down",
+                    ControlButton(icon: "arrow-down", help: "Move \(model.providerName(provider)) down in Usage and the bar",
                                   action: { model.moveProvider(provider, 1) }).disabled(model.draft.order.last == provider)
-                }.padding(.vertical, 3)
+                }.padding(.vertical, 4).modifier(ProviderRowLayoutProbe(model: model, provider: provider))
             }
         }
     }
@@ -2869,7 +3006,9 @@ struct GuidePage: View {
         Row(feature: "Move focus", action: "Tab / Shift+Tab."),
         Row(feature: "Activate a button", action: "Space when focused."),
         Row(feature: "Adjust alert levels", action: "Drag a slider in Alerts."),
-        Row(feature: "Reorder providers", action: "Providers → up/down buttons."),
+        Row(feature: "Show a provider in the bar", action: "Providers → Active and Show in bar checkboxes."),
+        Row(feature: "Choose menu bar limits", action: "Providers → click a provider name to choose its limits."),
+        Row(feature: "Reorder providers", action: "Providers → up/down buttons reorder Usage and the bar together."),
         Row(feature: "Save settings", action: "Save applies all tabs and keeps Settings open."),
         Row(feature: "Cancel settings", action: "Cancel, Back or Esc returns to Usage without saving."),
         Row(feature: "Reset credits", action: "Click Reset credits when available."),
@@ -3459,6 +3598,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         try smokeMenuTracking()
         try smokeSettingsSelects(sample: sample)
         try smokeBarItems(sample: sample, directory: previewDirectory)
+        try smokeUnifiedProviders(sample: sample, directory: previewDirectory)
         try smokeBarExample(sample: sample, directory: previewDirectory)
         try smokeRefreshInterval(sample: sample)
         let model = Model()
@@ -3619,7 +3759,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
         model.accept(multiData)
         guard model.draft.items == pending else { throw AppError.message("A refresh replaced pending menu bar items.") }
         model.draft.items = []
-        guard !model.settingsValid, model.settingsPayload() == nil else { throw AppError.message("An empty menu bar selection was accepted.") }
+        guard !model.settingsValid, model.settingsValidation?.section == .providers, model.settingsPayload() == nil else {
+            throw AppError.message("An empty menu bar selection was accepted or routed outside Providers.")
+        }
         model.draft.items = identities + [identities[0]]
         guard !model.settingsValid else { throw AppError.message("Duplicate menu bar selections were accepted.") }
         model.draft.items = identities
@@ -3628,7 +3770,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             throw AppError.message("Disabling one provider removed another provider's menu bar item.")
         }
         model.setBarItem(identities[0], enabled: false)
-        guard model.draft.items == [identities[0]] else { throw AppError.message("The last menu bar checkbox could be deselected.") }
+        guard model.draft.items.isEmpty, !model.settingsValid, model.settingsValidation?.section == .providers else {
+            throw AppError.message("Removing the last menu bar item did not preserve an explicit invalid draft in Providers.")
+        }
         model.showSettings()
         let unavailable = Selection(provider: "claude", metric: "weekly:temporarily-missing")
         model.setBarItem(unavailable, enabled: true)
@@ -3672,7 +3816,156 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
               (model.settingsPayload()?["items"] as? [[String: Any]])?.count == 24 else {
             throw AppError.message("Menu bar selections imposed a fixed item limit.")
         }
+        model.showSettingsSection(.providers)
         try renderSmokePage(model, name: "settings-multiple-items", directory: directory)
+    }
+
+    private static func smokeUnifiedProviders(sample: String, directory: URL?) throws {
+        guard var document = try JSONSerialization.jsonObject(with: Data(sample.utf8)) as? [String: Any],
+              var settings = document["settings"] as? [String: Any] else {
+            throw AppError.message("Unified provider settings fixture failed.")
+        }
+        let unavailable = Selection(provider: "claude", idx: 2, metric: "weekly")
+        let pins = [Selection(provider: "claude", metric: "weekly"),
+                    Selection(provider: "codex", metric: "weekly"),
+                    Selection(provider: "claude", metric: "rolling"), unavailable]
+        let claudePins = [pins[0], pins[2], unavailable]
+        let original = [pins[1]] + claudePins
+        var names = settings["names"] as? [String: String] ?? [:]
+        names["codex"] = "Codex · Personal account"
+        names["claude"] = "Claude · Main work account"
+        settings["names"] = names
+        settings["items"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(pins))
+        document["settings"] = settings
+        document["selected"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(pins[0]))
+        let data = try JSONSerialization.data(withJSONObject: document)
+        let model = Model()
+        model.accept(data)
+        model.showSettings()
+        model.showSettingsSection(.providers)
+        guard model.draft.items == original, model.settingsValid,
+              model.draft.order.filter({ $0 == "claude" }).count == 1,
+              Set(model.draft.items) == Set(pins) else {
+            throw AppError.message("One provider row did not retain all exact limits in the shared provider order.")
+        }
+        try renderSmokePage(model, name: "settings-providers-original-order", directory: directory)
+        model.draft.saved = true
+        model.moveProvider("codex", -1)
+        model.moveProvider("zai", 1)
+        model.moveProvider("claude", 2)
+        model.moveProvider("unknown", 1)
+        guard model.draft.items == original, model.draft.saved else {
+            throw AppError.message("Invalid or boundary provider moves changed the shared order.")
+        }
+        model.moveProvider("claude", -1)
+        let reordered = claudePins + [pins[1]]
+        guard model.draft.order.first == "claude", model.draft.items == reordered, !model.draft.saved,
+              let payload = model.settingsPayload(),
+              payload["enabled"] as? [String] == ["claude", "codex"],
+              let encodedItems = payload["items"], let encodedPrimary = payload["selected"],
+              try JSONDecoder().decode([Selection].self, from: JSONSerialization.data(withJSONObject: encodedItems)) == reordered,
+              try JSONDecoder().decode(Selection.self, from: JSONSerialization.data(withJSONObject: encodedPrimary)) == reordered[0] else {
+            throw AppError.message("Provider moves failed to save the same Usage/bar order and exact limit identities.")
+        }
+        try renderSmokePage(model, name: "settings-providers-reordered", directory: directory)
+        model.settingsSaving = true
+        model.setProviderShown("claude", enabled: false)
+        model.setProviderLimit(pins[0], enabled: false)
+        model.setBarItem(pins[0], enabled: false)
+        model.toggleProvider("claude")
+        model.moveProvider("claude", 1)
+        guard model.draft.items == reordered, model.draft.enabled == Set(["codex", "claude"]),
+              model.draft.hiddenItems.isEmpty, model.draft.order.first == "claude" else {
+            throw AppError.message("Unified provider controls changed settings during a save.")
+        }
+        model.settingsSaving = false
+        model.setProviderShown("claude", enabled: false)
+        guard model.draft.items == [pins[1]], model.draft.enabled.contains("claude"),
+              model.draft.hiddenItems["claude"] == claudePins, model.settingsValid else {
+            throw AppError.message("Hiding a provider deactivated it or lost its remembered limits.")
+        }
+        try renderSmokePage(model, name: "settings-providers-active-hidden", directory: directory)
+        model.showSettingsSection(.general)
+        model.accept(data)
+        model.showSettingsSection(.providers)
+        guard model.draft.items == [pins[1]], model.draft.hiddenItems["claude"] == claudePins,
+              model.draft.order.first == "claude" else {
+            throw AppError.message("Navigation or refresh discarded pending provider order and visibility.")
+        }
+        model.setProviderShown("claude", enabled: true)
+        guard model.draft.items == reordered, model.providerBarChoices("claude").contains(where: { $0.selection == unavailable }) else {
+            throw AppError.message("Showing a provider failed to restore all limits, including an unavailable account index.")
+        }
+        model.setProviderShown("codex", enabled: false)
+        model.toggleProvider("claude")
+        guard model.draft.items.isEmpty, model.draft.enabled == Set(["codex"]),
+              !model.settingsValid, model.settingsValidation?.section == .providers else {
+            throw AppError.message("Deactivating the visible provider silently chose another active provider.")
+        }
+        model.toggleProvider("claude")
+        guard model.draft.items.isEmpty else {
+            throw AppError.message("Activating a provider implicitly showed it in the bar.")
+        }
+        model.setProviderShown("claude", enabled: true)
+        guard model.draft.items == claudePins, model.settingsValid else {
+            throw AppError.message("Reactivation did not retain draft-only remembered limit choices.")
+        }
+        model.setProviderLimit(unavailable, enabled: false)
+        guard model.draft.items == [pins[0], pins[2]], !model.providerLimitChecked(unavailable) else {
+            throw AppError.message("A compact limit menu changed another exact account/limit identity.")
+        }
+        model.setProviderShown("claude", enabled: false)
+        model.setProviderLimit(unavailable, enabled: true)
+        guard model.draft.items == [unavailable], model.providerShown("claude"), model.providerLimitChecked(unavailable) else {
+            throw AppError.message("Choosing a limit from the compact menu did not show that precise limit in the bar.")
+        }
+        model.setProviderShown("claude", enabled: false)
+        model.setProviderShown("claude", enabled: true)
+        guard model.draft.items == [unavailable] else {
+            throw AppError.message("Showing a hidden provider did not retain its latest compact menu selection.")
+        }
+        model.back()
+        model.showSettings()
+        model.showSettingsSection(.providers)
+        guard model.draft.items == original, model.snapshot?.pinnedItems == pins,
+              model.draft.hiddenItems.isEmpty, model.draft.order.first == "codex" else {
+            throw AppError.message("Cancel did not restore the saved shared order, visibility and draft limit choices.")
+        }
+        model.toggleProvider("antigravity")
+        guard !model.providerShown("antigravity") else {
+            throw AppError.message("A newly active provider was automatically added to the bar.")
+        }
+        model.setProviderShown("antigravity", enabled: true)
+        guard model.draft.items.last == Selection(provider: "antigravity", metric: "rolling"),
+              model.draft.items.prefix(original.count).elementsEqual(original) else {
+            throw AppError.message("Showing a new provider did not choose its first limit in the shared provider order.")
+        }
+        let orphan = Selection(provider: "account:deleted", idx: 3, metric: "rolling")
+        var orphanSettings = settings
+        orphanSettings["items"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode([pins[1], orphan, pins[2]]))
+        var orphanDocument = document
+        orphanDocument["settings"] = orphanSettings
+        let orphanModel = Model()
+        orphanModel.accept(try JSONSerialization.data(withJSONObject: orphanDocument))
+        orphanModel.showSettings()
+        orphanModel.showSettingsSection(.providers)
+        orphanModel.toggleProvider("antigravity")
+        guard orphanModel.draft.order.filter({ $0 == orphan.provider }).count == 1,
+              orphanModel.providerShown(orphan.provider), !orphanModel.draft.enabled.contains(orphan.provider),
+              orphanModel.draft.items == [pins[1], pins[2], orphan],
+              !orphanModel.settingsValid, orphanModel.settingsValidation?.section == .providers else {
+            throw AppError.message("An unrelated provider edit hid or duplicated a saved unavailable connection.")
+        }
+        try renderSmokePage(orphanModel, name: "settings-providers-unavailable", directory: directory)
+        orphanModel.toggleProvider(orphan.provider)
+        guard !orphanModel.draft.enabled.contains(orphan.provider) else {
+            throw AppError.message("A deleted connection could be reactivated.")
+        }
+        orphanModel.setProviderShown(orphan.provider, enabled: false)
+        guard orphanModel.draft.items == [pins[1], pins[2]], orphanModel.settingsValid,
+              orphanModel.settingsPayload() != nil else {
+            throw AppError.message("Hiding an unavailable provider did not resolve validation while retaining the remaining limits.")
+        }
     }
 
     private static func smokeMenuBarPixels(snapshot: Snapshot, button: NSStatusBarButton, directory: URL?) throws {
@@ -3769,6 +4062,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
               model.settingsChoices.count == 5, snapshot.visibleBarItems.map(\.text) == texts else {
             throw AppError.message("Multiple menu bar item example did not preserve its three selected metrics and two alternatives.")
         }
+        model.showSettingsSection(.providers)
         try renderSmokePage(model, name: "settings-multiple-items-example", directory: directory)
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         defer { NSStatusBar.system.removeStatusItem(item) }
@@ -4593,6 +4887,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
                 throw AppError.message("An empty provider select did not show its disabled placeholder.")
             }
         }
+        model.showSettings()
+        model.setBarItem(choices[1].selection, enabled: true)
+        let checked = Set(model.draft.items)
+        let (checklist, checklistTarget) = PanelSelectMenuPresenter.makeChecklist(title: "Provider limits", options: options,
+                                                                                  checked: checked) { selection, enabled in
+            model.setProviderLimit(selection, enabled: enabled)
+        }
+        guard checklist.items.enumerated().allSatisfy({ index, item in
+            item.state == (checked.contains(options[index].value) ? .on : .off) && item.image?.size == NSSize(width: 16, height: 16)
+        }), sourceImage?.size == sourceSize else {
+            throw AppError.message("Native limit checklist did not preserve multiple checked limits or keep its artwork at 16px.")
+        }
+        withExtendedLifetime(checklistTarget) {
+            checklist.performActionForItem(at: 0)
+            checklist.performActionForItem(at: 2)
+        }
+        guard model.draft.items == [choices[1].selection, choices[2].selection],
+              model.draft.enabled.contains(choices[0].selection.provider), model.snapshot?.selected == savedSelection else {
+            throw AppError.message("Native limit checklist changed another provider's activation or did not toggle the precise draft limits.")
+        }
+        let (emptyChecklist, emptyChecklistTarget) = PanelSelectMenuPresenter.makeChecklist(title: "Provider limits", options: [],
+                                                                                           checked: Set<Selection>()) { _, _ in }
+        try withExtendedLifetime(emptyChecklistTarget) {
+            guard emptyChecklist.numberOfItems == 1, !emptyChecklist.items[0].isEnabled else {
+                throw AppError.message("An empty native limit checklist did not retain a disabled placeholder.")
+            }
+        }
     }
 
     private static func smokeCloudCredits(sample: String, directory: URL?) throws {
@@ -4820,6 +5141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     }
 
     private static func renderSmokePage(_ model: Model, name: String, directory: URL?) throws {
+        model.smokeProviderRowFrames.removeAll()
         let host = NSHostingController(rootView: PanelView(model: model).transaction {
             $0.disablesAnimations = true
             $0.animation = nil
@@ -4837,6 +5159,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             // Let SwiftUI mount once with animations disabled for deterministic fills.
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
             host.view.layoutSubtreeIfNeeded()
+            if model.page == .settings && model.settingsSection == .providers {
+                let frames = model.smokeProviderRowFrames
+                guard Set(frames.keys) == Set(model.draft.order), frames.count == model.draft.order.count,
+                      frames.values.allSatisfy({ $0.height > 0 && $0.height <= 40 && $0.width >= 300 }) else {
+                    throw AppError.message("The \(name) provider list lost a compact row or exceeded 40px per row: \(frames).")
+                }
+                print("AI Status macOS \(name): \(frames.count) compact provider rows, maximum height \(frames.values.map(\.height).max() ?? 0)")
+            }
             func capture(_ captureName: String) throws {
                 host.view.displayIfNeeded()
                 guard let bitmap = host.view.bitmapImageRepForCachingDisplay(in: host.view.bounds) else {

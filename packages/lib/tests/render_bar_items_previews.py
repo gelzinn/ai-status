@@ -118,15 +118,17 @@ Item {
             panel.configure()
             const settings = findChild(panel, "panel-settings-page")
             const scroller = findChild(panel, "panel-scroller")
-            compare(settings.section, "general")
+            settings.selectSection("providers")
+            compare(settings.section, "providers")
             compare(settings.selectedItems.length, 3)
             compare(settings.refreshIntervalMinutes, 5)
             for (const item of scene.captureSnapshot.settings.items) {
-                const row = findChild(settings, "bar-item-" + item.provider + "-" + item.idx + "-" + item.metric)
+                const row = findChild(settings, "provider-bar-" + item.provider)
                 verify(row !== null && row.checked)
+                verify(settings.providerChoices(item.provider).some(choice => settings.sameItem(choice, item)))
             }
-            verify(!findChild(settings, "bar-item-codex-0-rolling").checked)
-            verify(!findChild(settings, "bar-item-claude-0-weekly:Fable").checked)
+            verify(!settings.selectedItems.some(item => item.provider === "codex" && item.metric === "rolling"))
+            verify(!settings.selectedItems.some(item => item.metric === "weekly:Fable"))
             scroller.contentY = 0
             wait(250)
             const settingsImage = grabImage(findChild(panel, "panel-surface"))

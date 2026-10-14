@@ -134,13 +134,14 @@ def save_settings(payload):
         if (not isinstance(items, list) or not items or not all(valid_choice(choice) for choice in items)
                 or len(state.get_selected_items({"items": items})) != len(items)):
             raise ValueError("Choose at least one enabled provider and limit, without duplicates")
-        state.set_selected_items(selected, items)
+        state.set_selected_items(selected, state.order_bar_items(items, enabled))
     else:
         choice = payload.get("selected")
         if not valid_choice(choice):
             raise ValueError("Choose an enabled provider and limit")
         state.select_primary(selected, choice)
-        state.set_selected_items(selected, [item for item in state.get_selected_items(selected) if item["provider"] in enabled])
+        state.set_selected_items(selected, state.order_bar_items(
+            [item for item in state.get_selected_items(selected) if item["provider"] in enabled], enabled))
     usage_display = payload.get("usageDisplay", state.get_usage_display(selected))
     if usage_display not in state.USAGE_DISPLAY_MODES:
         raise ValueError("Invalid usage display")
@@ -184,7 +185,8 @@ def select_metric(selection):
         if render.connection_key(entry) == provider and entry.get("_idx", 0) == idx and provider in config.enabled_connection_order():
             if key in [render.metric_key(metric) for metric in usable_metrics(entry)]:
                 selected = state.load_selected() or {}
-                state.select_primary(selected, {"provider": provider, "idx": idx, "metric": key})
+                state.select_primary(selected, {"provider": provider, "idx": idx, "metric": key},
+                                     provider_order=config.enabled_connection_order())
                 state.save_selected(selected)
                 return
     raise ValueError("This usage metric is no longer available")

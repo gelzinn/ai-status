@@ -79,6 +79,13 @@ def get_selected_items(selected):
     return items
 
 
+def order_bar_items(items, provider_order):
+    """Group canonical bar identities by provider order, preserving each group."""
+    ranks = {provider: index for index, provider in enumerate(dict.fromkeys(provider_order))}
+    return sorted(get_selected_items({"items": items}),
+                  key=lambda item: ranks.get(item["provider"], len(ranks)))
+
+
 def set_selected_items(selected, items):
     """Replace the bar list and mirror its first item for legacy consumers."""
     selected["items"] = get_selected_items({"items": items})
@@ -90,9 +97,12 @@ def set_selected_items(selected, items):
     return selected
 
 
-def select_primary(selected, choice):
-    """Change the first bar slot while retaining the other pinned metrics."""
-    return set_selected_items(selected, [choice] + get_selected_items(selected)[1:])
+def select_primary(selected, choice, provider_order=None):
+    """Replace the first slot, optionally retaining the shared provider order."""
+    items = [choice] + get_selected_items(selected)[1:]
+    if provider_order is not None:
+        items = order_bar_items(items, provider_order)
+    return set_selected_items(selected, items)
 
 
 def validate_refresh_interval_minutes(value):

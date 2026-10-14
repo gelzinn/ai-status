@@ -8,6 +8,8 @@ Column {
     property color foreground: "white"
     property string fontFamily: Style.font.family
     property var order: []
+    property var availableProviders: []
+    property var rememberedBarItems: ({})
     property var enabledProviders: []
     property var display: ({})
     property string iconMode: "bot"
@@ -32,7 +34,8 @@ Column {
     readonly property var invalidAlertRules: (alertSettings.rules || []).filter(rule => !validThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] : rule.thresholds.join(",")))
     readonly property string ruleSelectionLabel: ruleLabel(ruleSelection.provider, ruleSelection.metric)
     property Item popupParent: parent
-    readonly property bool selectionOpen: iconSelector.popupOpen || usageDisplaySelector.popupOpen
+    property Item providerSelector: null
+    readonly property bool selectionOpen: iconSelector.popupOpen || usageDisplaySelector.popupOpen || (!!providerSelector && providerSelector.popupOpen)
     property bool saved: false
     property bool inlineValidation: true
     property string section: "general"
@@ -45,12 +48,14 @@ Column {
     ]
     readonly property string validationSection: enabledProviders.length === 0 ? "providers"
         : !Object.keys(display).some(key => display[key]) || ["used", "remaining"].indexOf(usageDisplay) === -1 || !validRefreshInterval(refreshIntervalMinutes) ? "general"
-        : !validItems ? "general"
+        : !validItems ? "providers"
         : !valid ? "alerts" : ""
-    readonly property string validationMessage: validationSection === "providers" ? "Enable at least one provider in Providers."
+    readonly property string validationMessage: validationSection === "providers" ? enabledProviders.length === 0
+            ? "Enable at least one provider in Providers."
+            : "Choose at least one bar item from an active provider in Providers."
         : validationSection === "general" ? !validRefreshInterval(refreshIntervalMinutes) ? "Choose a refresh interval from 5 to 60 minutes in General."
             : !Object.keys(display).some(key => display[key]) || ["used", "remaining"].indexOf(usageDisplay) === -1 ? "Choose a usage display and at least one bar text field in General."
-            : "Choose at least one bar item from an enabled provider in General."
+            : "Choose at least one bar item from an enabled provider in Providers."
         : validationSection === "alerts" ? "Review alert levels and schedules in Alerts."
         : ""
     readonly property var choices: {
@@ -110,7 +115,7 @@ Column {
     }
     readonly property var selectedChoice: choices.find(item => item.provider === selected.provider && item.idx === selected.idx && item.metric === selected.metric) || null
     readonly property string selectedLabel: selectedChoice ? selectedChoice.groupLabel + " · " + selectedChoice.label : "Choose a provider and limit"
-    readonly property bool validItems: selectedItems.length > 0 && selectedItems.every(item => enabledProviders.indexOf(item.provider) !== -1 && choices.some(choice => sameItem(choice, item)))
+    readonly property bool validItems: selectedItems.length > 0 && selectedItems.every(item => enabledProviders.indexOf(item.provider) !== -1 && availableProviders.indexOf(item.provider) !== -1 && choices.some(choice => sameItem(choice, item)))
     readonly property bool valid: enabledProviders.length > 0 && Object.keys(display).some(key => display[key]) && ["used", "remaining"].indexOf(usageDisplay) !== -1 && validRefreshInterval(refreshIntervalMinutes) && validItems && validThresholds(alertThresholds) && validHours(alertQuietHours) && validHours(alertWorkHours) && (alertSettings.rules || []).every(rule => validThresholds(alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] !== undefined ? alertRuleTexts[rule.connection_id + "\u001f" + rule.metric] : rule.thresholds.join(",")))
     spacing: Style.space(16)
     enabled: !Plugin.Model.settingsSaving
@@ -122,8 +127,10 @@ Column {
     onRefreshIntervalMinutesChanged: saved = false
     onSelectedChanged: {
         saved = false; alertRuleTarget = null
-        if (selected.provider && selected.metric)
+        if (selected.provider && selected.metric && (!selectedItems.length || !sameItem(selectedItems[0], selected))) {
             selectedItems = [itemIdentity(selected)].concat(selectedItems.slice(1).filter(item => !sameItem(item, selected)))
+            normalizeBarItems()
+        }
     }
     onSelectedItemsChanged: saved = false
     onAlertSettingsChanged: saved = false
@@ -172,19 +179,34 @@ Column {
     function closeSelectors() {
         iconSelector.dismiss()
         usageDisplaySelector.dismiss()
+        if (providerSelector) providerSelector.dismiss()
+        providerSelector = null
+    }
+
+    function providerMenuChanged(selector) {
+        if (selector.popupOpen) {
+            iconSelector.dismiss()
+            usageDisplaySelector.dismiss()
+            if (providerSelector && providerSelector !== selector) providerSelector.dismiss()
+            providerSelector = selector
+        } else if (providerSelector === selector) providerSelector = null
     }
 
     function begin() {
         section = "general"
         const settings = Plugin.Model.snapshot.settings || {}
-        order = (settings.order || []).slice()
+        availableProviders = (settings.order || []).slice()
+        order = availableProviders.concat((settings.items || []).map(item => item.provider)
+            .filter((name, index, names) => availableProviders.indexOf(name) === -1 && names.indexOf(name) === index))
         enabledProviders = (settings.enabled || []).slice()
+        rememberedBarItems = {}
         display = Object.assign({}, settings.display || {})
         iconMode = settings.iconMode || "bot"
         usageDisplay = settings.usageDisplay === "remaining" ? "remaining" : "used"
         refreshIntervalMinutes = validRefreshInterval(settings.refreshIntervalMinutes) ? settings.refreshIntervalMinutes : 5
         selectedItems = (settings.items || []).map(itemIdentity)
         selected = selectedItems.length ? Object.assign({}, selectedItems[0]) : Object.assign({}, Plugin.Model.snapshot.selected)
+        normalizeBarItems()
         alertSettings = JSON.parse(JSON.stringify(settings.notifications || {enabled: true, thresholds: [80,95,100], recovery: true, muted_until: 0, rules: [], quiet_hours: {start: "", end: ""}, work_hours: {start: "", end: ""}, recent_only: false}))
         alertThresholds = alertSettings.thresholds.join(",")
         alertRuleTexts = {}
@@ -208,7 +230,7 @@ Column {
             : section === "providers" && providerRows.count > 0 ? providerRows.itemAt(0).firstControl
             : !validRefreshInterval(refreshIntervalMinutes) ? refreshIntervalSlider
             : !Object.keys(display).some(key => display[key]) || ["used", "remaining"].indexOf(usageDisplay) === -1 ? usageDisplaySelector
-            : barItemRows.count > 0 ? barItemRows.itemAt(0) : refreshIntervalSlider
+            : refreshIntervalSlider
         if (first) first.forceActiveFocus(Qt.TabFocusReason)
     }
 
@@ -222,14 +244,12 @@ Column {
     }
 
     function toggleProvider(name) {
-        enabledProviders = enabledProviders.indexOf(name) === -1 ? enabledProviders.concat([name]) : enabledProviders.filter(item => item !== name)
-        selectedItems = selectedItems.filter(item => enabledProviders.indexOf(item.provider) !== -1)
-        if (selectedItems.length) {
-            selected = Object.assign({}, selectedItems[0])
-        } else {
-            const first = choices[0]
-            selected = first ? {provider: first.provider, idx: first.idx, metric: first.metric} : {}
-        }
+        if (Plugin.Model.settingsSaving || availableProviders.indexOf(name) === -1) return
+        const activating = enabledProviders.indexOf(name) === -1
+        if (!activating) rememberBarChoices(name)
+        enabledProviders = activating ? enabledProviders.concat([name]) : enabledProviders.filter(item => item !== name)
+        if (!activating) selectedItems = selectedItems.filter(item => item.provider !== name)
+        normalizeBarItems()
     }
 
     function sameItem(left, right) {
@@ -241,31 +261,73 @@ Column {
     }
 
     function toggleItem(choice) {
+        if (Plugin.Model.settingsSaving) return
+        if (enabledProviders.indexOf(choice.provider) === -1 && !selectedItems.some(item => sameItem(item, choice))) return
         selectedItems = selectedItems.some(item => sameItem(item, choice))
             ? selectedItems.filter(item => !sameItem(item, choice))
             : selectedItems.concat([itemIdentity(choice)])
+        normalizeBarItems()
+        const remembered = Object.assign({}, rememberedBarItems)
+        remembered[choice.provider] = selectedItems.filter(item => item.provider === choice.provider).map(itemIdentity)
+        rememberedBarItems = remembered
+    }
+
+    function normalizeBarItems() {
+        const rank = name => order.indexOf(name) === -1 ? order.length : order.indexOf(name)
+        selectedItems = selectedItems.map((item, index) => ({item: item, index: index}))
+            .sort((left, right) => rank(left.item.provider) - rank(right.item.provider) || left.index - right.index)
+            .map(entry => entry.item)
         selected = selectedItems.length ? Object.assign({}, selectedItems[0]) : {}
-        Qt.callLater(() => {
-            if (!root.visible || root.section !== "general") return
-            for (let index = 0; index < barItemRows.count; index++) {
-                const row = barItemRows.itemAt(index)
-                if (row && sameItem(row.modelData, choice)) {
-                    row.forceActiveFocus(Qt.TabFocusReason)
-                    return
-                }
-            }
-            focusFirstControl()
-        })
+    }
+
+    function rememberBarChoices(name) {
+        const items = selectedItems.filter(item => item.provider === name).map(itemIdentity)
+        if (!items.length) return
+        const remembered = Object.assign({}, rememberedBarItems)
+        remembered[name] = items
+        rememberedBarItems = remembered
+    }
+
+    function providerChoices(name) {
+        const live = choices.filter(choice => choice.provider === name)
+        const missing = (rememberedBarItems[name] || []).filter(item => !live.some(choice => sameItem(item, choice)))
+        return live.concat(missing.map(item => Object.assign({}, item, {
+            groupLabel: providerName(name), groupLogoSource: providerLogo(name, null),
+            label: item.metric + " (unavailable)"
+        })))
+    }
+
+    function toggleProviderBar(name) {
+        if (Plugin.Model.settingsSaving) return
+        if (selectedItems.some(item => item.provider === name)) {
+            rememberBarChoices(name)
+            selectedItems = selectedItems.filter(item => item.provider !== name)
+        } else {
+            if (enabledProviders.indexOf(name) === -1 || availableProviders.indexOf(name) === -1) return
+            const first = choices.find(item => item.provider === name)
+            const remembered = rememberedBarItems[name] || []
+            const restored = remembered.length ? remembered : (first ? [itemIdentity(first)] : [])
+            selectedItems = selectedItems.concat(restored)
+        }
+        normalizeBarItems()
     }
 
     function moveProvider(index, direction) {
+        if (Plugin.Model.settingsSaving || index < 0 || index >= order.length || (direction !== -1 && direction !== 1)) return
         const next = order.slice()
         const other = index + direction
         if (other < 0 || other >= next.length) return
+        closeSelectors()
         const value = next[index]
         next[index] = next[other]
         next[other] = value
         order = next
+        normalizeBarItems()
+        Qt.callLater(() => {
+            if (!root.visible || root.section !== "providers") return
+            const row = providerRows.itemAt(other)
+            if (row) row.focusMove(direction)
+        })
     }
 
     function save() {
@@ -316,6 +378,29 @@ Column {
     component Button: Plugin.PanelButton {
         foreground: root.foreground
         fontFamily: root.fontFamily
+    }
+    component ProviderCheckbox: Button {
+        id: checkbox
+        property bool checked: false
+        width: Style.space(28)
+        Accessible.role: Accessible.CheckBox
+        Accessible.checked: checked
+        Rectangle {
+            objectName: checkbox.objectName + "-indicator"
+            anchors.centerIn: parent
+            width: Style.space(14)
+            height: width
+            radius: Style.space(3)
+            color: checkbox.checked ? checkbox.foreground : "transparent"
+            border.width: checkbox.checked ? 0 : 1
+            border.color: Qt.rgba(checkbox.foreground.r, checkbox.foreground.g, checkbox.foreground.b, 0.3)
+            Plugin.PanelIcon {
+                anchors.fill: parent
+                visible: checkbox.checked
+                name: "check"
+                foreground: Commons.Color.popups.background
+            }
+        }
     }
     component Field: Rectangle {
         id: field
@@ -393,7 +478,7 @@ Column {
         alertRuleTexts = texts
     }
     function ruleLabel(connection, metric) {
-        if (!connection || !metric) return "Choose a provider and limit in General."
+        if (!connection || !metric) return "Choose a provider and limit in Providers."
         const choice = choices.find(item => item.provider === connection && item.metric === metric)
         return choice ? choice.groupLabel + " · " + choice.label : providerName(connection) + " · " + metric
     }
@@ -421,32 +506,6 @@ Column {
         setAlert(key, {start: parts[0], end: parts[1] || ""})
     }
 
-    Column {
-        objectName: "settings-section-general"
-        visible: root.section === "general"
-        width: parent.width
-        spacing: Style.space(8)
-        SectionHeading {
-            title: "Bar items"
-            description: "Select as many account limits as you want. Items appear in the order you select them."
-        }
-        Repeater {
-            id: barItemRows
-            model: root.choices
-            delegate: Button {
-                required property var modelData
-                objectName: "bar-item-" + modelData.provider + "-" + modelData.idx + "-" + modelData.metric
-                width: parent.width
-                alignLeft: true
-                logoSource: modelData.groupLogoSource
-                readonly property bool checked: root.selectedItems.some(item => root.sameItem(item, modelData))
-                text: (checked ? "[x]  " : "[ ]  ") + modelData.groupLabel + " · " + modelData.label
-                Accessible.role: Accessible.CheckBox
-                Accessible.checked: checked
-                onClicked: root.toggleItem(modelData)
-            }
-        }
-    }
     Column {
         objectName: "settings-refresh-interval"
         visible: root.section === "general"
@@ -744,44 +803,99 @@ Column {
         spacing: Style.space(6)
         SectionHeading {
             title: "Providers"
-            description: "Enable providers and set their order in the usage page."
+            description: "One order for Usage and the bar. Click a provider name to choose limits."
+        }
+        Row {
+            width: parent.width
+            spacing: Style.space(4)
+            Label { width: parent.width - Style.space(100); text: "Active · Provider"; font.pixelSize: Style.font.caption; opacity: 0.5 }
+            Label { width: Style.space(28); text: "Bar"; font.pixelSize: Style.font.caption; horizontalAlignment: Text.AlignHCenter; opacity: 0.5 }
         }
         Repeater {
             id: providerRows
             model: root.order
             delegate: Row {
+                id: providerRow
                 required property string modelData
                 required property int index
+                objectName: "provider-row-" + modelData
                 width: root.width
                 spacing: Style.space(4)
-                property alias firstControl: providerButton
-                Button {
+                readonly property Item firstControl: providerButton.enabled ? providerButton
+                    : providerBar.enabled ? providerBar : providerUp.enabled ? providerUp : providerDown
+                readonly property bool available: root.availableProviders.indexOf(modelData) !== -1
+                readonly property bool active: root.enabledProviders.indexOf(modelData) !== -1
+                readonly property bool shown: root.selectedItems.some(item => item.provider === modelData)
+                function focusMove(direction) {
+                    const requested = direction < 0 ? providerUp : providerDown
+                    const fallback = direction < 0 ? providerDown : providerUp
+                    const control = requested.enabled ? requested : fallback.enabled ? fallback : providerBar
+                    control.forceActiveFocus(Qt.TabFocusReason)
+                }
+                ProviderCheckbox {
                     id: providerButton
-                    objectName: "provider-" + parent.modelData
-                    width: Math.max(0, parent.width - Style.space(68))
-                    prefixText: root.enabledProviders.indexOf(parent.modelData) !== -1 ? "[x]" : "[ ]"
-                    text: root.providerName(parent.modelData)
-                    logoSource: root.providerLogo(parent.modelData, Plugin.Model.snapshot.providers.find(item => item.id === parent.modelData))
-                    alignLeft: true
+                    objectName: "provider-" + providerRow.modelData
+                    checked: providerRow.active
+                    enabled: providerRow.available
+                    Accessible.name: "Active " + root.providerName(providerRow.modelData)
                     Accessible.role: Accessible.CheckBox
-                    Accessible.checked: root.enabledProviders.indexOf(parent.modelData) !== -1
-                    onClicked: root.toggleProvider(parent.modelData)
+                    Accessible.checked: providerRow.active
+                    onClicked: root.toggleProvider(providerRow.modelData)
+                }
+                Plugin.PanelSelect {
+                    id: providerLimits
+                    objectName: "provider-limits-" + providerRow.modelData
+                    width: Math.max(0, parent.width - Style.space(132))
+                    text: root.providerName(providerRow.modelData) + (providerRow.available ? "" : " (unavailable)")
+                    logoSource: providerRow.available ? root.providerLogo(providerRow.modelData, Plugin.Model.snapshot.providers.find(item => item.id === providerRow.modelData)) : ""
+                    popupParent: root.popupParent
+                    popupWidth: root.width
+                    multiple: true
+                    outlined: false
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    choices: root.providerChoices(providerRow.modelData).map(choice => Object.assign({}, choice, {
+                        label: choice.groupLabel + " · " + choice.label,
+                        groupKey: "",
+                        logoSource: choice.groupLogoSource,
+                        objectName: "bar-item-" + choice.provider + "-" + choice.idx + "-" + choice.metric,
+                        checked: root.selectedItems.some(item => root.sameItem(item, choice))
+                    }))
+                    Accessible.name: "Choose bar limits for " + root.providerName(providerRow.modelData)
+                    trailingIconName: providerRow.active && providerRow.available ? "chevron-down" : ""
+                    onActivated: index => root.toggleItem(choices[index])
+                    onPopupOpenChanged: {
+                        if (popupOpen && (!providerRow.active || !providerRow.available)) dismiss()
+                        root.providerMenuChanged(providerLimits)
+                    }
+                }
+                ProviderCheckbox {
+                    id: providerBar
+                    objectName: "provider-bar-" + providerRow.modelData
+                    checked: providerRow.shown
+                    enabled: providerRow.shown || (providerRow.available && providerRow.active)
+                    Accessible.name: "Show " + root.providerName(providerRow.modelData) + " in bar"
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.checked: providerRow.shown
+                    onClicked: root.toggleProviderBar(providerRow.modelData)
                 }
                 Button {
-                    objectName: "provider-move-up-" + parent.modelData
+                    id: providerUp
+                    objectName: "provider-move-up-" + providerRow.modelData
                     width: Style.space(30)
                     iconName: "arrow-up"
-                    enabled: parent.index > 0
-                    Accessible.name: "Move " + root.providerName(parent.modelData) + " up"
-                    onClicked: root.moveProvider(parent.index, -1)
+                    enabled: providerRow.index > 0
+                    Accessible.name: "Move " + root.providerName(providerRow.modelData) + " up in Usage and the bar"
+                    onClicked: root.moveProvider(providerRow.index, -1)
                 }
                 Button {
-                    objectName: "provider-move-down-" + parent.modelData
+                    id: providerDown
+                    objectName: "provider-move-down-" + providerRow.modelData
                     width: Style.space(30)
                     iconName: "arrow-down"
-                    enabled: parent.index < root.order.length - 1
-                    Accessible.name: "Move " + root.providerName(parent.modelData) + " down"
-                    onClicked: root.moveProvider(parent.index, 1)
+                    enabled: providerRow.index < root.order.length - 1
+                    Accessible.name: "Move " + root.providerName(providerRow.modelData) + " down in Usage and the bar"
+                    onClicked: root.moveProvider(providerRow.index, 1)
                 }
             }
         }
