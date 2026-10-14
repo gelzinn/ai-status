@@ -632,6 +632,9 @@ final class Model: ObservableObject {
     }
     @Published var draft = SettingsDraft()
     @Published var settingsSection: SettingsSection = .general
+    #if AI_STATUS_SMOKE
+    var smokeProviderRowFrames: [String: CGRect] = [:]
+    #endif
     @Published var notificationAdvancedExpanded = false
     @Published var notificationEditingSelection: Selection?
     @Published var notificationRuleFocusRequest = 0
@@ -1465,6 +1468,44 @@ final class PanelSelectMenuPresenter: ObservableObject {
         return (menu, target)
     }
 
+    static func makeChecklist<Value: Hashable>(title: String, options: [PanelSelectOption<Value>],
+                                               checked: Set<Value>, toggle: @escaping (Value, Bool) -> Void) -> (NSMenu, PanelSelectMenuActions) {
+        let menu = NSMenu(title: title)
+        menu.autoenablesItems = false
+        menu.font = NSFont(name: "GeistMono-Regular", size: 13) ?? .monospacedSystemFont(ofSize: 13, weight: .regular)
+        let target = PanelSelectMenuActions(actions: options.map { option in
+            { toggle(option.value, !checked.contains(option.value)) }
+        })
+        for (index, option) in options.enumerated() {
+            let item = NSMenuItem(title: option.title, action: #selector(PanelSelectMenuActions.select(_:)), keyEquivalent: "")
+            item.tag = index
+            item.target = target
+            item.state = checked.contains(option.value) ? .on : .off
+            if let provider = option.provider, let image = Assets.image(provider: provider, path: option.logoPath)?.copy() as? NSImage {
+                image.size = NSSize(width: 16, height: 16)
+                image.isTemplate = false
+                item.image = image
+            }
+            menu.addItem(item)
+        }
+        if options.isEmpty {
+            let item = NSMenuItem(title: "No limits available", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+        return (menu, target)
+    }
+
+    func presentChecklist<Value: Hashable>(title: String, options: [PanelSelectOption<Value>],
+                                           checked: Set<Value>, toggle: @escaping (Value, Bool) -> Void) {
+        guard let anchor = anchor, anchor.window != nil else { return }
+        let (menu, target) = Self.makeChecklist(title: title, options: options, checked: checked, toggle: toggle)
+        menu.minimumWidth = anchor.bounds.width
+        withExtendedLifetime(target) {
+            _ = menu.popUp(positioning: nil, at: NSPoint(x: anchor.bounds.minX, y: anchor.bounds.maxY + 4), in: anchor)
+        }
+    }
+
     func present<Value: Hashable>(title: String, options: [PanelSelectOption<Value>],
                                  selection: Binding<Value>, placeholder: String) {
         guard let anchor = anchor, anchor.window != nil else { return }
@@ -1872,6 +1913,49 @@ struct SettingsHeading: View {
     }
 }
 
+struct ProviderLimitsButton: View {
+    @ObservedObject var model: Model
+    let provider: String
+    @StateObject private var presenter = PanelSelectMenuPresenter()
+    private var available: Bool { model.snapshot?.settings.available.contains(provider) == true }
+    private func openMenu() {
+        let options = model.providerBarChoices(provider).map {
+            PanelSelectOption(value: $0.selection, title: $0.label, provider: $0.provider, logoPath: $0.logoPath)
+        }
+        presenter.presentChecklist(title: "Limits for " + model.providerName(provider), options: options,
+                                   checked: Set(model.draft.items)) { selection, enabled in
+            model.setProviderLimit(selection, enabled: enabled)
+        }
+    }
+    var body: some View {
+        HoverButton(padding: 0, action: openMenu) {
+            HStack(spacing: 6) {
+                ProviderLogo(provider: model.logoProviderID(provider))
+                Text(available ? model.providerName(provider) : "Unavailable · " + model.providerName(provider))
+                    .lineLimit(1).truncationMode(.tail)
+            }.font(Assets.font).frame(height: 24)
+        }.background(PanelSelectMenuAnchor(presenter: presenter).allowsHitTesting(false))
+            .help(available ? "Choose limits for \(model.providerName(provider))" : "\(model.providerName(provider)) (unavailable)")
+            .accessibilityLabel("\(model.providerName(provider)), choose limits")
+    }
+}
+
+struct ProviderRowLayoutProbe: ViewModifier {
+    let model: Model
+    let provider: String
+    func body(content: Content) -> some View {
+        #if AI_STATUS_SMOKE
+        content.background(GeometryReader { geometry in
+            let frame = geometry.frame(in: .global)
+            Color.clear.onAppear { model.smokeProviderRowFrames[provider] = frame }
+                .onChange(of: frame) { model.smokeProviderRowFrames[provider] = $0 }
+        })
+        #else
+        content
+        #endif
+    }
+}
+
 struct SettingsPage: View {
     @ObservedObject var model: Model
     private let fields = [("show_provider", "Provider name"), ("show_model", "Model / plan"),
@@ -1965,22 +2049,7 @@ struct SettingsPage: View {
                     Toggle("Active", isOn: Binding(get: { model.draft.enabled.contains(provider) }, set: { _ in model.toggleProvider(provider) }))
                         .labelsHidden().toggleStyle(.checkbox).modifier(PanelFocusTarget()).frame(width: 28)
                         .disabled(!available && !active).accessibilityLabel("Activate \(model.providerName(provider))")
-                    Menu {
-                        ForEach(model.providerBarChoices(provider)) { choice in
-                            Toggle(choice.label, isOn: Binding(get: { model.providerLimitChecked(choice.selection) }, set: {
-                                model.setProviderLimit(choice.selection, enabled: $0)
-                            }))
-                        }
-                    } label: {
-                        HStack(spacing: 6) {
-                            ProviderLogo(provider: model.logoProviderID(provider))
-                            Text(available ? model.providerName(provider) : "Unavailable · " + model.providerName(provider))
-                                .lineLimit(1).truncationMode(.tail)
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }.menuStyle(.borderlessButton).menuIndicator(.hidden).modifier(PanelFocusTarget())
-                        .disabled(!available || !active)
-                        .help(available ? "Choose limits for \(model.providerName(provider))" : "\(model.providerName(provider)) (unavailable)")
-                        .accessibilityLabel("\(model.providerName(provider)), choose limits")
+                    ProviderLimitsButton(model: model, provider: provider).disabled(!available || !active)
                     Toggle("Show in bar", isOn: Binding(get: { model.providerShown(provider) }, set: {
                         model.setProviderShown(provider, enabled: $0)
                     })).labelsHidden().toggleStyle(.checkbox).modifier(PanelFocusTarget()).frame(width: 28)
@@ -1989,7 +2058,7 @@ struct SettingsPage: View {
                                   action: { model.moveProvider(provider, -1) }).disabled(model.draft.order.first == provider)
                     ControlButton(icon: "arrow-down", help: "Move \(model.providerName(provider)) down in Usage and the bar",
                                   action: { model.moveProvider(provider, 1) }).disabled(model.draft.order.last == provider)
-                }.padding(.vertical, 4)
+                }.padding(.vertical, 4).modifier(ProviderRowLayoutProbe(model: model, provider: provider))
             }
         }
     }
@@ -4818,6 +4887,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
                 throw AppError.message("An empty provider select did not show its disabled placeholder.")
             }
         }
+        model.showSettings()
+        model.setBarItem(choices[1].selection, enabled: true)
+        let checked = Set(model.draft.items)
+        let (checklist, checklistTarget) = PanelSelectMenuPresenter.makeChecklist(title: "Provider limits", options: options,
+                                                                                  checked: checked) { selection, enabled in
+            model.setProviderLimit(selection, enabled: enabled)
+        }
+        guard checklist.items.enumerated().allSatisfy({ index, item in
+            item.state == (checked.contains(options[index].value) ? .on : .off) && item.image?.size == NSSize(width: 16, height: 16)
+        }), sourceImage?.size == sourceSize else {
+            throw AppError.message("Native limit checklist did not preserve multiple checked limits or keep its artwork at 16px.")
+        }
+        withExtendedLifetime(checklistTarget) {
+            checklist.performActionForItem(at: 0)
+            checklist.performActionForItem(at: 2)
+        }
+        guard model.draft.items == [choices[1].selection, choices[2].selection],
+              model.draft.enabled.contains(choices[0].selection.provider), model.snapshot?.selected == savedSelection else {
+            throw AppError.message("Native limit checklist changed another provider's activation or did not toggle the precise draft limits.")
+        }
+        let (emptyChecklist, emptyChecklistTarget) = PanelSelectMenuPresenter.makeChecklist(title: "Provider limits", options: [],
+                                                                                           checked: Set<Selection>()) { _, _ in }
+        try withExtendedLifetime(emptyChecklistTarget) {
+            guard emptyChecklist.numberOfItems == 1, !emptyChecklist.items[0].isEnabled else {
+                throw AppError.message("An empty native limit checklist did not retain a disabled placeholder.")
+            }
+        }
     }
 
     private static func smokeCloudCredits(sample: String, directory: URL?) throws {
@@ -5045,6 +5141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
     }
 
     private static func renderSmokePage(_ model: Model, name: String, directory: URL?) throws {
+        model.smokeProviderRowFrames.removeAll()
         let host = NSHostingController(rootView: PanelView(model: model).transaction {
             $0.disablesAnimations = true
             $0.animation = nil
@@ -5062,6 +5159,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, UNU
             // Let SwiftUI mount once with animations disabled for deterministic fills.
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
             host.view.layoutSubtreeIfNeeded()
+            if model.page == .settings && model.settingsSection == .providers {
+                let frames = model.smokeProviderRowFrames
+                guard Set(frames.keys) == Set(model.draft.order), frames.count == model.draft.order.count,
+                      frames.values.allSatisfy({ $0.height > 0 && $0.height <= 40 && $0.width >= 300 }) else {
+                    throw AppError.message("The \(name) provider list lost a compact row or exceeded 40px per row: \(frames).")
+                }
+                print("AI Status macOS \(name): \(frames.count) compact provider rows, maximum height \(frames.values.map(\.height).max() ?? 0)")
+            }
             func capture(_ captureName: String) throws {
                 host.view.displayIfNeeded()
                 guard let bitmap = host.view.bitmapImageRepForCachingDisplay(in: host.view.bounds) else {
