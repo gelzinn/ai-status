@@ -1048,6 +1048,8 @@ class DesktopTests(IsolatedState):
         settings.display["show_provider"].setChecked(False)
         settings.icon_mode.setCurrentIndex(settings.icon_mode.findData("logo"))
         settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
+        self.assertFalse(settings.show_total.isChecked())
+        settings.show_total.setChecked(True)
         with patch.object(self.dashboard, "refresh") as refresh:
             QTest.mouseClick(settings.save_button, tray.Qt.MouseButton.LeftButton)
         refresh.assert_called_once()
@@ -1057,6 +1059,7 @@ class DesktopTests(IsolatedState):
         self.assertEqual(selected["metric"], "weekly")
         self.assertEqual(selected["icon_mode"], "logo")
         self.assertEqual(selected["usage_display"], "remaining")
+        self.assertTrue(selected["show_total"])
         self.assertFalse(selected["show_provider"])
         self.assertTrue(self.dashboard.isVisible())
         self.dashboard.back_button.click()
@@ -1495,6 +1498,7 @@ class DesktopTests(IsolatedState):
         self.dashboard.configure()
         settings = self.dashboard.settings_view
         settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
+        settings.show_total.setChecked(True)
         with patch.object(self.dashboard, "refresh"):
             settings.save()
         # Updating the preference reuses the rows and changes every usage surface.
@@ -2200,6 +2204,9 @@ class DesktopTests(IsolatedState):
 
     def test_long_metric_names_keep_percentages_and_amounts_in_the_viewport(self):
         config.save_config(["openai-api"])
+        # The longest value form: the amount with its total.
+        state.save_selected(dict(state.load_selected() or {}, show_total=True))
+        self.dashboard.selected = state.load_selected()
         self.dashboard.on_result("openai-api", [{"provider": "OpenAI API", "metrics": [
             {"type": "monthly", "name": "Reported month costs / configured budget (USD)",
              "percentage": 38.75},

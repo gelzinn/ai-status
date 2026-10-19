@@ -312,5 +312,46 @@ class UsageDisplayTests(unittest.TestCase):
                 refresh.assert_not_called()
 
 
+    def test_amounts_hide_their_total_unless_show_total_is_on(self):
+        dollars = dict(type="credits", name="Credits", amount=3.37, limit=40, percentage=8.425,
+                       unit="USD", value_format="amount_ratio")
+        tokens = dict(dollars, amount=1250, limit=5000, percentage=25, unit="tokens")
+        for selected, expected in (({}, ("$3.37", "1,250.00 tokens")),
+                                   (self.remaining, ("$36.63", "3,750.00 tokens")),
+                                   ({"show_total": True}, ("$3.37 / $40.00", "1,250.00 / 5,000.00 tokens")),
+                                   (dict(self.remaining, show_total=True), ("$36.63 / $40.00", "3,750.00 / 5,000.00 tokens")),
+                                   ({"show_total": "yes"}, ("$3.37", "1,250.00 tokens"))):
+            with self.subTest(selected=selected):
+                self.assertEqual((render.metric_value(dollars, selected), render.metric_value(tokens, selected)), expected)
+
+    def test_native_settings_save_show_total_and_refresh_when_only_it_changes(self):
+        state.save_selected(self.selected)
+        with patch.object(state, "trigger_refresh"):
+            quickshell.save_settings(self.settings_payload())
+        self.assertFalse(quickshell.build_snapshot(self.data, state.load_selected())["settings"]["showTotal"])
+        with patch.object(state, "trigger_refresh") as refresh:
+            quickshell.save_settings(self.settings_payload())
+        refresh.assert_not_called()
+        with patch.object(state, "trigger_refresh") as refresh:
+            quickshell.save_settings(self.settings_payload(showTotal=True))
+        refresh.assert_called_once()
+        self.assertTrue(state.load_selected()["show_total"])
+        # Clients that predate the setting keep the saved value.
+        with patch.object(state, "trigger_refresh"):
+            quickshell.save_settings(self.settings_payload())
+        self.assertTrue(state.get_show_total(state.load_selected()))
+        for value in (None, "true", 1):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                quickshell.save_settings(self.settings_payload(showTotal=value))
+
+    def test_cli_sets_show_total_without_opening_settings(self):
+        state.save_selected(self.selected)
+        for flag, expected in (("--show-total", True), ("--no-show-total", False)):
+            with self.subTest(flag=flag), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.main(["config", flag]), 0)
+                self.assertIs(state.load_selected()["show_total"], expected)
+                self.assertEqual(state.load_selected()["usage_display"], "remaining")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -197,6 +197,7 @@ struct Settings: Decodable {
     let display: [String: Bool]
     let iconMode: String
     let usageDisplay: String?
+    let showTotal: Bool?
     let refreshIntervalMinutes: Int?
     let notifications: NotificationPreferences?
     let items: [Selection]?
@@ -490,6 +491,7 @@ struct SettingsDraft {
     var display: [String: Bool] = [:]
     var iconMode = "bot"
     var usageDisplay = "used"
+    var showTotal = false
     var refreshIntervalMinutes = RefreshInterval.defaultMinutes
     var items: [Selection] = []
     var hiddenItems: [String: [Selection]] = [:]
@@ -1008,6 +1010,7 @@ final class Model: ObservableObject {
         draft = SettingsDraft(order: snapshot.settings.order, enabled: Set(snapshot.settings.enabled),
                               display: snapshot.settings.display, iconMode: snapshot.settings.iconMode,
                               usageDisplay: snapshot.settings.usageDisplay == "remaining" ? "remaining" : "used",
+                              showTotal: snapshot.settings.showTotal == true,
                               refreshIntervalMinutes: snapshot.settings.refreshIntervalMinutes ?? RefreshInterval.defaultMinutes,
                               items: snapshot.pinnedItems)
         for provider in snapshot.settings.enabled + snapshot.pinnedItems.map(\.provider) where !draft.order.contains(provider) {
@@ -1128,7 +1131,7 @@ final class Model: ObservableObject {
               let items = try? JSONSerialization.jsonObject(with: itemsData) else { return nil }
         return ["enabled": draft.order.filter { draft.enabled.contains($0) },
                 "display": draft.display, "iconMode": draft.iconMode,
-                "usageDisplay": draft.usageDisplay, "selected": selection, "items": items,
+                "usageDisplay": draft.usageDisplay, "showTotal": draft.showTotal, "selected": selection, "items": items,
                 "refreshIntervalMinutes": draft.refreshIntervalMinutes, "notifications": alertsObject]
     }
     func saveSettings() {
@@ -2048,6 +2051,9 @@ struct SettingsPage: View {
                             selection: Binding(get: { model.draft.usageDisplay }, set: {
                     model.draft.usageDisplay = $0; model.draft.saved = false
                 }))
+                Toggle("Show total", isOn: Binding(get: { model.draft.showTotal }, set: {
+                    model.draft.showTotal = $0; model.draft.saved = false
+                })).toggleStyle(.checkbox).modifier(PanelFocusTarget())
             }
             VStack(alignment: .leading, spacing: 8) {
                 SettingsHeading(title: "Bar display")

@@ -83,7 +83,8 @@ class SwiftBarCompatibilityTests(unittest.TestCase):
         metric = dict(type="credits", name="Account spend / total credits", percentage=25,
                       amount=25, limit=100, unit="USD", value_format="amount_ratio")
         data[1]["metrics"] = [metric]
-        selected = dict(provider="account:work", idx=0, metric="credits:Account spend / total credits", icon_mode="off")
+        selected = dict(provider="account:work", idx=0, metric="credits:Account spend / total credits", icon_mode="off",
+                        show_total=True)
         with patch.object(config, "enabled_order", return_value=[]):
             menu = swiftbar.render_menu(data, selected)
         self.assertIn("$25.00 / $100.00", menu)

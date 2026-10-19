@@ -1696,6 +1696,10 @@ class ProviderSettings(QWidget):
             self.usage_display.addItem(label, value)
         self.usage_display.setCurrentIndex(self.usage_display.findData(state.get_usage_display(selected)))
         general.addWidget(self.usage_display)
+        self.show_total = QCheckBox("Show total")
+        self.show_total.setAccessibleDescription("Show the limit after amounts, such as $3.37 / $40.00.")
+        self.show_total.setChecked(state.get_show_total(selected))
+        general.addWidget(self.show_total)
         general.addSpacing(8)
         general.addWidget(SettingsHeading("Bar display"))
         self.display = {}
@@ -1774,6 +1778,7 @@ class ProviderSettings(QWidget):
             checkbox.toggled.connect(self.clear_message)
         self.icon_mode.currentIndexChanged.connect(self.clear_message)
         self.usage_display.currentIndexChanged.connect(self.update_choices)
+        self.show_total.toggled.connect(self.clear_message)
         self.active.currentIndexChanged.connect(self.clear_message)
         self.active.currentIndexChanged.connect(self.notification_choice_changed)
         self.startup.toggled.connect(self.clear_message)
@@ -1793,7 +1798,7 @@ class ProviderSettings(QWidget):
         """Compare controls, including default selections, without publishing a draft."""
         return (tuple(tuple(item[key] for key in ("provider", "idx", "metric")) for item in self.bar_selections),
                 {key: checkbox.isChecked() for key, checkbox in self.display.items()},
-                self.icon_mode.currentData(), self.usage_display.currentData(),
+                self.icon_mode.currentData(), self.usage_display.currentData(), self.show_total.isChecked(),
                 [self.providers.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.providers.count())
                  if self.providers.item(i).checkState() == Qt.CheckState.Checked],
                 self.startup.isChecked(), notification_settings)
@@ -1812,7 +1817,7 @@ class ProviderSettings(QWidget):
                     for button in widget.findChildren(QAbstractButton)]
 
         fields = {
-            "general": [self.refresh_interval, self.startup, self.usage_display,
+            "general": [self.refresh_interval, self.startup, self.usage_display, self.show_total,
                         *self.display.values(), self.icon_mode],
             "providers": [self.providers, *row_controls(self.providers)],
             "guide": [],
@@ -2405,7 +2410,7 @@ class ProviderSettings(QWidget):
         interval_only = signature == self.saved_draft
         state.set_selected_items(selected, self.bar_selections)
         selected.update(display, icon_mode=self.icon_mode.currentData(), usage_display=usage_display,
-                        refresh_interval_minutes=refresh_interval)
+                        show_total=self.show_total.isChecked(), refresh_interval_minutes=refresh_interval)
         try:
             if paths.IS_WINDOWS and not interval_only:
                 set_startup(self.startup.isChecked())
