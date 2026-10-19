@@ -96,6 +96,7 @@ def settings_snapshot(selected):
         )},
         "iconMode": state.get_icon_mode(selected),
         "usageDisplay": state.get_usage_display(selected),
+        "showTotal": state.get_show_total(selected),
         "items": state.get_selected_items(selected),
         "refreshIntervalMinutes": state.get_refresh_interval_minutes(selected),
         "notifications": notifications.load_settings(),
@@ -145,6 +146,9 @@ def save_settings(payload):
     usage_display = payload.get("usageDisplay", state.get_usage_display(selected))
     if usage_display not in state.USAGE_DISPLAY_MODES:
         raise ValueError("Invalid usage display")
+    show_total = payload.get("showTotal", state.get_show_total(selected))
+    if type(show_total) is not bool:
+        raise ValueError("Invalid total display")
     refresh_interval = state.validate_refresh_interval_minutes(payload.get(
         "refreshIntervalMinutes", state.get_refresh_interval_minutes(selected)))
     alert_settings = notifications.validate_settings(payload["notifications"]) if "notifications" in payload else None
@@ -155,10 +159,11 @@ def save_settings(payload):
             ("show_provider", True), ("show_model", True), ("show_metric", False), ("show_pct", True))}
         and icon_mode == state.get_icon_mode(previous)
         and usage_display == state.get_usage_display(previous)
+        and show_total == state.get_show_total(previous)
         and (alert_settings is None or alert_settings == notifications.load_settings())
     )
     selected.update({key: display[key] for key in fields}, icon_mode=icon_mode, usage_display=usage_display,
-                    refresh_interval_minutes=refresh_interval)
+                    show_total=show_total, refresh_interval_minutes=refresh_interval)
     # Report I/O errors to the form instead of using the best-effort wrappers.
     if not refresh_only:
         if alert_settings is not None:

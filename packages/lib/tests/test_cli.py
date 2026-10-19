@@ -847,7 +847,7 @@ class TerminalConfigTests(unittest.TestCase):
                 refresh.assert_not_called()
 
     def test_provider_navigation_and_reordering_after_display_options(self):
-        screen, save, order, refresh = self.run_config([ord("j")] * 7 + [ord("J"), ord(" "), ord("\n")],
+        screen, save, order, refresh = self.run_config([ord("j")] * 8 + [ord("J"), ord(" "), ord("\n")],
                                                        {"usage_display": "remaining"}, height=16)
         order.assert_called_once_with(["claude"])
         refresh.assert_called_once_with()

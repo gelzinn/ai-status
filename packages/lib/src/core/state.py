@@ -50,6 +50,11 @@ def get_usage_display(selected):
     return mode if mode in USAGE_DISPLAY_MODES else "used"
 
 
+def get_show_total(selected):
+    """Whether amounts with a limit show it after the used or remaining value."""
+    return (selected or {}).get("show_total") is True
+
+
 def _selection_identity(item):
     if not isinstance(item, dict):
         return None

@@ -390,15 +390,22 @@ Item {
             compare(findChild(settings, "settings-section-appearance"), null)
             settings.usageDisplay = "remaining"
             settings.refreshIntervalMinutes = 20
+            const showTotal = findChild(settings, "show-total")
+            verify(showTotal.visible)
+            compare(showTotal.checked, false)
+            mouseClick(showTotal)
+            compare(settings.showTotal, true)
             settings.selectSection("alerts")
             settings.selectSection("general")
             compare(settings.usageDisplay, "remaining")
             compare(settings.refreshIntervalMinutes, 20)
             settings.save()
             compare(Plugin.Model.saved.usageDisplay, "remaining")
+            compare(Plugin.Model.saved.showTotal, true)
             compare(Plugin.Model.saved.refreshIntervalMinutes, 20)
             settings.begin()
             compare(settings.usageDisplay, "used")
+            compare(settings.showTotal, false)
             compare(settings.refreshIntervalMinutes, 5)
         }
         function test_general_refresh_changes_preserve_saved_bar_item_order() {

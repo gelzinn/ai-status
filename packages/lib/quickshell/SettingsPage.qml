@@ -14,6 +14,7 @@ Column {
     property var display: ({})
     property string iconMode: "bot"
     property string usageDisplay: "used"
+    property bool showTotal: false
     property int refreshIntervalMinutes: 5
     property var selected: ({})
     property var selectedItems: []
@@ -203,6 +204,7 @@ Column {
         display = Object.assign({}, settings.display || {})
         iconMode = settings.iconMode || "bot"
         usageDisplay = settings.usageDisplay === "remaining" ? "remaining" : "used"
+        showTotal = settings.showTotal === true
         refreshIntervalMinutes = validRefreshInterval(settings.refreshIntervalMinutes) ? settings.refreshIntervalMinutes : 5
         selectedItems = (settings.items || []).map(itemIdentity)
         selected = selectedItems.length ? Object.assign({}, selectedItems[0]) : Object.assign({}, Plugin.Model.snapshot.selected)
@@ -338,6 +340,7 @@ Column {
             display: display,
             iconMode: iconMode,
             usageDisplay: usageDisplay,
+            showTotal: showTotal,
             refreshIntervalMinutes: refreshIntervalMinutes,
             notifications: Object.assign({}, alertSettings, {
                 thresholds: parseThresholds(alertThresholds),
@@ -552,6 +555,15 @@ Column {
             currentIndex: ["used", "remaining"].indexOf(root.usageDisplay)
             onPopupOpenChanged: if (popupOpen) iconSelector.dismiss()
             onActivated: index => root.usageDisplay = choices[index].value
+        }
+        Plugin.PanelSwitch {
+            objectName: "show-total"
+            width: parent.width
+            text: "Show total"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            checked: root.showTotal
+            onToggled: root.showTotal = checked
         }
     }
     Column {

@@ -197,7 +197,7 @@ This copies the backup back (saving the current one as `.pre-revert` first) and 
 | Scroll up/down | With one bar item configured, switch between providers |
 | Middle-click | With one bar item configured, cycle through the provider's limits (rolling → weekly → monthly, and per-model ones like Claude's Fable weekly) |
 
-The config TUI lets you enable/disable providers, reorder with Shift+J/K, select one or more account/limit items for the bar, toggle display settings, switch icon modes (bot, logo, off), and choose **Usage display: Used / Remaining**. Use Space or the left/right arrows to change the display choice, Enter to save, or Escape to cancel.
+The config TUI lets you enable/disable providers, reorder with Shift+J/K, select one or more account/limit items for the bar, toggle display settings, switch icon modes (bot, logo, off), choose **Usage display: Used / Remaining**, and turn **Show total** on or off. Use Space or the left/right arrows to change the display choice, Enter to save, or Escape to cancel.
 
 ## Command line
 
@@ -218,6 +218,7 @@ use `~/.local/bin/ai-status`.
 | Change providers, ordering and display preferences | `ai-status config` |
 | Show quota remaining without opening Settings | `ai-status config --usage-display remaining` |
 | Show quota used (default) | `ai-status config --usage-display used` |
+| Show the limit after amounts, or hide it (default) | `ai-status config --show-total` / `--no-show-total` |
 | Request a refresh of the running app or daemon | `ai-status refresh` |
 
 `status` prints JSON with `providers` and `errors` and updates the usage cache.
@@ -228,7 +229,9 @@ with `ai-status status > usage.json`.
 
 The usage display preference changes quota percentages, progress bars, and
 amounts with a known limit across the bar and usage panel. **Remaining** shows
-`100% - used`, and `$25 / $100` used becomes `$75 / $100` remaining. Raw `status`
+`100% - used`, and `$25` used becomes `$75` remaining. Amounts with a limit show
+only that value; turn on **Show total** below the usage display, or run
+`ai-status config --show-total`, to add the limit: `$25 / $100`. Raw `status`
 JSON, uncapped spend, available balances, and reset credits retain their original
 meaning. The CLI option redraws cached usage without fetching
 providers again.

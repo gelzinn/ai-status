@@ -9,6 +9,8 @@ ICON_MODE_LABELS = {
     "logo": "Provider Logo (image)",
 }
 USAGE_DISPLAY_LABELS = {"used": "Used", "remaining": "Remaining"}
+# Rows 0-7 are settings; providers start here.
+FIRST_PROVIDER = 8
 
 def get_selectable_items():
     cache = state.load_cache()
@@ -78,6 +80,7 @@ def run():
     show_pct = current_selected.get("show_pct", True)
     icon_mode_idx = state.ICON_MODES.index(state.get_icon_mode(current_selected))
     usage_display_idx = state.USAGE_DISPLAY_MODES.index(state.get_usage_display(current_selected))
+    show_total = state.get_show_total(current_selected)
 
     selected_idx = 0
     scroll_offset = 0
@@ -103,10 +106,10 @@ def run():
     def draw():
         nonlocal scroll_offset
         h, w = stdscr.getmaxyx()
-        list_height = max(1, h - 14)
+        list_height = max(1, h - 15)
 
-        if selected_idx >= 7:
-            prov_idx = selected_idx - 7
+        if selected_idx >= FIRST_PROVIDER:
+            prov_idx = selected_idx - FIRST_PROVIDER
             if prov_idx < scroll_offset:
                 scroll_offset = prov_idx
             if prov_idx >= scroll_offset + list_height:
@@ -173,25 +176,29 @@ def run():
         attr = curses.A_REVERSE if selected_idx == 6 else curses.A_NORMAL
         safe_addstr(10, 0, usage_text[:w], attr)
 
+        total_text = f"   [{'x' if show_total else ' '}] Show total"
+        attr = curses.A_REVERSE if selected_idx == 7 else curses.A_NORMAL
+        safe_addstr(11, 0, total_text[:w], attr)
+
         # Header for providers
         header_text = "--- Providers List (SPACE to toggle, Shift+J/K to reorder) ---"
         if len(header_text) > w:
             header_text = header_text[:w]
-        safe_addstr(12, 0, header_text, curses.A_DIM)
+        safe_addstr(13, 0, header_text, curses.A_DIM)
 
         # Draw providers list
         visible = order[scroll_offset:scroll_offset + list_height]
         for i, prov in enumerate(visible):
-            y = 13 + i
+            y = 14 + i
             if y >= h - 1:
                 break
             enabled_flag = prov in enabled_set
             checkbox = "[x]" if enabled_flag else "[ ]"
-            prefix = " > " if scroll_offset + i + 7 == selected_idx else "   "
+            prefix = " > " if scroll_offset + i + FIRST_PROVIDER == selected_idx else "   "
             text = f"{prefix}{checkbox} {prov}"
             if len(text) > w:
                 text = text[:w]
-            attr = curses.A_REVERSE if scroll_offset + i + 7 == selected_idx else curses.A_NORMAL
+            attr = curses.A_REVERSE if scroll_offset + i + FIRST_PROVIDER == selected_idx else curses.A_NORMAL
             safe_addstr(y, 0, text, attr)
 
         help_text = (
@@ -204,7 +211,7 @@ def run():
 
         stdscr.refresh()
 
-    max_idx = 7 + len(order) - 1 if order else 6
+    max_idx = FIRST_PROVIDER + len(order) - 1 if order else FIRST_PROVIDER - 1
 
     while True:
         draw()
@@ -240,6 +247,7 @@ def run():
                     "show_pct": final_show_pct,
                     "icon_mode": state.ICON_MODES[icon_mode_idx],
                     "usage_display": state.USAGE_DISPLAY_MODES[usage_display_idx],
+                    "show_total": show_total,
                 }
                 state.set_selected_items(new_selected, chosen)
                 state.save_selected(new_selected)
@@ -338,33 +346,36 @@ def run():
             elif selected_idx == 6:
                 usage_display_idx = (usage_display_idx + 1) % len(state.USAGE_DISPLAY_MODES)
                 selected_changed = True
-            elif selected_idx >= 7:
-                prov = order[selected_idx - 7]
+            elif selected_idx == 7:
+                show_total = not show_total
+                selected_changed = True
+            elif selected_idx >= FIRST_PROVIDER:
+                prov = order[selected_idx - FIRST_PROVIDER]
                 if prov in enabled_set:
                     enabled_set.remove(prov)
                 else:
                     enabled_set.add(prov)
                 config_changed = True
         elif key in (curses.KEY_PPAGE,):
-            if selected_idx >= 7:
-                selected_idx = max(7, selected_idx - 10)
+            if selected_idx >= FIRST_PROVIDER:
+                selected_idx = max(FIRST_PROVIDER, selected_idx - 10)
             else:
                 selected_idx = 0
         elif key in (curses.KEY_NPAGE,):
-            if selected_idx >= 7:
+            if selected_idx >= FIRST_PROVIDER:
                 selected_idx = min(max_idx, selected_idx + 10)
             else:
                 selected_idx = max_idx
         elif key == ord("K"):
-            if selected_idx > 7:
-                idx1 = selected_idx - 7
+            if selected_idx > FIRST_PROVIDER:
+                idx1 = selected_idx - FIRST_PROVIDER
                 idx2 = idx1 - 1
                 order[idx1], order[idx2] = order[idx2], order[idx1]
                 selected_idx -= 1
                 config_changed = True
         elif key == ord("J"):
-            if selected_idx >= 7 and selected_idx < max_idx:
-                idx1 = selected_idx - 7
+            if selected_idx >= FIRST_PROVIDER and selected_idx < max_idx:
+                idx1 = selected_idx - FIRST_PROVIDER
                 idx2 = idx1 + 1
                 order[idx1], order[idx2] = order[idx2], order[idx1]
                 selected_idx += 1

@@ -165,13 +165,15 @@ ai-status update             # Start the updater for your installation
 ai-status config             # Provider and display settings
 ai-status config --usage-display remaining  # Show quota remaining
 ai-status config --usage-display used       # Show quota used (default)
+ai-status config --show-total               # Show the limit after amounts: $3.37 / $40.00
 ```
 
 Choose **Used** or **Remaining** in Settings, the terminal configuration UI,
 or the Linux installation wizard. The CLI option saves the same preference
 without opening Settings. It applies to quota percentages, progress bars, and
 amounts with a known limit; uncapped spend and available balances keep their
-original meaning.
+original meaning. Amounts with a limit show only the used or remaining value;
+turn on **Show total**, below the usage display, to add the limit (`$3.37 / $40.00`).
 
 Sign in through the provider's own app or CLI. Your normal Codex login supplies
 the default Codex connection; it does not need `accounts add`.

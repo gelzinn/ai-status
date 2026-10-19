@@ -92,6 +92,8 @@ class ConnectionViewsTests(unittest.TestCase):
                       amount=25, limit=100, unit="USD", value_format="amount_ratio")
         entry = dict(self.data[1], metrics=[metric])
         choice = dict(self.selected, metric=render.metric_key(metric))
+        self.assertEqual(quickshell.build_snapshot([entry], choice)["text"], "OpenRouter · Work $25.00")
+        choice["show_total"] = True
         snapshot = quickshell.build_snapshot([entry], choice)
         self.assertEqual(snapshot["providers"][0]["metrics"][0]["value"], "$25.00 / $100.00")
         self.assertTrue(snapshot["providers"][0]["metrics"][0]["hasPercentage"])

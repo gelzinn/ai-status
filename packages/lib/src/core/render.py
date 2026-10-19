@@ -105,6 +105,8 @@ def metric_value(metric, selected=None):
         amount, limit = ratio
         if _shows_remaining(metric, selected):
             amount = max(0.0, min(limit, limit - amount))
+        if not state.get_show_total(selected):
+            return f"${amount:.2f}" if unit == "USD" else f"{amount:,.2f} {unit}".strip()
         if unit == "USD":
             return f"${amount:.2f} / ${limit:.2f}"
         return f"{amount:,.2f} / {limit:,.2f} {unit}".strip()
