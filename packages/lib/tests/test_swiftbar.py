@@ -23,8 +23,8 @@ class SwiftBarCompatibilityTests(unittest.TestCase):
         enabled = patch.object(config, "enabled_order", return_value=["codex", "claude"])
         enabled.start()
         self.addCleanup(enabled.stop)
-        # Keep Claude logins on this machine out of the saved-account fixtures.
-        discovery = patch("core.claude_accounts.discover", return_value=[])
+        # Keep CLI logins on this machine out of the saved-account fixtures.
+        discovery = patch("core.folder_accounts.discover", return_value=[])
         discovery.start()
         self.addCleanup(discovery.stop)
         self.selected = {"provider": "claude", "idx": 0, "metric": "rolling", "icon_mode": "off"}

@@ -2,7 +2,7 @@ import os
 import json
 from . import paths
 from . import accounts
-from . import claude_accounts
+from . import folder_accounts
 
 CONFIG_DIR = str(paths.CONFIG_DIR)
 CONFIG_FILE = os.path.join(CONFIG_DIR, "providers.json")
@@ -47,10 +47,10 @@ def accounts_file():
 
 
 def _with_discovered(document):
-    """Adds Claude logins found on disk that no saved account covers. Only saved
-    accounts are ever written back, so discovered ones follow their folder."""
-    found = {record["id"]: record for record in claude_accounts.discover(
-        document["accounts"], skip_default="claude" in enabled_order())}
+    """Adds CLI logins found in config folders that no saved account covers. Only
+    saved accounts are ever written back, so discovered ones follow their folder."""
+    found = {record["id"]: record for record in folder_accounts.discover(
+        document["accounts"], enabled={name for name in enabled_order() if isinstance(name, str)})}
     for record in document["accounts"]:
         match = found.pop(record["id"], None)
         auth_file = record.get("auth_file")

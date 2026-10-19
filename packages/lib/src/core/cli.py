@@ -549,7 +549,7 @@ def _list_accounts(args, records):
         ])
         print("\nDefault connections use existing provider logins. Edit/remove applies to saved accounts.")
         if any(record["source"] == "discovered" for record in public):
-            print("Discovered accounts are Claude Code logins found on disk; turn one off with ai-status config.")
+            print("Discovered accounts are CLI logins found in config folders; turn one off with ai-status config.")
         print("Usage is from the last collected snapshot; use --refresh to check enabled connections now.")
         print("Configure default connections: ai-status config")
     else:
@@ -564,7 +564,7 @@ def _unknown_account(account_id):
     if account_id.startswith("default:") or account_id in cfgmod.available_providers():
         raise accounts.AccountError("Default provider connections are managed with ai-status config. Edit/remove applies only to saved accounts.")
     if any(record["id"] == account_id for record in cfgmod.discovered_accounts()):
-        raise accounts.AccountError("This account was found on disk, not saved. Turn it off with ai-status config.")
+        raise accounts.AccountError("This account was found in a CLI config folder, not saved. Turn it off with ai-status config.")
     raise accounts.AccountError("Unknown account ID. Use ai-status accounts --saved to find saved account IDs.")
 
 

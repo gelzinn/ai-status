@@ -39,4 +39,6 @@ bash ~/.local/share/ai-status/packages/lib/src/providers/codex/query.sh
 
 ## Multiple accounts
 
-Set `auth_file` to that account's Codex `auth.json`, use `CODEX_HOME`, or map `CODEX_ACCESS_TOKEN` and, when needed, `CODEX_ACCOUNT_ID` to separate environment variables. This collector requires ChatGPT OAuth; OpenAI API keys belong to the OpenAI API provider. There is no application-imposed account limit. See the [authentication and multiple-account guide](https://github.com/gelzinn/ai-status/blob/main/packages/lib/PROVIDERS.md).
+Extra Codex logins show up on their own. AI Status looks for config folders you run Codex with through `CODEX_HOME` — `~/.codex-<name>` and `~/.config/seats/codex/<name>` (where [seats](https://github.com/gelzinn/seats) keeps them; `$SEATS_HOME` moves it) — and adds one connection per signed-in account, labeled with its email. Renaming or moving a folder keeps the same connection, and `~/.codex` stays the regular Codex entry.
+
+For a login kept anywhere else, set `auth_file` to that account's Codex `auth.json`, use `CODEX_HOME`, or map `CODEX_ACCESS_TOKEN` and, when needed, `CODEX_ACCOUNT_ID` to separate environment variables. This collector requires ChatGPT OAuth; OpenAI API keys belong to the OpenAI API provider. There is no application-imposed account limit. See the [authentication and multiple-account guide](https://github.com/gelzinn/ai-status/blob/main/packages/lib/PROVIDERS.md).
