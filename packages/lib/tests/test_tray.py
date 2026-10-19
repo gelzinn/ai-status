@@ -1048,6 +1048,8 @@ class DesktopTests(IsolatedState):
         settings.display["show_provider"].setChecked(False)
         settings.icon_mode.setCurrentIndex(settings.icon_mode.findData("logo"))
         settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
+        self.assertFalse(settings.show_total.isChecked())
+        settings.show_total.setChecked(True)
         with patch.object(self.dashboard, "refresh") as refresh:
             QTest.mouseClick(settings.save_button, tray.Qt.MouseButton.LeftButton)
         refresh.assert_called_once()
@@ -1057,6 +1059,7 @@ class DesktopTests(IsolatedState):
         self.assertEqual(selected["metric"], "weekly")
         self.assertEqual(selected["icon_mode"], "logo")
         self.assertEqual(selected["usage_display"], "remaining")
+        self.assertTrue(selected["show_total"])
         self.assertFalse(selected["show_provider"])
         self.assertTrue(self.dashboard.isVisible())
         self.dashboard.back_button.click()

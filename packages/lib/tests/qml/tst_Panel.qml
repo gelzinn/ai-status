@@ -946,6 +946,8 @@ Item {
             verify(findChild(settings, "refresh-interval-slider").activeFocus)
             keyClick(Qt.Key_Tab)
             verify(findChild(settings, "usage-display").activeFocus)
+            keyClick(Qt.Key_Tab)
+            verify(findChild(settings, "show-total").activeFocus)
             for (const key of ["show_provider", "show_model", "show_metric", "show_pct"]) {
                 keyClick(Qt.Key_Tab)
                 verify(findChild(settings, "display-" + key).activeFocus)
@@ -1064,7 +1066,7 @@ Item {
             verify(next.popupOpen)
             keyClick(Qt.Key_Tab)
             tryCompare(next, "popupOpen", false)
-            const checkbox = findChild(settings, "display-show_provider")
+            const checkbox = findChild(settings, "show-total")
             tryVerify(() => checkbox.activeFocus)
             verifyControlInViewport(checkbox, scroller)
         }

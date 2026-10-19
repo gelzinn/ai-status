@@ -746,11 +746,16 @@ def _build_parser():
         "terminal configuration UI. On macOS, --frontend selects the terminal UI.\n\n"
         "Set quota display without opening Settings:\n"
         "  ai-status config --usage-display remaining\n"
-        "  ai-status config --usage-display used"
+        "  ai-status config --usage-display used\n"
+        "  ai-status config --show-total"
     )
     command_parsers["config"].add_argument(
         "--usage-display", choices=state.USAGE_DISPLAY_MODES,
         help="Show quota used or remaining; save directly without opening Settings (default: used)",
+    )
+    command_parsers["config"].add_argument(
+        "--show-total", action=argparse.BooleanOptionalAction, default=None,
+        help="Show the limit after amounts, such as $3.37 / $40.00; save directly without opening Settings (default: off)",
     )
     command_parsers["status"].epilog = "Output: a JSON object with providers and errors. Requires provider authentication."
     command_parsers["update"].epilog = (
@@ -954,15 +959,21 @@ def main(argv=None):
             print(str(error), file=sys.stderr)
             return 1
         return 0
-    if command == "config" and args.usage_display is not None:
+    if command == "config" and (args.usage_display is not None or args.show_total is not None):
         selected = state.load_selected() or {}
-        selected["usage_display"] = args.usage_display
+        if args.usage_display is not None:
+            selected["usage_display"] = args.usage_display
+        if args.show_total is not None:
+            selected["show_total"] = args.show_total
         try:
             paths.atomic_json(state.SELECTED_FILE, selected)
         except OSError:
             print("Unable to save display preferences.", file=sys.stderr)
             return 1
-        print(f"Usage display: {args.usage_display.title()}")
+        if args.usage_display is not None:
+            print(f"Usage display: {args.usage_display.title()}")
+        if args.show_total is not None:
+            print(f"Show total: {'On' if args.show_total else 'Off'}")
         return 0
     if command == "update":
         from . import updates
