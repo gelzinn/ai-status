@@ -57,7 +57,7 @@ Reads the Claude Code OAuth credential store to query Anthropic's usage endpoint
 
 | Detail | |
 |---|---|
-| **Auth** | Claude Code login (`~/.claude/.credentials.json`), or OpenCode authenticated with Claude as fallback |
+| **Auth** | Claude Code login (`~/.claude/.credentials.json`), or OpenCode authenticated with Claude as fallback. Other signed-in config folders become their own connections automatically (see [Multiple accounts](#multiple-accounts-and-connections)) |
 | **Endpoint** | `https://api.anthropic.com/api/oauth/usage?cedar_ember=1` |
 | **Metrics** | Session (5-hour rolling) and weekly usage with reset timers, including per-model weekly limits; reported Cloud credit balance and expiration; shows the subscription plan (Pro/Max/Team) when available |
 
@@ -89,7 +89,7 @@ Uses the Codex access token and account ID from `~/.codex/auth.json` to call Ope
 
 | Detail | |
 |---|---|
-| **Auth** | `~/.codex/auth.json` with valid `access_token` and `account_id` |
+| **Auth** | `~/.codex/auth.json` with valid `access_token` and `account_id`. Other signed-in config folders become their own connections automatically (see [Multiple accounts](#multiple-accounts-and-connections)) |
 | **Endpoint** | `https://chatgpt.com/backend-api/wham/usage` |
 | **Metrics** | Plan type; a 5-hour and a weekly usage window on paid plans (a single monthly window on free), each with a reset timer; usage-credit balance; available banked resets |
 
@@ -176,7 +176,19 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development details.
 
 ## Multiple accounts and connections
 
-There is no configured account-count limit. Each connection has a stable ID and label, its own credential references and provider options. Accounts work independently of the default provider session; adding an OpenRouter account does not require enabling the default OpenRouter entry. Every desktop can select, enable, disable and reorder saved connections. The CLI manages their credential sources:
+There is no configured account-count limit. Each connection has a stable ID and label, its own credential references and provider options.
+
+Claude Code, Codex and Command Code accounts don't need to be added. Every signed-in config folder of those CLIs shows up as a `discovered` connection, besides the one each CLI reads by default:
+
+| Provider | Folders | Label |
+|---|---|---|
+| Claude | `~/.claude-<name>`, `~/.config/seats/claude/<name>`; `~/.claude` when `CLAUDE_CONFIG_DIR` points elsewhere | Account email |
+| Codex | `~/.codex-<name>`, `~/.config/seats/codex/<name>`; `~/.codex` when `CODEX_HOME` points elsewhere | Account email |
+| Command Code | `~/.commandcode-<name>`, `~/.config/seats/commandcode/<name>` | Folder name |
+
+`~/.config/seats` is where [seats](https://github.com/gelzinn/seats) keeps one folder per account (`$SEATS_HOME` when set); seats itself is not needed. A connection's ID comes from the account, so renaming the folder keeps it. A saved account pointing at the same credential file takes its place; turning a discovered one off in Settings saves it as a disabled account.
+
+Accounts work independently of the default provider session; adding an OpenRouter account does not require enabling the default OpenRouter entry. Every desktop can select, enable, disable and reorder saved connections. The CLI manages their credential sources:
 
 ```bash
 ai-status accounts add openrouter --id personal --label Personal --env OPENROUTER_API_KEY=OPENROUTER_PERSONAL_KEY

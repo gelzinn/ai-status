@@ -2,6 +2,7 @@ import os
 import json
 from . import paths
 from . import accounts
+from . import folder_accounts
 
 CONFIG_DIR = str(paths.CONFIG_DIR)
 CONFIG_FILE = os.path.join(CONFIG_DIR, "providers.json")
@@ -45,8 +46,31 @@ def accounts_file():
     return os.path.join(os.path.dirname(CONFIG_FILE), "accounts.json")
 
 
+def _with_discovered(document):
+    """Adds CLI logins found in config folders that no saved account covers. Only
+    saved accounts are ever written back, so discovered ones follow their folder."""
+    found = {record["id"]: record for record in folder_accounts.discover(
+        document["accounts"], enabled={name for name in enabled_order() if isinstance(name, str)})}
+    for record in document["accounts"]:
+        match = found.pop(record["id"], None)
+        auth_file = record.get("auth_file")
+        if match and (not auth_file or not os.path.isfile(os.path.expanduser(auth_file))):
+            # A discovered account saved to keep it disabled; its folder moved since.
+            record["auth_file"] = match["auth_file"]
+    document["accounts"] = document["accounts"] + list(found.values())
+    return document
+
+
+def load_document():
+    return _with_discovered(accounts.load_document(accounts_file()))
+
+
+def discovered_accounts():
+    return [record for record in load_document()["accounts"] if record.get("discovered")]
+
+
 def load_accounts():
-    return accounts.load_document(accounts_file())["accounts"]
+    return load_document()["accounts"]
 
 
 def available_connections():
@@ -70,7 +94,7 @@ def connection_info(identity):
 
 
 def enabled_connection_order():
-    document = accounts.load_document(accounts_file())
+    document = load_document()
     available = set(available_providers())
     enabled = list(dict.fromkeys(name for name in enabled_order()
                                 if isinstance(name, str) and name in available))
@@ -80,7 +104,7 @@ def enabled_connection_order():
 
 
 def enabled_connections():
-    document = accounts.load_document(accounts_file())
+    document = load_document()
     records = {"account:" + record["id"]: accounts.connection(record) for record in document["accounts"]}
     return [records[identity] if identity in records else {
         "connection_id": identity, "provider": identity, "account_id": None,
@@ -97,6 +121,11 @@ def save_connection_order(identities):
         raise ValueError("Connection order contains an unknown or duplicate connection.")
     document = accounts.load_document(accounts_file())
     selected = set(identities)
+    saved = {record["id"] for record in document["accounts"]}
+    for record in discovered_accounts():
+        # Turning a discovered account off is the one thing that has to be saved.
+        if record["id"] not in saved and "account:" + record["id"] not in selected:
+            document["accounts"].append({key: record[key] for key in ("id", "provider", "label", "auth_file")})
     for record in document["accounts"]:
         record["enabled"] = "account:" + record["id"] in selected
     document["order"] = list(identities)

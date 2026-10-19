@@ -39,7 +39,7 @@ Your **five-hour and weekly spend limits** use the caps reported by the service.
 
 Behind the scenes it calls the same public endpoints the CLI's own usage view uses, on `api.commandcode.ai`: `whoami` → `billing/subscriptions` → `billing/credits` → `usage/summary`. It works for both personal and organization accounts.
 
-For multiple accounts, create named connections with separate `auth_file` paths or `COMMANDCODE_API_KEY` references. See the [multiple-account configuration](https://github.com/gelzinn/ai-status/blob/main/packages/lib/PROVIDERS.md#multiple-accounts-and-connections).
+Extra Command Code logins in `~/.commandcode-<name>` or `~/.config/seats/commandcode/<name>` (where [seats](https://github.com/gelzinn/seats) keeps them) show up on their own, labeled with the folder name. For keys kept anywhere else, create named connections with separate `auth_file` paths or `COMMANDCODE_API_KEY` references. See the [multiple-account configuration](https://github.com/gelzinn/ai-status/blob/main/packages/lib/PROVIDERS.md#multiple-accounts-and-connections).
 
 ## Troubleshooting
 

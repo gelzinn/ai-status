@@ -20,6 +20,10 @@ class ConnectionViewsTests(unittest.TestCase):
             replacement = patch(target, value)
             replacement.start()
             self.addCleanup(replacement.stop)
+        # Keep CLI logins on this machine out of the saved-account fixtures.
+        discovery = patch("core.folder_accounts.discover", return_value=[])
+        discovery.start()
+        self.addCleanup(discovery.stop)
         accounts.save_document({"version": 1, "accounts": [
             {"id": "personal", "provider": "openrouter", "label": "Personal"},
             {"id": "work", "provider": "openrouter", "label": "Work"},
