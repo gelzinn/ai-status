@@ -57,7 +57,7 @@ Reads the Claude Code OAuth credential store to query Anthropic's usage endpoint
 
 | Detail | |
 |---|---|
-| **Auth** | Claude Code login (`~/.claude/.credentials.json`), or OpenCode authenticated with Claude as fallback |
+| **Auth** | Claude Code login (`~/.claude/.credentials.json`), or OpenCode authenticated with Claude as fallback. Other signed-in config folders (`~/.claude-<name>`, `~/.config/seats/claude/<name>`) become their own connections automatically |
 | **Endpoint** | `https://api.anthropic.com/api/oauth/usage?cedar_ember=1` |
 | **Metrics** | Session (5-hour rolling) and weekly usage with reset timers, including per-model weekly limits; reported Cloud credit balance and expiration; shows the subscription plan (Pro/Max/Team) when available |
 
@@ -176,7 +176,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development details.
 
 ## Multiple accounts and connections
 
-There is no configured account-count limit. Each connection has a stable ID and label, its own credential references and provider options. Accounts work independently of the default provider session; adding an OpenRouter account does not require enabling the default OpenRouter entry. Every desktop can select, enable, disable and reorder saved connections. The CLI manages their credential sources:
+There is no configured account-count limit. Each connection has a stable ID and label, its own credential references and provider options.
+
+Claude Code accounts don't need to be added. Every signed-in Claude Code config folder at `~/.claude-<name>` or `~/.config/seats/claude/<name>` (`$SEATS_HOME/claude/<name>` when set) shows up as a `discovered` connection labeled with its email, besides the one Claude Code reads by default. Its ID comes from the account, so renaming the folder keeps it. A saved account pointing at the same `.credentials.json` takes its place; turning a discovered one off in Settings saves it as a disabled account. Accounts work independently of the default provider session; adding an OpenRouter account does not require enabling the default OpenRouter entry. Every desktop can select, enable, disable and reorder saved connections. The CLI manages their credential sources:
 
 ```bash
 ai-status accounts add openrouter --id personal --label Personal --env OPENROUTER_API_KEY=OPENROUTER_PERSONAL_KEY

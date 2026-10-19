@@ -51,4 +51,6 @@ bash ~/.local/share/ai-status/packages/lib/src/providers/claude/query.sh
 
 ## Multiple accounts
 
-Set `auth_file` to that account's Claude Code `.credentials.json`, use `CLAUDE_CONFIG_DIR`, or map `CLAUDE_ACCESS_TOKEN` to its own environment variable. Explicit accounts do not fall back to another OpenCode session. There is no application-imposed account limit. See the [authentication and multiple-account guide](https://github.com/gelzinn/ai-status/blob/main/packages/lib/PROVIDERS.md).
+Extra Claude Code logins show up on their own. AI Status looks for config folders you run Claude Code with through `CLAUDE_CONFIG_DIR` — `~/.claude-<name>` and `~/.config/seats/claude/<name>` (where [seats](https://github.com/gelzinn/seats) keeps them; `$SEATS_HOME` moves it) — and adds one connection per signed-in account, labeled with its email. Nothing to configure, and renaming or moving a folder keeps the same connection. The folder Claude Code reads by default stays the regular Claude entry. Turn any of them off in Settings like any other connection.
+
+For a login kept anywhere else, set `auth_file` to that account's Claude Code `.credentials.json`, use `CLAUDE_CONFIG_DIR`, or map `CLAUDE_ACCESS_TOKEN` to its own environment variable. Explicit accounts do not fall back to another OpenCode session. There is no application-imposed account limit. See the [authentication and multiple-account guide](https://github.com/gelzinn/ai-status/blob/main/packages/lib/PROVIDERS.md).
