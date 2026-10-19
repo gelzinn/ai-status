@@ -32,13 +32,13 @@ class ClaudeAccountDiscoveryTests(unittest.TestCase):
         self.addCleanup(env.stop)
         claude_accounts._memo.clear()
 
-    def login(self, folder, email, uuid=None, expires=None):
+    def login(self, folder, email, uuid=None, expires=None, meta=None):
         directory = self.home / folder
         directory.mkdir(parents=True, exist_ok=True)
         expires = expires if expires is not None else (time.time() + 3600) * 1000
         (directory / ".credentials.json").write_text(json.dumps(
             {"claudeAiOauth": {"accessToken": "token-" + email, "expiresAt": expires}}), encoding="utf-8")
-        (directory / ".claude.json").write_text(json.dumps(
+        (meta or directory / ".claude.json").write_text(json.dumps(
             {"oauthAccount": {"accountUuid": uuid or "uuid-" + email, "emailAddress": email}}), encoding="utf-8")
         return directory
 
@@ -53,8 +53,14 @@ class ClaudeAccountDiscoveryTests(unittest.TestCase):
         return [record["label"] for record in config.discovered_accounts()]
 
     def test_a_single_claude_folder_adds_nothing(self):
-        self.login(".claude", "solo@example.com")
+        self.login(".claude", "solo@example.com", meta=self.home / ".claude.json")
         self.assertEqual(self.labels(), [])
+
+    def test_a_single_claude_folder_turned_off_stays_off(self):
+        self.login(".claude", "solo@example.com", meta=self.home / ".claude.json")
+        config.save_config([])
+        self.assertEqual(self.labels(), [])
+        self.assertEqual(config.enabled_connection_order(), [])
 
     def test_seats_store_adds_every_seat_but_the_one_claude_reads(self):
         self.seats("primary", "work", "side")
@@ -69,7 +75,8 @@ class ClaudeAccountDiscoveryTests(unittest.TestCase):
         self.assertEqual(self.labels(), ["primary@example.com", "work@example.com"])
 
     def test_hand_made_config_folders_and_claude_config_dir(self):
-        self.login(".claude", "solo@example.com")
+        # Claude Code run without CLAUDE_CONFIG_DIR keeps the account next to the folder.
+        self.login(".claude", "solo@example.com", meta=self.home / ".claude.json")
         self.login(".claude-work", "work@example.com")
         self.login("elsewhere/claude", "env@example.com")
         self.login(".claude-work.bak", "backup@example.com")

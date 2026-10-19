@@ -50,26 +50,26 @@ def _expiry(directory):
     return expiry if isinstance(expiry, (int, float)) else 0
 
 
-def _identity(directory):
-    """A stable ID and label for the account signed in to `directory`."""
-    meta_file = directory / ".claude.json"
+def _identity(directory, meta_file):
+    """A stable ID and label for the account signed in to `directory`, from its `.claude.json`."""
     try:
         stat = meta_file.stat()
-        key = (str(meta_file), stat.st_mtime_ns, stat.st_size)
+        version = (stat.st_mtime_ns, stat.st_size)
     except OSError:
-        key = None
-    if key is None or key not in _identities:
-        # .claude.json also holds project history and can be large; parse it once per change.
-        meta = paths.read_json(meta_file)
-        account = meta.get("oauthAccount") if isinstance(meta, dict) else None
-        account = account if isinstance(account, dict) else {}
-        email = account.get("emailAddress") if isinstance(account.get("emailAddress"), str) else None
-        anchor = account.get("accountUuid") or email or str(directory.resolve())
-        result = ("claude-" + hashlib.sha256(str(anchor).encode()).hexdigest()[:10], email)
-        if key is None:
-            return result
-        _identities[key] = result
-    return _identities[key]
+        version = None
+    cached = _identities.get(str(meta_file))
+    if version is not None and cached and cached[0] == version:
+        return cached[1]
+    # .claude.json also holds project history and can be large; parse it once per change.
+    meta = paths.read_json(meta_file)
+    account = meta.get("oauthAccount") if isinstance(meta, dict) else None
+    account = account if isinstance(account, dict) else {}
+    email = account.get("emailAddress") if isinstance(account.get("emailAddress"), str) else None
+    anchor = account.get("accountUuid") or email or str(directory)
+    result = ("claude-" + hashlib.sha256(str(anchor).encode()).hexdigest()[:10], email)
+    if version is not None:
+        _identities[str(meta_file)] = (version, result)
+    return result
 
 
 def _real(path):
@@ -82,11 +82,13 @@ def _real(path):
 def discover(saved=(), *, skip_default=True, environ=None):
     """Account records for Claude logins on disk, one per account.
 
-    Skips the folder the default Claude connection already reads when
-    `skip_default`, and credential files a saved account points at.
+    Skips credential files a saved account points at, and the folder the
+    default Claude connection reads: always when `skip_default`, otherwise only
+    when it's a real folder, so a single account that was turned off stays off.
+    A `~/.claude` linked into a store (one seat of several) is listed then.
     """
     environ = os.environ if environ is None else environ
-    _, _, default = _roots(environ)
+    home, _, default = _roots(environ)
     taken = {_real(record["auth_file"]) for record in saved
              if record.get("provider") == "claude" and record.get("auth_file")}
     signature = (tuple(sorted(filter(None, taken))), skip_default,
@@ -96,7 +98,8 @@ def discover(saved=(), *, skip_default=True, environ=None):
     if cached and time.monotonic() - cached[0] < _TTL:
         return [dict(record) for record in cached[1]]
 
-    skipped = {_real(default)} if skip_default else set()
+    skipped = {_real(default)} if skip_default or not os.path.islink(default) else set()
+    plain = _real(home / ".claude")
     seen_dirs, best = set(), {}
     for directory in _candidates(environ):
         real = _real(directory)
@@ -107,7 +110,11 @@ def discover(saved=(), *, skip_default=True, environ=None):
         credentials = os.path.join(real, ".credentials.json")
         if expiry is None or _real(credentials) in taken:
             continue
-        account_id, email = _identity(Path(real))
+        meta_file = Path(real) / ".claude.json"
+        if real == plain and not meta_file.exists():
+            # Claude Code run without CLAUDE_CONFIG_DIR keeps its account in ~/.claude.json.
+            meta_file = home / ".claude.json"
+        account_id, email = _identity(Path(real), meta_file)
         # The same account in two folders: keep the one its CLI refreshed last.
         if account_id in best and best[account_id][0] >= expiry:
             continue
