@@ -1498,6 +1498,7 @@ class DesktopTests(IsolatedState):
         self.dashboard.configure()
         settings = self.dashboard.settings_view
         settings.usage_display.setCurrentIndex(settings.usage_display.findData("remaining"))
+        settings.show_total.setChecked(True)
         with patch.object(self.dashboard, "refresh"):
             settings.save()
         # Updating the preference reuses the rows and changes every usage surface.
@@ -2203,6 +2204,9 @@ class DesktopTests(IsolatedState):
 
     def test_long_metric_names_keep_percentages_and_amounts_in_the_viewport(self):
         config.save_config(["openai-api"])
+        # The longest value form: the amount with its total.
+        state.save_selected(dict(state.load_selected() or {}, show_total=True))
+        self.dashboard.selected = state.load_selected()
         self.dashboard.on_result("openai-api", [{"provider": "OpenAI API", "metrics": [
             {"type": "monthly", "name": "Reported month costs / configured budget (USD)",
              "percentage": 38.75},
