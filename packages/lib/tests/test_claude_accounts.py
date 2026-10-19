@@ -16,7 +16,8 @@ class ClaudeAccountDiscoveryTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="ai-status claude accounts ")
         self.addCleanup(temporary.cleanup)
-        self.home = Path(temporary.name)
+        # Discovery reports real paths: Windows expands 8.3 names, macOS /var is /private/var.
+        self.home = Path(os.path.realpath(temporary.name))
         for target, key, value in (
             (config, "CONFIG_DIR", str(self.home / "config/ai-status")),
             (config, "CONFIG_FILE", str(self.home / "config/ai-status/providers.json")),
